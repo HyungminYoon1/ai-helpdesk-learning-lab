@@ -46,6 +46,12 @@ Week 1에는 Framework 없이 Ticket 객체가 자신의 상태와 규칙을 지
 ```text
 .
 ├─ README.md
+├─ pom.xml
+├─ mvnw
+├─ mvnw.cmd
+├─ .mvn/
+│  └─ wrapper/
+│     └─ maven-wrapper.properties
 ├─ .gitattributes
 ├─ .gitignore
 └─ src/
@@ -64,6 +70,7 @@ Java Package는 `lab.helpdesk.ticket`을 사용한다.
 
 - JDK 25
 - PowerShell 또는 동등한 명령행 환경
+- 첫 Maven Wrapper 실행 시 Maven Distribution을 받을 수 있는 네트워크
 
 설치된 Java 도구의 Version을 확인한다.
 
@@ -75,22 +82,21 @@ jshell --version
 
 세 명령 모두 Java 25를 가리켜야 한다.
 
-## 현재 컴파일 방법
+## Build와 검증 방법
 
-아직 Maven이나 Gradle을 구성하지 않았으므로 `javac`로 최소 Source를 직접 컴파일한다.
+이 Project는 Maven Wrapper `3.3.4`의 `only-script` 방식으로 Maven `3.9.16`을 고정한다. Windows에서는 전역 Maven 설치 대신 Project Root의 `mvnw.cmd`를 실행한다.
 
 ```powershell
-New-Item -ItemType Directory -Force -Path 'out'
-
-javac --release 25 -d out `
-    src/main/java/lab/helpdesk/ticket/TicketStatus.java `
-    src/main/java/lab/helpdesk/ticket/Ticket.java
+.\mvnw.cmd --version
+.\mvnw.cmd test
 ```
 
-컴파일에 성공하면 다음 위치에 Class 파일이 생성된다.
+`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Unit Test를 실행한다. 현재는 JUnit Test가 없으므로 Main Source 컴파일과 Build Lifecycle 재현만 검증한다.
+
+Build에 성공하면 다음 위치에 Class 파일이 생성된다.
 
 ```text
-out/lab/helpdesk/ticket/
+target/classes/lab/helpdesk/ticket/
 ```
 
 `out/`, `target/`, `build/` 같은 생성물 디렉터리는 Git에서 추적하지 않는다.
@@ -101,11 +107,13 @@ out/lab/helpdesk/ticket/
 |---|---|---|
 | JDK와 Java Compiler | 완료 | `java`, `javac`, `jshell` 25.0.4 확인 |
 | Java 25 Source 컴파일 | 완료 | `javac --release 25` 성공 |
+| Maven Wrapper | 완료 | Wrapper 3.3.4로 Maven 3.9.16과 Java 25.0.4 실행 확인 |
+| Maven `test` Lifecycle | 완료 | `BUILD SUCCESS`와 `target/classes` 생성 확인 |
 | Ticket 정상 상태 전이 | 수동 검증 완료 | JShell에서 상태 변화 확인 |
 | 잘못된 상태 전이 거부 | 수동 검증 완료 | 예외와 실패 후 상태 보존 확인 |
-| JUnit 자동 검증 | 미수행 | Build Tool과 Test Source 미구성 |
+| JUnit 자동 검증 | 미수행 | JUnit Dependency와 Test Case 미구성 |
 
-수동 검증 완료는 자동 회귀 Test가 준비됐다는 의미가 아니다.
+수동 검증과 Maven `test` 성공은 자동 회귀 Test가 준비됐다는 의미가 아니다.
 
 ## 현재 비범위
 
@@ -135,7 +143,7 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 
 ## 다음 단계
 
-1. 한 개의 Build Tool과 Wrapper로 재현 가능한 실행 환경을 구성한다.
-2. 정상·경계·거부 Case를 JUnit Given-When-Then Test로 작성한다.
+1. JUnit Dependency와 Test Source를 구성한다.
+2. 정상·경계·거부 Case를 Given-When-Then Test로 작성한다.
 3. 새 Terminal에서 Wrapper를 사용해 전체 Test를 다시 실행한다.
 4. 실제 관찰 결과와 남은 질문을 학습 문서에 반영한다.
