@@ -1,0 +1,7 @@
+# 소스코드 컴파일 결과물
+/out/
+/target/
+/build/
+
+# IDE
+.vscode/
