@@ -24,10 +24,11 @@ class TicketTest {
         // Given
         String title = null;
 
-        // When & Then
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new Ticket(title));
+        // When
+        var exception = assertThrows(IllegalArgumentException.class, () -> new Ticket(title));
+
+        // Then
+        assertEquals("title must not be blank", exception.getMessage());
     }
 
     @Test
@@ -85,11 +86,12 @@ class TicketTest {
         var ticket = new Ticket("로그인 오류");
 
         // When
-        assertThrows(
-                IllegalStateException.class,
-                ticket::resolve);
+        var exception = assertThrows(IllegalStateException.class, ticket::resolve);
 
         // Then
+        assertEquals(
+                "only IN_PROGRESS ticket can be resolved",
+                exception.getMessage());
         assertEquals(TicketStatus.OPEN, ticket.status());
     }
 
@@ -100,11 +102,10 @@ class TicketTest {
         ticket.startProgress();
 
         // When
-        assertThrows(
-                IllegalStateException.class,
-                ticket::startProgress);
+        var exception = assertThrows(IllegalStateException.class, ticket::startProgress);
 
         // Then
+        assertEquals("only OPEN ticket can start progress", exception.getMessage());
         assertEquals(TicketStatus.IN_PROGRESS, ticket.status());
     }
 
