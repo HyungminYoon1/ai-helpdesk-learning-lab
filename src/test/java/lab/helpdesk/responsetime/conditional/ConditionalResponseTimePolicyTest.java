@@ -35,4 +35,17 @@ class ConditionalResponseTimePolicyTest {
         // Then
         assertEquals(Duration.ofHours(4), actualTarget);
     }
+
+    @Test
+    void vip_priority_has_1_hour_target() {
+        // Given
+        var policy = new ConditionalResponseTimePolicy();
+        var priority = TicketPriority.VIP;
+
+        // When
+        var actualTarget = policy.targetResponseTime(priority);
+
+        // Then
+        assertEquals(Duration.ofHours(1), actualTarget);
+    }
 }

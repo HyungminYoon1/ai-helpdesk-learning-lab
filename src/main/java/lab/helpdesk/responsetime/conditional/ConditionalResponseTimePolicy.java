@@ -12,6 +12,7 @@ public final class ConditionalResponseTimePolicy {
         return switch (priority) {
             case NORMAL -> Duration.ofHours(24);
             case URGENT -> Duration.ofHours(4);
+            case VIP -> Duration.ofHours(1);
         };
     }
 }
