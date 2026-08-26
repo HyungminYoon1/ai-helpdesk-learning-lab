@@ -7,7 +7,7 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
         <version>4.1.1</version>
-        <relativePath/>
+        <relativePath />
     </parent>
 
     <!-- 프로젝트 기본 정보 -->
@@ -23,7 +23,7 @@
     <properties>
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <junit.version>6.1.3</junit.version>
+        <junit-jupiter.version>6.1.3</junit-jupiter.version>
         <maven-surefire-plugin.version>3.5.5</maven-surefire-plugin.version>
     </properties>
 
@@ -35,9 +35,8 @@
         </dependency>
 
         <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>${junit.version}</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
