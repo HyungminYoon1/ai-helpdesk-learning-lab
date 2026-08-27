@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 2 진행 중 — HTTP·REST 예상 계약과 Spring Boot 최소 기동·Root Smoke 검증 완료
-> 현재 학습 영역: HTTP 메시지, REST API 계약, Spring Boot·Spring MVC 요청 흐름과 최소 Ticket API
+> 상태: Week 2 진행 중 — Ticket 정상 생성·조회와 대표 `400`·`404`·`500` 오류 계약 구현·검증 완료
+> 현재 학습 영역: Spring MVC 입력 검증, Exception Handler와 RFC 9457 `ProblemDetail`
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -43,9 +43,13 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
 - Spring MVC의 DispatcherServlet·Controller 요청 처리 흐름
 - Controller·Application Service·Repository Port·In-memory 구현·Domain 책임 분리
 - 정상 생성·조회와 대표 `400 Bad Request`·`404 Not Found`·통제된 `500 Internal Server Error` 검증
+- 요청 DTO Validation과 Domain 불변조건 검증의 경계
+- `ResponseEntityExceptionHandler`·`@RestControllerAdvice` 기반의 안전한 `ProblemDetail` 오류 응답
 - MockMvc Test와 실제 `curl.exe` Request·Response Trace 비교
 
-2026-08-25 야간에 Spring Boot Dependency와 Application 진입점을 추가하고 기존 Unit Test 16개를 다시 통과했다. Application Context와 내장 Server를 기동한 뒤 Root URI에 실제 `curl.exe` 요청을 보내 `404 Not Found` JSON 응답을 관찰했다. Ticket Web API와 MockMvc는 아직 구현하지 않았고 `POST /api/tickets`·`GET /api/tickets/{id}` 실제 호출도 `NOT_RUN`이다.
+2026-08-25 야간에 Spring Boot Dependency와 Application 진입점을 추가하고 기존 Unit Test 16개를 다시 통과했다. Application Context와 내장 Server를 기동한 뒤 Root URI에 실제 `curl.exe` 요청을 보내 `404 Not Found` JSON 응답을 관찰했다.
+
+2026-08-26에는 Repository·Application Service·Controller로 정상 생성·조회 수직 Slice를 구성하고 MockMvc Test 2개와 전체 Test 24개를 통과했다. 2026-08-27에는 실제 `POST`·`GET` 호출을 확인하고, 제목 Validation·잘못된 JSON·잘못된 ID 형식·존재하지 않는 Ticket·통제된 내부 실패를 서로 다른 오류 계약으로 구현했다. 전체 Clean Test 29개와 실제 `400`·`404` HTTP Trace를 확인했으며 대표 `500`은 Production 실패 Endpoint 없이 수동 Test Double로만 재현했다.
 
 ## Ticket Domain 규칙
 
@@ -86,7 +90,19 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
    │           ├─ HelpdeskApplication.java
    │           ├─ ticket/
    │           │  ├─ Ticket.java
-   │           │  └─ TicketStatus.java
+   │           │  ├─ TicketStatus.java
+   │           │  ├─ application/
+   │           │  │  ├─ TicketApplicationService.java
+   │           │  │  ├─ TicketNotFoundException.java
+   │           │  │  └─ TicketResult.java
+   │           │  ├─ repository/
+   │           │  │  ├─ TicketRepository.java
+   │           │  │  └─ InMemoryTicketRepository.java
+   │           │  └─ web/
+   │           │     ├─ CreateTicketRequest.java
+   │           │     ├─ TicketApiExceptionHandler.java
+   │           │     ├─ TicketController.java
+   │           │     └─ TicketResponse.java
    │           └─ responsetime/
    │              ├─ TicketPriority.java
    │              ├─ conditional/
@@ -102,7 +118,13 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
          └─ lab/
             └─ helpdesk/
                ├─ ticket/
-               │  └─ TicketTest.java
+               │  ├─ TicketTest.java
+               │  ├─ application/
+               │  │  └─ TicketApplicationServiceTest.java
+               │  ├─ repository/
+               │  │  └─ InMemoryTicketRepositoryTest.java
+               │  └─ web/
+               │     └─ TicketControllerTest.java
                └─ responsetime/
                   ├─ conditional/
                   │  └─ ConditionalResponseTimePolicyTest.java
@@ -112,7 +134,7 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
 
 Java Package Root는 `lab.helpdesk`다. Application 진입점은 Root에 두고 Ticket Domain의 `lab.helpdesk.ticket`과 독립 Policy 비교용 `lab.helpdesk.responsetime` 하위 Package를 사용한다.
 
-위 구조는 현재 실제 Source 기준이다. Week 2의 Web·Application·Repository Package는 구현하고 검증한 뒤 구조도에 추가한다.
+위 구조는 2026-08-27 현재 실제 Source 기준이다.
 
 ## 실행 요구사항
 
@@ -139,7 +161,7 @@ jshell --version
 .\mvnw.cmd test
 ```
 
-`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Maven Surefire가 JUnit Platform을 통해 Unit Test를 실행한다. 현재 Ticket 정상·경계·거부 Test 10개, 조건문 Policy Test 3개와 Strategy Policy Test 3개가 실행된다.
+`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Maven Surefire가 JUnit Platform을 통해 Test를 실행한다. 현재 Ticket Domain Test 10개, 조건문·Strategy Policy Test 6개, Repository Test 3개, Application Service Test 3개와 Spring MVC Test 7개가 실행된다.
 
 Build와 Test 실행 후 다음 위치에 Class 파일과 Test Report가 생성된다.
 
@@ -165,20 +187,24 @@ target/surefire-reports/
 | Exception Message | 자동 검증 완료 | 서로 다른 대표 Message 3개 확인 |
 | 조건문 응답 시간 Policy | 자동 검증 완료 | NORMAL 24시간·URGENT 4시간·VIP 1시간 Case 통과 |
 | Strategy 응답 시간 Policy | 자동 검증 완료 | 세 Policy 구현체를 같은 Interface와 Calculator로 검증 |
-| JUnit 자동 검증 | 완료 | `Tests run: 16, Failures: 0, Errors: 0, Skipped: 0` |
+| JUnit 자동 검증 | 완료 | `Tests run: 29, Failures: 0, Errors: 0, Skipped: 0` |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
-| Ticket Web API·MockMvc | `NOT_IMPLEMENTED` | Controller·Application Service·Repository 미구현 |
-| 실제 HTTP `curl.exe` Trace | Root Smoke 완료 | `GET /`에서 `404 Not Found`, `Content-Type: application/json`과 기본 오류 Body 확인. Ticket API Trace는 `NOT_RUN` |
+| Ticket Web API·MockMvc | 완료 | 정상 생성·조회와 공백 제목·잘못된 JSON·ID Type 불일치·부재·대표 내부 실패를 MVC Test 7개로 검증 |
+| Validation·오류 응답 | 완료 | `@NotBlank`·`@Valid`, `TicketNotFoundException`, `ResponseEntityExceptionHandler`와 `ProblemDetail` 적용 |
+| 실제 HTTP `curl.exe` Trace | 완료 | 정상 `201`·`200`, 공백 제목·잘못된 JSON·ID Type 불일치 `400`, 부재 `404`와 `application/problem+json` Body 확인 |
+| 대표 `500` 계약 | Test 완료 | Repository 수동 Test Double의 통제된 실패를 안전한 `500 ProblemDetail`로 변환하고 내부 Exception은 Server Log에만 보존 |
 
-이 결과는 Ticket Domain Test 10개와 응답 시간 Policy 비교 Test 6개를 자동 검증했다는 의미다. 응답 시간 Policy가 실제 Ticket 업무 흐름에 연결됐거나 동시성, 영속화, 권한과 현재 비범위 기능의 정확성까지 검증했다는 의미는 아니다.
+이 결과는 선택한 생성·조회와 대표 오류 계약을 자동 검증했다는 의미다. 동시성, 영속화, Transaction, 권한과 현재 비범위 기능의 정확성까지 검증했다는 의미는 아니다.
 
 2026-08-25 22:27 KST에 `spring-boot:run`으로 Spring Boot `4.1.1`을 기동했고, 22:28 KST에 `curl.exe --verbose --include --header "Accept: application/json" http://localhost:8080/`를 실행했다. `localhost`의 IPv6 Loopback `::1` 연결, `GET / HTTP/1.1`, `HTTP/1.1 404`와 JSON 오류 Body를 관찰했다. Controller가 없는 상태의 예상 결과이며 Ticket API 동작 근거는 아니다. 실행 후 Server를 종료하고 Port `8080`에 Listener가 없음을 확인했다.
 
 Maven 변경 직후 VS Code가 `HelpdeskApplication.java`에 일시적인 오류 표시를 남겼지만, Maven Clean Compile과 실제 Server 기동은 성공했다. Java Language Server Workspace 정리와 Maven Project Reload 후 표시가 사라졌으므로 Source 오류가 아니라 Editor Dependency 동기화 문제로 판단했다.
 
 JUnit 기준선은 `cdcbee0`, 대표 Exception Message 검증은 `944aede`, Policy 비교 기준선은 `6fb3365`, VIP 확장은 `3eb8b29` Commit에 기록했다.
+
+2026-08-27 실제 Server에서 정상 생성은 `201 Created`와 `Location: /api/tickets/1`, 정상 조회는 `200 OK`와 Ticket JSON을 반환했다. 공백 제목과 잘못된 JSON, 숫자가 아닌 ID는 각각 안전한 `400 ProblemDetail`을 반환했고, 존재하지 않는 숫자 ID는 `404 ProblemDetail`을 반환했다. RFC 9457의 기본 `type`인 `about:blank`는 JSON에서 생략될 수 있으며, `instance`는 실제 Request Path로 설정되는 것을 관찰했다.
 
 ## 현재 비범위
 
@@ -205,14 +231,13 @@ JUnit 기준선은 `cdcbee0`, 대표 Exception Message 검증은 `944aede`, Poli
 ## AI 활용 범위
 
 - AI가 보조한 부분: 개념 설명, 반례와 검증 Case 제안, Code와 문서 Review
-- 직접 수행한 부분: JDK와 JShell 실행, Ticket·Policy Code와 JUnit Test 작성, Spring Boot Dependency·Application 진입점 구성, Maven Clean Test, Server 기동, `curl.exe` Trace, Editor 동기화 오류 조치와 Diff 관찰
+- 직접 수행한 부분: JDK와 JShell 실행, Ticket·Policy Code와 JUnit Test 작성, Spring Boot와 Ticket 수직 Slice 구성, Validation·Exception Handler·오류 Test 작성, Maven Clean Test, Server 기동, 정상·실패 `curl.exe` Trace와 Diff 관찰
 
 AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 때만 학습 결과로 인정한다.
 
 ## 다음 단계
 
-1. 기존 16개 Unit Test를 Spring 변경 이후에도 회귀 기준선으로 유지한다.
-2. Controller·Application Service·Repository Port·In-memory 구현으로 생성·단건 조회 수직 Slice를 구성한다.
-3. 정상 생성·조회 MVC Test에서 Status·Header·Body와 Layer 호출을 검증한다.
-4. 실제 `POST /api/tickets`와 `GET /api/tickets/{id}`를 호출하고 구현 전 예상 계약과 비교한다.
-5. 잘못된 제목·존재하지 않는 ID·잘못된 ID 형식의 오류 계약은 정상 수직 Slice 이후 추가한다.
+1. Exception 발생 지점, 전파와 HTTP 변환 책임을 Code와 Test를 보며 다시 설명한다.
+2. 새 Terminal에서 전체 29개 Clean Test와 대표 실제 HTTP Trace를 재현한다.
+3. Week 2 문서에 예상·관찰·해석과 Test·Trace의 검증 경계를 반영한다.
+4. Must Gate를 유지한 뒤 Filter·Interceptor·CORS는 필요한 최소 비교만 수행하거나 보류한다.
