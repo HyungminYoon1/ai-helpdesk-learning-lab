@@ -1,7 +1,7 @@
 package lab.helpdesk.ticket.web;
 
 import java.net.URI;
-import java.util.Optional;
+import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,7 +28,7 @@ public class TicketController {
     // 티켓 생성
     @PostMapping
     public ResponseEntity<TicketResponse> create(
-            @RequestBody CreateTicketRequest request) {
+            @Valid @RequestBody CreateTicketRequest request) {
 
         TicketResult result = service.create(request.title());
         TicketResponse response = TicketResponse.from(result);
@@ -46,16 +46,8 @@ public class TicketController {
     public ResponseEntity<TicketResponse> findById(
             @PathVariable long id) {
 
-        Optional<TicketResult> result = service.findById(id);
-
-        if (result.isEmpty()) {
-            return ResponseEntity
-                    .notFound()
-                    .build();
-        }
-
-        TicketResponse response = TicketResponse.from(
-                result.orElseThrow());
+        TicketResult result = service.findById(id);
+        TicketResponse response = TicketResponse.from(result);
 
         return ResponseEntity.ok(response);
     }

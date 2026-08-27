@@ -7,7 +7,7 @@ import lab.helpdesk.ticket.repository.InMemoryTicketRepository;
 import lab.helpdesk.ticket.repository.TicketRepository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class TicketApplicationServiceTest {
 
@@ -41,9 +41,7 @@ public class TicketApplicationServiceTest {
         TicketResult created = service.create("로그인 오류");
 
         // When
-        TicketResult found = service
-                .findById(created.id())
-                .orElseThrow();
+        TicketResult found = service.findById(created.id());
 
         // Then
         assertEquals(created.id(), found.id());
@@ -51,17 +49,22 @@ public class TicketApplicationServiceTest {
         assertEquals(TicketStatus.OPEN, found.status());
     }
 
-    // 존재하지 않는 ID도 검증
+    // Ticket이 없으면 TicketNotFoundException 발생
     @Test
-    void unknown_ticket_id_returns_empty() {
+    void unknown_ticket_id_throws_exception() {
         // Given
         TicketRepository repository = new InMemoryTicketRepository();
+
         TicketApplicationService service = new TicketApplicationService(repository);
 
         // When
-        var result = service.findById(999L);
+        TicketNotFoundException exception = assertThrows(
+                TicketNotFoundException.class,
+                () -> service.findById(999L));
 
         // Then
-        assertTrue(result.isEmpty());
+        assertEquals(
+                "ticket not found: 999",
+                exception.getMessage());
     }
 }

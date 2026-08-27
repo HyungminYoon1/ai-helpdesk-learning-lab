@@ -4,8 +4,6 @@ import lab.helpdesk.ticket.Ticket;
 import lab.helpdesk.ticket.repository.TicketRepository;
 import org.springframework.stereotype.Service;
 
-import java.util.Optional;
-
 @Service
 public class TicketApplicationService {
 
@@ -28,12 +26,14 @@ public class TicketApplicationService {
         return result;
     }
 
-    // Optional.map()은 Ticket이 있을 경우 Lambda 실행, 없을 경우 Optional.empty() 반환
-    public Optional<TicketResult> findById(long id) {
+    // Ticket이 없으면 TicketNotFoundException 발생
+    public TicketResult findById(long id) {
         return repository.findById(id)
                 .map(ticket -> new TicketResult(
                         id,
                         ticket.title(),
-                        ticket.status()));
+                        ticket.status()))
+                .orElseThrow(
+                        () -> new TicketNotFoundException(id));
     }
 }
