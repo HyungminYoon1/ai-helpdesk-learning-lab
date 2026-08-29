@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 2 진행 중 — Ticket 정상 생성·조회와 대표 `400`·`404`·`500` 오류 계약 구현·검증 완료
-> 현재 학습 영역: Spring MVC 입력 검증, Exception Handler와 RFC 9457 `ProblemDetail`
+> 상태: Week 2 구현·검증 완료 — Ticket API와 대표 오류 계약, Filter·Interceptor 최소 실험
+> 현재 학습 영역: Spring MVC 요청 생명주기와 공통 처리 책임 경계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -45,11 +45,14 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
 - 정상 생성·조회와 대표 `400 Bad Request`·`404 Not Found`·통제된 `500 Internal Server Error` 검증
 - 요청 DTO Validation과 Domain 불변조건 검증의 경계
 - `ResponseEntityExceptionHandler`·`@RestControllerAdvice` 기반의 안전한 `ProblemDetail` 오류 응답
+- `OncePerRequestFilter` 기반 Request ID 부여와 `HandlerInterceptor` 기반 Handler 실행 시간 기록
 - MockMvc Test와 실제 `curl.exe` Request·Response Trace 비교
 
 2026-08-25 야간에 Spring Boot Dependency와 Application 진입점을 추가하고 기존 Unit Test 16개를 다시 통과했다. Application Context와 내장 Server를 기동한 뒤 Root URI에 실제 `curl.exe` 요청을 보내 `404 Not Found` JSON 응답을 관찰했다.
 
 2026-08-26에는 Repository·Application Service·Controller로 정상 생성·조회 수직 Slice를 구성하고 MockMvc Test 2개와 전체 Test 24개를 통과했다. 2026-08-27에는 실제 `POST`·`GET` 호출을 확인하고, 제목 Validation·잘못된 JSON·잘못된 ID 형식·존재하지 않는 Ticket·통제된 내부 실패를 서로 다른 오류 계약으로 구현했다. 전체 Clean Test 29개와 실제 `400`·`404` HTTP Trace를 확인했으며 대표 `500`은 Production 실패 Endpoint 없이 수동 Test Double로만 재현했다.
+
+2026-08-29 야간 학습 세션은 자정을 넘어 8월 30일 01시대까지 이어졌다. 이 세션에서 모든 요청에 Request ID를 부여하는 Filter와 선택된 Controller Method의 이름·최종 HTTP Status·실행 시간을 기록하는 Interceptor를 최소 범위로 추가했다. 단위 Test와 전체 Application Context를 사용하는 MockMvc 통합 Test를 구분했으며, 전체 Clean Test 33개가 실패·오류·건너뜀 없이 통과했다. 실제 Server와 `curl.exe` Trace는 다시 실행하지 않았으므로 8월 27일 근거와 구분한다.
 
 ## Ticket Domain 규칙
 
@@ -88,6 +91,10 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
    │     └─ lab/
    │        └─ helpdesk/
    │           ├─ HelpdeskApplication.java
+   │           ├─ web/
+   │           │  ├─ HandlerTimingInterceptor.java
+   │           │  ├─ RequestIdFilter.java
+   │           │  └─ WebConfiguration.java
    │           ├─ ticket/
    │           │  ├─ Ticket.java
    │           │  ├─ TicketStatus.java
@@ -125,6 +132,10 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
                │  │  └─ InMemoryTicketRepositoryTest.java
                │  └─ web/
                │     └─ TicketControllerTest.java
+               ├─ web/
+               │  ├─ HandlerTimingInterceptorTest.java
+               │  ├─ RequestIdFilterTest.java
+               │  └─ WebInfrastructureIntegrationTest.java
                └─ responsetime/
                   ├─ conditional/
                   │  └─ ConditionalResponseTimePolicyTest.java
@@ -134,7 +145,7 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
 
 Java Package Root는 `lab.helpdesk`다. Application 진입점은 Root에 두고 Ticket Domain의 `lab.helpdesk.ticket`과 독립 Policy 비교용 `lab.helpdesk.responsetime` 하위 Package를 사용한다.
 
-위 구조는 2026-08-27 현재 실제 Source 기준이다.
+위 구조는 2026-08-30 현재 실제 Source 기준이다.
 
 ## 실행 요구사항
 
@@ -161,7 +172,7 @@ jshell --version
 .\mvnw.cmd test
 ```
 
-`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Maven Surefire가 JUnit Platform을 통해 Test를 실행한다. 현재 Ticket Domain Test 10개, 조건문·Strategy Policy Test 6개, Repository Test 3개, Application Service Test 3개와 Spring MVC Test 7개가 실행된다.
+`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Maven Surefire가 JUnit Platform을 통해 Test를 실행한다. 현재 Ticket Domain Test 10개, 조건문·Strategy Policy Test 6개, Repository Test 3개, Application Service Test 3개, Ticket Spring MVC Test 7개와 Web 공통 처리 Test 4개가 실행된다.
 
 Build와 Test 실행 후 다음 위치에 Class 파일과 Test Report가 생성된다.
 
@@ -187,12 +198,13 @@ target/surefire-reports/
 | Exception Message | 자동 검증 완료 | 서로 다른 대표 Message 3개 확인 |
 | 조건문 응답 시간 Policy | 자동 검증 완료 | NORMAL 24시간·URGENT 4시간·VIP 1시간 Case 통과 |
 | Strategy 응답 시간 Policy | 자동 검증 완료 | 세 Policy 구현체를 같은 Interface와 Calculator로 검증 |
-| JUnit 자동 검증 | 완료 | `Tests run: 29, Failures: 0, Errors: 0, Skipped: 0` |
+| JUnit 자동 검증 | 완료 | `Tests run: 33, Failures: 0, Errors: 0, Skipped: 0` |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
 | Ticket Web API·MockMvc | 완료 | 정상 생성·조회와 공백 제목·잘못된 JSON·ID Type 불일치·부재·대표 내부 실패를 MVC Test 7개로 검증 |
 | Validation·오류 응답 | 완료 | `@NotBlank`·`@Valid`, `TicketNotFoundException`, `ResponseEntityExceptionHandler`와 `ProblemDetail` 적용 |
+| Filter·Interceptor | 최소 실험 완료 | Request ID·Chain 진행, 요청별 시작 시각과 `preHandle()` 반환을 단위 Test로 확인하고 전체 Context Test에서 등록·404 완료 로그를 검증 |
 | 실제 HTTP `curl.exe` Trace | 완료 | 정상 `201`·`200`, 공백 제목·잘못된 JSON·ID Type 불일치 `400`, 부재 `404`와 `application/problem+json` Body 확인 |
 | 대표 `500` 계약 | Test 완료 | Repository 수동 Test Double의 통제된 실패를 안전한 `500 ProblemDetail`로 변환하고 내부 Exception은 Server Log에만 보존 |
 
@@ -216,7 +228,8 @@ JUnit 기준선은 `cdcbee0`, 대표 Exception Message 검증은 `944aede`, Poli
 - Ticket 전체 CRUD와 검색·정렬·Pagination
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현
 - WebFlux, GraphQL과 다른 Backend Framework 비교
-- Must 범위 완료 전 CORS·Filter·Interceptor 확장 구현
+- CORS와 Preflight 실험
+- 비동기 Dispatch, 분산 Trace와 Production Monitoring
 
 현재 학습 질문에 필요하지 않은 기능은 먼저 추가하지 않는다.
 
@@ -231,13 +244,12 @@ JUnit 기준선은 `cdcbee0`, 대표 Exception Message 검증은 `944aede`, Poli
 ## AI 활용 범위
 
 - AI가 보조한 부분: 개념 설명, 반례와 검증 Case 제안, Code와 문서 Review
-- 직접 수행한 부분: JDK와 JShell 실행, Ticket·Policy Code와 JUnit Test 작성, Spring Boot와 Ticket 수직 Slice 구성, Validation·Exception Handler·오류 Test 작성, Maven Clean Test, Server 기동, 정상·실패 `curl.exe` Trace와 Diff 관찰
+- 직접 수행한 부분: JDK와 JShell 실행, Ticket·Policy Code와 JUnit Test 작성, Spring Boot와 Ticket 수직 Slice 구성, Validation·Exception Handler·오류 Test 작성, Filter·Interceptor와 관련 Test 작성, Maven Clean Test, Server 기동, 정상·실패 `curl.exe` Trace와 Diff 관찰
 
 AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 때만 학습 결과로 인정한다.
 
 ## 다음 단계
 
-1. Exception 발생 지점, 전파와 HTTP 변환 책임을 Code와 Test를 보며 다시 설명한다.
-2. 새 Terminal에서 전체 29개 Clean Test와 대표 실제 HTTP Trace를 재현한다.
-3. Week 2 문서에 예상·관찰·해석과 Test·Trace의 검증 경계를 반영한다.
-4. Must Gate를 유지한 뒤 Filter·Interceptor·CORS는 필요한 최소 비교만 수행하거나 보류한다.
+1. Week 2 WIL에서 완료 범위와 아직 자료 없이 설명하기 어려운 Exception 흐름을 구분한다.
+2. 8월 31일 첫 학습 Block에서 오류 전파와 Filter·Interceptor·Exception Handler 선택 기준을 Code 없이 다시 설명한다.
+3. 복습 Gate 뒤에는 기존 Repository Port를 유지한 채 PostgreSQL의 Schema·Transaction·Query Plan 학습으로 이동한다.
