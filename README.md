@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 2 구현·검증 완료 — Ticket API와 대표 오류 계약, Filter·Interceptor 최소 실험
-> 현재 학습 영역: Spring MVC 요청 생명주기와 공통 처리 책임 경계
+> 상태: Week 4 9월 11일 연장 Session의 Security 의존성 단독 실험 — 실제 Context Test 2개 실패, 남은 구현은 9월 12일로 이월
+> 현재 학습 영역: Spring Security Default Auto-Configuration과 Test Boundary
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -12,12 +12,16 @@ Week 1에는 Framework 없이 Ticket 객체가 자신의 상태와 규칙을 지
 
 Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하면서 HTTP 메시지와 REST 계약을 먼저 설명한다. 이후 Spring Boot를 최소 구성으로 기동하고, Ticket 생성·단건 조회 흐름을 Controller·Application Service·Repository·Domain으로 분리하여 구현한다. 구현량보다 예상 계약, Test와 실제 HTTP Trace의 차이를 설명하고 재현하는 데 중점을 둔다.
 
+Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기반 인가를 작은 단계로 실험한다. 9월 11일 학습이 자정을 넘긴 연장 구간에서 Security Starter만 추가해 Default Auto-Configuration의 영향을 먼저 관찰했다. 실제 Test 실행 시각은 2026-09-12 00:41~00:42 KST이며, 사용자 정의 `SecurityFilterChain`, Password·사용자·Role·Session·CSRF 계약은 9월 12일 과업으로 옮겨 아직 구현하지 않았다.
+
 ## 핵심 질문
 
 1. Client와 Server는 HTTP Method·URI·Header·Body와 Status를 통해 요청과 응답의 의미를 어떻게 합의하는가?
 2. Ticket 생성·단건 조회의 정상·실패 계약을 구현 전에 설명할 수 있는가?
 3. Controller·Application Service·Repository·Domain은 각각 무엇을 알고 무엇을 몰라야 하는가?
 4. Spring MVC Test와 실제 Server에 보내는 `curl.exe` Trace는 각각 무엇을 검증하는가?
+5. Standalone Controller Test와 실제 Security Filter Chain Test는 왜 서로 다른 결과를 낼 수 있는가?
+6. Framework의 Default 거부 동작과 Application이 선택한 `401`·`403` 계약을 어떻게 구분해 검증하는가?
 
 ## 현재 범위
 
@@ -47,6 +51,16 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
 - `ResponseEntityExceptionHandler`·`@RestControllerAdvice` 기반의 안전한 `ProblemDetail` 오류 응답
 - `OncePerRequestFilter` 기반 Request ID 부여와 `HandlerInterceptor` 기반 Handler 실행 시간 기록
 - MockMvc Test와 실제 `curl.exe` Request·Response Trace 비교
+
+### Week 4 Security 진행 상태
+
+- `spring-boot-starter-security` 추가
+- Spring Boot Security Starter 4.1.1, Spring Security 7.1.1 해석 확인
+- Security 변경 직전 전체 Test 33개 통과
+- Starter 단독 상태에서 Standalone Controller Test 7개 통과
+- 실제 Context Test 2개는 기존 `404` 대신 `/login` Redirect `302`를 받아 실패
+- 생성된 개발용 Credential 값은 실행 결과 공유와 문서에서 제외
+- 사용자 정의 인증 진입점, Password·사용자·Role·Session·CSRF는 `NOT_IMPLEMENTED`
 
 2026-08-25 야간에 Spring Boot Dependency와 Application 진입점을 추가하고 기존 Unit Test 16개를 다시 통과했다. Application Context와 내장 Server를 기동한 뒤 Root URI에 실제 `curl.exe` 요청을 보내 `404 Not Found` JSON 응답을 관찰했다.
 
@@ -198,7 +212,8 @@ target/surefire-reports/
 | Exception Message | 자동 검증 완료 | 서로 다른 대표 Message 3개 확인 |
 | 조건문 응답 시간 Policy | 자동 검증 완료 | NORMAL 24시간·URGENT 4시간·VIP 1시간 Case 통과 |
 | Strategy 응답 시간 Policy | 자동 검증 완료 | 세 Policy 구현체를 같은 Interface와 Calculator로 검증 |
-| JUnit 자동 검증 | 완료 | `Tests run: 33, Failures: 0, Errors: 0, Skipped: 0` |
+| Security 변경 전 JUnit 기준선 | 완료 | `Tests run: 33, Failures: 0, Errors: 0, Skipped: 0` |
+| Security Starter 단독 실험 | 원인 확인된 Red | `Tests run: 33, Failures: 2, Errors: 0, Skipped: 0`; 실제 Context Test에서 기대 `404`, 실제 `/login` Redirect `302` |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -221,7 +236,7 @@ JUnit 기준선은 `cdcbee0`, 대표 Exception Message 검증은 `944aede`, Poli
 ## 현재 비범위
 
 - Database와 영속화
-- 인증과 사용자 권한 검사
+- Production용 인증·사용자 권한 검사와 운영 Credential 관리
 - Browser UI
 - AI 분류와 외부 API 연동
 - 담당자 할당, Comment와 이력 조회
@@ -250,6 +265,6 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 
 ## 다음 단계
 
-1. Week 2 WIL에서 완료 범위와 아직 자료 없이 설명하기 어려운 Exception 흐름을 구분한다.
-2. 8월 31일 첫 학습 Block에서 오류 전파와 Filter·Interceptor·Exception Handler 선택 기준을 Code 없이 다시 설명한다.
-3. 복습 Gate 뒤에는 기존 Repository Port를 유지한 채 PostgreSQL의 Schema·Transaction·Query Plan 학습으로 이동한다.
+1. Security Test 지원 의존성과 실제 Filter Chain을 통과하는 익명 `GET` Test를 추가한다.
+2. API의 `401`과 Form Login Redirect를 명시적으로 구분하고 현재 Context Test의 계약을 조정한다.
+3. Password·Session·`USER`·`AGENT`·CSRF를 실패와 성공 Test 한 쌍씩으로 검증한다.
