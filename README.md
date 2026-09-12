@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 4 익명 API `401` 최소 Baseline 완료 — 전체 Test 34개 통과, Password·Login·Session·Role·CSRF는 후속 단계
-> 현재 학습 영역: Spring Security Authentication Entry Point와 실제 Filter Chain Test Boundary
+> 상태: Week 4 익명 API `401`·BCrypt·Form Login·Session·Role Matrix·CSRF 비교 Baseline 완료 — 전체 Test 42개 통과
+> 현재 학습 영역: Session Credential에 대한 CSRF 보호 경계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -12,7 +12,7 @@ Week 1에는 Framework 없이 Ticket 객체가 자신의 상태와 규칙을 지
 
 Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하면서 HTTP 메시지와 REST 계약을 먼저 설명한다. 이후 Spring Boot를 최소 구성으로 기동하고, Ticket 생성·단건 조회 흐름을 Controller·Application Service·Repository·Domain으로 분리하여 구현한다. 구현량보다 예상 계약, Test와 실제 HTTP Trace의 차이를 설명하고 재현하는 데 중점을 둔다.
 
-Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기반 인가를 작은 단계로 실험한다. 9월 11일 학습이 자정을 넘긴 연장 구간에서 Security Starter만 추가해 Default Auto-Configuration의 영향을 먼저 관찰했다. 실제 Test 실행 시각은 2026-09-12 00:41~00:42 KST였다. 9월 12일에는 실제 Filter Chain을 통과하는 익명 API Request의 `401`을 최소 구성과 Test로 검증했다. Password·사용자·Role·Login·Session·CSRF는 아직 구현하거나 실행하지 않았다.
+Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기반 인가를 작은 단계로 실험한다. 9월 11일 학습이 자정을 넘긴 연장 구간에서 Security Starter만 추가해 Default Auto-Configuration의 영향을 먼저 관찰했다. 실제 Test 실행 시각은 2026-09-12 00:41~00:42 KST였다. 9월 12일에는 실제 Filter Chain을 통과하는 익명 API Request의 `401`, BCrypt Password 검증, Test 전용 USER·AGENT의 Form Login·Session 복원과 Role Matrix, 인증된 POST의 CSRF Token 누락·유효 조건을 작은 단계로 확인했다. Runtime 사용자 구성과 실제 Browser Cookie·CSRF Trace는 아직 구현하거나 실행하지 않았다.
 
 ## 핵심 질문
 
@@ -22,6 +22,7 @@ Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기�
 4. Spring MVC Test와 실제 Server에 보내는 `curl.exe` Trace는 각각 무엇을 검증하는가?
 5. Standalone Controller Test와 실제 Security Filter Chain Test는 왜 서로 다른 결과를 낼 수 있는가?
 6. Framework의 Default 거부 동작과 Application이 선택한 `401`·`403` 계약을 어떻게 구분해 검증하는가?
+7. Login 성공 Request와 같은 Session을 사용하는 후속 Request는 각각 무엇을 증명하는가?
 
 ## 현재 범위
 
@@ -63,9 +64,17 @@ Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기�
 - `/api/**`는 인증을 요구하고 익명 인증 실패는 `HttpStatusEntryPoint`를 통해 `401`을 반환하는 최소 `SecurityFilterChain` 구성
 - 익명 Security Integration Test에서 `401`, `Location` 없음, Controller 미진입 확인
 - Web Infrastructure Test에는 Request별 `AGENT` Test Double을 넣어 기존 Filter·Interceptor의 `404` 검증 책임 유지
-- 전체 Test 34개 통과, 실패·오류·건너뜀 0
+- `BCryptPasswordEncoder` Bean 구성
+- 같은 후보의 두 Encoding이 다르고 두 `matches`는 성공하며 잘못된 후보는 실패하는 Test 통과
+- Test 전용 `UserDetailsService`에 실행 중 임의 Password로 Encoding한 `USER`·`AGENT` Fixture 구성
+- Form Login 성공·잘못된 Password 실패와 Login 결과의 `MockHttpSession`을 사용한 후속 보호 Request 검증
+- 후속 Request에서 Username·Password를 다시 보내지 않고 `AGENT` Authentication 복원과 `TicketController#findById` 도달 확인
+- Test 전용 `USER` Fixture를 추가하고 Ticket 생성은 `USER`·`AGENT`, 단건 조회는 `AGENT`만 허용
+- 로그인한 `USER` 생성 `201`, 조회 `403`·Controller 미진입, `AGENT`의 존재하는 Ticket 조회 `200` 검증
+- 같은 USER Session과 POST 조건에서 CSRF Token 없음은 `403`·Controller 미진입, 유효 Token은 `201`·Controller 진입으로 비교
+- 전체 Test 42개 통과, 실패·오류·건너뜀 0
 - 생성된 개발용 Credential 값은 실행 결과 공유와 문서에서 제외
-- PasswordEncoder·실제 학습용 사용자·Role별 접근 규칙·Login·Session 재사용·CSRF는 `NOT_IMPLEMENTED`·`NOT_RUN`
+- Runtime 사용자 구성과 실제 Browser Cookie·CSRF Network Trace는 `NOT_IMPLEMENTED`·`NOT_RUN`
 
 2026-08-25 야간에 Spring Boot Dependency와 Application 진입점을 추가하고 기존 Unit Test 16개를 다시 통과했다. Application Context와 내장 Server를 기동한 뒤 Root URI에 실제 `curl.exe` 요청을 보내 `404 Not Found` JSON 응답을 관찰했다.
 
@@ -191,7 +200,7 @@ jshell --version
 .\mvnw.cmd test
 ```
 
-`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Maven Surefire가 JUnit Platform을 통해 Test를 실행한다. 현재 Ticket Domain Test 10개, 조건문·Strategy Policy Test 6개, Repository Test 3개, Application Service Test 3개, Ticket Spring MVC Test 7개와 Web 공통 처리 Test 4개가 실행된다.
+`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Maven Surefire가 JUnit Platform을 통해 Test를 실행한다. 현재 Ticket Domain Test 10개, 조건문·Strategy Policy Test 6개, Repository Test 3개, Application Service Test 3개, Ticket Spring MVC Test 7개, Web 공통 처리 Test 4개와 Security Integration Test 9개가 실행된다.
 
 Build와 Test 실행 후 다음 위치에 Class 파일과 Test Report가 생성된다.
 
@@ -221,6 +230,15 @@ target/surefire-reports/
 | Security Starter 단독 실험 | 원인 확인된 Red | `Tests run: 33, Failures: 2, Errors: 0, Skipped: 0`; 실제 Context Test에서 기대 `404`, 실제 `/login` Redirect `302` |
 | 익명 API `401` 최소 Baseline | 자동 검증 완료 | 실제 Filter Chain Test에서 `401`, Redirect Header 없음, Controller 미진입 확인 |
 | Security 적용 후 전체 회귀 | 자동 검증 완료 | `Tests run: 34, Failures: 0, Errors: 0, Skipped: 0`; Web Infrastructure Test는 Request별 인증 Test Double 사용 |
+| BCrypt Password 검증 | 자동 검증 완료 | 두 Encoding의 차이, 올바른 후보의 두 `matches` 성공과 잘못된 후보 실패; 값 자체는 출력하지 않음 |
+| Password 적용 후 전체 회귀 | 자동 검증 완료 | `Tests run: 35, Failures: 0, Errors: 0, Skipped: 0` |
+| Test 전용 AGENT Form Login | 자동 검증 완료 | 미등록 사용자 Red 뒤 등록된 사용자 Login 성공, 잘못된 Password 실패와 인증 상태 확인 |
+| Login Session 재사용 | 자동 검증 완료 | Login 결과의 동일 `MockHttpSession`만 후속 보호 Request에 전달해 `AGENT` Authentication 복원과 Controller 도달 확인 |
+| Session 적용 후 전체 회귀 | 자동 검증 완료 | `Tests run: 38, Failures: 0, Errors: 0, Skipped: 0` |
+| Test 전용 Role Matrix | 자동 검증 완료 | `USER` 생성 `201`, 조회 `403`·Controller 미진입, `AGENT`의 존재하는 Ticket 조회 `200` 확인 |
+| Role Matrix 적용 후 전체 회귀 | 자동 검증 완료 | `Tests run: 41, Failures: 0, Errors: 0, Skipped: 0` |
+| 인증된 POST의 CSRF 비교 | 자동 검증 완료 | 같은 USER Session에서 Token 없음은 `403`·Controller 미진입, 유효 Token은 `201`·Controller 진입 |
+| CSRF 비교 후 전체 회귀 | 자동 검증 완료 | `Tests run: 42, Failures: 0, Errors: 0, Skipped: 0` |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -272,7 +290,6 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 
 ## 다음 단계
 
-1. Salt 기반 PasswordEncoder의 서로 다른 Encoding과 `matches` 성공·실패를 Test로 검증한다.
-2. Test 전용 `USER`·`AGENT`를 구성하고 Form Login 성공·실패와 Session 재사용을 검증한다.
-3. `USER` 생성 허용, `USER` 조회 `403`, `AGENT` 조회 성공의 Role Matrix를 실제 Filter Chain Test로 검증한다.
-4. 인증된 `POST`에서 CSRF Token 없음·유효 조건을 비교한다.
+1. Role Matrix와 CSRF 비교 결과를 자료 없이 다시 설명한다.
+2. Source·설정·Test Output과 Log의 Secret·Password 노출 여부를 점검한다.
+3. MockMvc Session 근거와 실제 Browser Cookie Trace의 경계를 WIL에 정리한다.
