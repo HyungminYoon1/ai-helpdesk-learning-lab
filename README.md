@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 4 9월 11일 연장 Session의 Security 의존성 단독 실험 — 실제 Context Test 2개 실패, 남은 구현은 9월 12일로 이월
-> 현재 학습 영역: Spring Security Default Auto-Configuration과 Test Boundary
+> 상태: Week 4 익명 API `401` 최소 Baseline 완료 — 전체 Test 34개 통과, Password·Login·Session·Role·CSRF는 후속 단계
+> 현재 학습 영역: Spring Security Authentication Entry Point와 실제 Filter Chain Test Boundary
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -12,7 +12,7 @@ Week 1에는 Framework 없이 Ticket 객체가 자신의 상태와 규칙을 지
 
 Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하면서 HTTP 메시지와 REST 계약을 먼저 설명한다. 이후 Spring Boot를 최소 구성으로 기동하고, Ticket 생성·단건 조회 흐름을 Controller·Application Service·Repository·Domain으로 분리하여 구현한다. 구현량보다 예상 계약, Test와 실제 HTTP Trace의 차이를 설명하고 재현하는 데 중점을 둔다.
 
-Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기반 인가를 작은 단계로 실험한다. 9월 11일 학습이 자정을 넘긴 연장 구간에서 Security Starter만 추가해 Default Auto-Configuration의 영향을 먼저 관찰했다. 실제 Test 실행 시각은 2026-09-12 00:41~00:42 KST이며, 사용자 정의 `SecurityFilterChain`, Password·사용자·Role·Session·CSRF 계약은 9월 12일 과업으로 옮겨 아직 구현하지 않았다.
+Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기반 인가를 작은 단계로 실험한다. 9월 11일 학습이 자정을 넘긴 연장 구간에서 Security Starter만 추가해 Default Auto-Configuration의 영향을 먼저 관찰했다. 실제 Test 실행 시각은 2026-09-12 00:41~00:42 KST였다. 9월 12일에는 실제 Filter Chain을 통과하는 익명 API Request의 `401`을 최소 구성과 Test로 검증했다. Password·사용자·Role·Login·Session·CSRF는 아직 구현하거나 실행하지 않았다.
 
 ## 핵심 질문
 
@@ -56,11 +56,16 @@ Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기�
 
 - `spring-boot-starter-security` 추가
 - Spring Boot Security Starter 4.1.1, Spring Security 7.1.1 해석 확인
+- Test Scope의 `spring-security-test` 7.1.1 추가
 - Security 변경 직전 전체 Test 33개 통과
 - Starter 단독 상태에서 Standalone Controller Test 7개 통과
 - 실제 Context Test 2개는 기존 `404` 대신 `/login` Redirect `302`를 받아 실패
+- `/api/**`는 인증을 요구하고 익명 인증 실패는 `HttpStatusEntryPoint`를 통해 `401`을 반환하는 최소 `SecurityFilterChain` 구성
+- 익명 Security Integration Test에서 `401`, `Location` 없음, Controller 미진입 확인
+- Web Infrastructure Test에는 Request별 `AGENT` Test Double을 넣어 기존 Filter·Interceptor의 `404` 검증 책임 유지
+- 전체 Test 34개 통과, 실패·오류·건너뜀 0
 - 생성된 개발용 Credential 값은 실행 결과 공유와 문서에서 제외
-- 사용자 정의 인증 진입점, Password·사용자·Role·Session·CSRF는 `NOT_IMPLEMENTED`
+- PasswordEncoder·실제 학습용 사용자·Role별 접근 규칙·Login·Session 재사용·CSRF는 `NOT_IMPLEMENTED`·`NOT_RUN`
 
 2026-08-25 야간에 Spring Boot Dependency와 Application 진입점을 추가하고 기존 Unit Test 16개를 다시 통과했다. Application Context와 내장 Server를 기동한 뒤 Root URI에 실제 `curl.exe` 요청을 보내 `404 Not Found` JSON 응답을 관찰했다.
 
@@ -214,6 +219,8 @@ target/surefire-reports/
 | Strategy 응답 시간 Policy | 자동 검증 완료 | 세 Policy 구현체를 같은 Interface와 Calculator로 검증 |
 | Security 변경 전 JUnit 기준선 | 완료 | `Tests run: 33, Failures: 0, Errors: 0, Skipped: 0` |
 | Security Starter 단독 실험 | 원인 확인된 Red | `Tests run: 33, Failures: 2, Errors: 0, Skipped: 0`; 실제 Context Test에서 기대 `404`, 실제 `/login` Redirect `302` |
+| 익명 API `401` 최소 Baseline | 자동 검증 완료 | 실제 Filter Chain Test에서 `401`, Redirect Header 없음, Controller 미진입 확인 |
+| Security 적용 후 전체 회귀 | 자동 검증 완료 | `Tests run: 34, Failures: 0, Errors: 0, Skipped: 0`; Web Infrastructure Test는 Request별 인증 Test Double 사용 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -265,6 +272,7 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 
 ## 다음 단계
 
-1. Security Test 지원 의존성과 실제 Filter Chain을 통과하는 익명 `GET` Test를 추가한다.
-2. API의 `401`과 Form Login Redirect를 명시적으로 구분하고 현재 Context Test의 계약을 조정한다.
-3. Password·Session·`USER`·`AGENT`·CSRF를 실패와 성공 Test 한 쌍씩으로 검증한다.
+1. Salt 기반 PasswordEncoder의 서로 다른 Encoding과 `matches` 성공·실패를 Test로 검증한다.
+2. Test 전용 `USER`·`AGENT`를 구성하고 Form Login 성공·실패와 Session 재사용을 검증한다.
+3. `USER` 생성 허용, `USER` 조회 `403`, `AGENT` 조회 성공의 Role Matrix를 실제 Filter Chain Test로 검증한다.
+4. 인증된 `POST`에서 CSRF Token 없음·유효 조건을 비교한다.

@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -30,6 +31,8 @@ class WebInfrastructureIntegrationTest {
 
         mockMvc.perform(
                 get("/api/tickets/{id}", 999L)
+                        .with(user("infrastructure-test-agent")
+                                .roles("AGENT"))
                         .accept(
                                 MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(status().isNotFound())
@@ -44,6 +47,8 @@ class WebInfrastructureIntegrationTest {
 
         mockMvc.perform(
                 get("/api/tickets/{id}", 999L)
+                        .with(user("infrastructure-test-agent")
+                                .roles("AGENT"))
                         .accept(
                                 MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(status().isNotFound());
