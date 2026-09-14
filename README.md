@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 4 익명 API `401`·BCrypt·Form Login·Session·Role Matrix·CSRF 비교 Baseline 완료 — 전체 Test 42개 통과
-> 현재 학습 영역: Session Credential에 대한 CSRF 보호 경계
+> 상태: Week 4 익명 API `401`·BCrypt·Form Login·Session·Role Matrix·CSRF 비교와 기본 Credential Log 제거 완료 — 전체 Test 42개 통과
+> 현재 학습 영역: Session 인증 근거와 Secret·Log 노출 경계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -12,7 +12,7 @@ Week 1에는 Framework 없이 Ticket 객체가 자신의 상태와 규칙을 지
 
 Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하면서 HTTP 메시지와 REST 계약을 먼저 설명한다. 이후 Spring Boot를 최소 구성으로 기동하고, Ticket 생성·단건 조회 흐름을 Controller·Application Service·Repository·Domain으로 분리하여 구현한다. 구현량보다 예상 계약, Test와 실제 HTTP Trace의 차이를 설명하고 재현하는 데 중점을 둔다.
 
-Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기반 인가를 작은 단계로 실험한다. 9월 11일 학습이 자정을 넘긴 연장 구간에서 Security Starter만 추가해 Default Auto-Configuration의 영향을 먼저 관찰했다. 실제 Test 실행 시각은 2026-09-12 00:41~00:42 KST였다. 9월 12일에는 실제 Filter Chain을 통과하는 익명 API Request의 `401`, BCrypt Password 검증, Test 전용 USER·AGENT의 Form Login·Session 복원과 Role Matrix, 인증된 POST의 CSRF Token 누락·유효 조건을 작은 단계로 확인했다. Runtime 사용자 구성과 실제 Browser Cookie·CSRF Trace는 아직 구현하거나 실행하지 않았다.
+Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기반 인가를 작은 단계로 실험한다. 9월 11일 학습이 자정을 넘긴 연장 구간에서 Security Starter만 추가해 Default Auto-Configuration의 영향을 먼저 관찰했다. 실제 Test 실행 시각은 2026-09-12 00:41~00:42 KST였다. 9월 12일에는 실제 Filter Chain을 통과하는 익명 API Request의 `401`, BCrypt Password 검증, Test 전용 USER·AGENT의 Form Login·Session 복원과 Role Matrix, 인증된 POST의 CSRF Token 누락·유효 조건을 작은 단계로 확인했다. 9월 14일에는 전체 Test와 Source·설정·Test Report를 다시 점검해 자동 생성된 기본 보안 Password 안내가 Report에 남는 문제를 확인하고, Runtime 사용자가 없는 현재 단계에서는 기본 사용자 자동 구성을 제외했다. Runtime 사용자 구성과 실제 Browser Cookie·CSRF Trace는 아직 구현하거나 실행하지 않았다.
 
 ## 핵심 질문
 
@@ -73,7 +73,8 @@ Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기�
 - 로그인한 `USER` 생성 `201`, 조회 `403`·Controller 미진입, `AGENT`의 존재하는 Ticket 조회 `200` 검증
 - 같은 USER Session과 POST 조건에서 CSRF Token 없음은 `403`·Controller 미진입, 유효 Token은 `201`·Controller 진입으로 비교
 - 전체 Test 42개 통과, 실패·오류·건너뜀 0
-- 생성된 개발용 Credential 값은 실행 결과 공유와 문서에서 제외
+- Runtime 사용자가 없는 상태에서 `UserDetailsServiceAutoConfiguration`을 제외해 자동 생성 기본 Password 안내가 Console·Surefire Report에 남지 않도록 구성
+- 2026-09-14 일반 `clean test` 재실행 후 생성 Password 안내, UUID 형태의 해당 값, BCrypt Encoding, Session ID와 CSRF Token 값이 Surefire Report에 남지 않은 것을 Pattern 기반으로 확인
 - Runtime 사용자 구성과 실제 Browser Cookie·CSRF Network Trace는 `NOT_IMPLEMENTED`·`NOT_RUN`
 
 2026-08-25 야간에 Spring Boot Dependency와 Application 진입점을 추가하고 기존 Unit Test 16개를 다시 통과했다. Application Context와 내장 Server를 기동한 뒤 Root URI에 실제 `curl.exe` 요청을 보내 `404 Not Found` JSON 응답을 관찰했다.
@@ -239,6 +240,9 @@ target/surefire-reports/
 | Role Matrix 적용 후 전체 회귀 | 자동 검증 완료 | `Tests run: 41, Failures: 0, Errors: 0, Skipped: 0` |
 | 인증된 POST의 CSRF 비교 | 자동 검증 완료 | 같은 USER Session에서 Token 없음은 `403`·Controller 미진입, 유효 Token은 `201`·Controller 진입 |
 | CSRF 비교 후 전체 회귀 | 자동 검증 완료 | `Tests run: 42, Failures: 0, Errors: 0, Skipped: 0` |
+| 기본 개발용 Credential Log | 제거·재검증 완료 | 기본 사용자 자동 구성을 제외하고 2026-09-14 일반 `clean test`의 Console·Surefire Report에서 생성 Password 안내 0건 확인 |
+| Source·공개 문서·Test Report 노출 점검 | Pattern 기반 점검 완료 | 추적 Source의 대표 Secret 형태·민감 Literal, 추적 Credential 파일과 공개 문서의 로컬 절대 경로 0건; Test Report의 Password·Encoding·Session ID·CSRF Token 값 0건 |
+| Week 4 최종 회귀 | 자동 검증 완료 | 2026-09-14 10:43 KST `Tests run: 42, Failures: 0, Errors: 0, Skipped: 0` |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -290,6 +294,6 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 
 ## 다음 단계
 
-1. Role Matrix와 CSRF 비교 결과를 자료 없이 다시 설명한다.
-2. Source·설정·Test Output과 Log의 Secret·Password 노출 여부를 점검한다.
-3. MockMvc Session 근거와 실제 Browser Cookie Trace의 경계를 WIL에 정리한다.
+1. Week 4 WIL의 표현과 완료·미수행 경계를 직접 검토한다.
+2. 실제 Browser Cookie Trace는 자동화 Test와 다른 근거가 필요할 때만 별도 실행한다.
+3. Runtime 사용자 저장소는 다음 학습 질문에 필요할 때 Password 정책·영속화와 함께 설계한다.
