@@ -17,8 +17,10 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.context.ActiveProfiles;
 
 import lab.helpdesk.ticket.application.TicketApplicationService;
 import lab.helpdesk.ticket.application.TicketResult;
@@ -32,12 +34,14 @@ import static org.springframework.security.test.web.servlet.response.SecurityMoc
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.handler;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(SessionAuthenticationIntegrationTest.LoginTestConfiguration.class)
+@ActiveProfiles("in-memory")
 class SessionAuthenticationIntegrationTest {
 
     private static final String TEST_AGENT_USERNAME =
@@ -177,6 +181,70 @@ class SessionAuthenticationIntegrationTest {
                 post("/api/tickets")
                         .session(authenticatedSession)
                         .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_TICKET_JSON))
+                .andExpect(authenticated()
+                        .withUsername(TEST_USER_USERNAME)
+                        .withRoles("USER"))
+                .andExpect(status().isCreated())
+                .andExpect(handler()
+                        .handlerType(TicketController.class))
+                .andExpect(handler()
+                        .methodName("create"));
+    }
+
+    @Test
+    void logged_in_user_can_request_csrf_token_for_follow_up_request()
+            throws Exception {
+
+        MockHttpSession authenticatedSession = authenticatedSession(
+                TEST_USER_USERNAME,
+                TEST_USER_PASSWORD,
+                "USER");
+
+        mockMvc.perform(
+                get("/api/csrf")
+                        .session(authenticatedSession))
+                .andExpect(authenticated()
+                        .withUsername(TEST_USER_USERNAME)
+                        .withRoles("USER"))
+                .andExpect(status().isOk())
+                .andExpect(handler()
+                        .handlerType(CsrfController.class))
+                .andExpect(handler()
+                        .methodName("csrf"))
+                .andExpect(jsonPath("$.headerName")
+                        .value("X-CSRF-TOKEN"))
+                .andExpect(jsonPath("$.token").isNotEmpty());
+    }
+
+    @Test
+    void csrf_token_from_endpoint_authorizes_follow_up_ticket_creation()
+            throws Exception {
+
+        MockHttpSession authenticatedSession = authenticatedSession(
+                TEST_USER_USERNAME,
+                TEST_USER_PASSWORD,
+                "USER");
+
+        MvcResult csrfResult = mockMvc.perform(
+                get("/api/csrf")
+                        .session(authenticatedSession))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        CsrfToken csrfToken = (CsrfToken) csrfResult
+                .getRequest()
+                .getAttribute(CsrfToken.class.getName());
+
+        assertThat(csrfToken).isNotNull();
+
+        mockMvc.perform(
+                post("/api/tickets")
+                        .session(authenticatedSession)
+                        .header(
+                                csrfToken.getHeaderName(),
+                                csrfToken.getToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(CREATE_TICKET_JSON))
                 .andExpect(authenticated()

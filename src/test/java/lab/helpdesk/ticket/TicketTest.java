@@ -20,6 +20,31 @@ class TicketTest {
     }
 
     @Test
+    void persisted_ticket_can_be_restored_without_replaying_transitions() {
+        // Given & When
+        var ticket = Ticket.restore(
+                "로그인 오류",
+                TicketStatus.RESOLVED);
+
+        // Then
+        assertEquals("로그인 오류", ticket.title());
+        assertEquals(TicketStatus.RESOLVED, ticket.status());
+    }
+
+    @Test
+    void restored_ticket_requires_a_status() {
+        // Given & When
+        var exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> Ticket.restore("로그인 오류", null));
+
+        // Then
+        assertEquals(
+                "status must not be null",
+                exception.getMessage());
+    }
+
+    @Test
     void null_title_is_rejected() {
         // Given
         String title = null;

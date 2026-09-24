@@ -3,19 +3,35 @@ package lab.helpdesk.ticket;
 public final class Ticket {
 
     private final String title;
-    private TicketStatus status = TicketStatus.OPEN;
+    private TicketStatus status;
 
     public String title() {
         return title;
     }
 
     public Ticket(String title) {
+        this(title, TicketStatus.OPEN);
+    }
+
+    private Ticket(String title, TicketStatus status) {
         if (title == null || title.isBlank()) {
             throw new IllegalArgumentException(
                     "title must not be blank");
         }
+        if (status == null) {
+            throw new IllegalArgumentException(
+                    "status must not be null");
+        }
 
         this.title = title;
+        this.status = status;
+    }
+
+    public static Ticket restore(
+            String title,
+            TicketStatus status) {
+
+        return new Ticket(title, status);
     }
 
     // 티켓 상태를 '처리중'으로 변경
