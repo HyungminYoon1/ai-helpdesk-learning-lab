@@ -38,6 +38,7 @@ public class SecurityConfiguration {
                         "/api/tickets/{id}");
 
         http
+                .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(ticketCreateRequest)
                         .hasAnyRole("USER", "AGENT")
