@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 PostgreSQL 영속성·Transaction·Session/CSRF 수직 Slice 검증 — 전체 Test 53개 통과
-> 현재 학습 영역: PostgreSQL Migration·Repository Adapter·Database Integration Test·CSRF Token 전달
+> 상태: Week 6 Local Browser·Session·CSRF·PostgreSQL 수직 Slice 검증 — Java Test 61개, JavaScript Test 12개 통과
+> 현재 학습 영역: 최소 Ticket UI·Credential CORS·실제 Browser E2E·JavaScript 품질 Gate
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -14,7 +14,7 @@ Week 2에는 Week 1의 Ticket Domain과 Test를 회귀 기준선으로 유지하
 
 Week 4에는 기존 수직 Slice를 유지하면서 Session 인증과 Role 기반 인가를 작은 단계로 실험한다. 9월 11일 학습이 자정을 넘긴 연장 구간에서 Security Starter만 추가해 Default Auto-Configuration의 영향을 먼저 관찰했다. 실제 Test 실행 시각은 2026-09-12 00:41~00:42 KST였다. 9월 12일에는 실제 Filter Chain을 통과하는 익명 API Request의 `401`, BCrypt Password 검증, Test 전용 USER·AGENT의 Form Login·Session 복원과 Role Matrix, 인증된 POST의 CSRF Token 누락·유효 조건을 작은 단계로 확인했다. 9월 14일에는 전체 Test와 Source·설정·Test Report를 다시 점검해 자동 생성된 기본 보안 Password 안내가 Report에 남는 문제를 확인하고, Runtime 사용자가 없는 현재 단계에서는 기본 사용자 자동 구성을 제외했다. Runtime 사용자 구성과 실제 Browser Cookie·CSRF Trace는 아직 구현하거나 실행하지 않았다.
 
-Week 6에는 기존 `TicketRepository` Port를 유지한 채 Spring JDBC Adapter를 추가했다. `postgres` Profile에서는 `JdbcTicketRepository`, `in-memory` Profile에서는 기존 In-memory Adapter를 사용한다. Flyway `V1` Migration을 빈 PostgreSQL 17.6 Testcontainer에 적용하고, 생성·단건 조회·Row 복원·누락 조회·Database `CHECK` 위반과 같은 Transaction의 Rollback을 실제 PostgreSQL에서 검증했다. 같은 PostgreSQL Container를 유지한 채 Spring Application Context를 닫고 새 Context를 만들어 같은 Row를 조회했으며, 이는 Context 재생성 근거이지 JVM Process·Database Container·외부 운영 Database 재시작 근거는 아니다. 인증된 Session에서 CSRF Token의 Header 이름과 값을 응답하고 후속 POST에 사용하는 Server-side 흐름도 MockMvc로 검증했지만 실제 Browser E2E는 아직 수행하지 않았다.
+Week 6에는 기존 `TicketRepository` Port를 유지한 채 Spring JDBC Adapter를 추가했다. `postgres` Profile에서는 `JdbcTicketRepository`, `in-memory` Profile에서는 기존 In-memory Adapter를 사용한다. Flyway `V1` Migration을 빈 PostgreSQL 17.6 Testcontainer에 적용하고, 생성·단건 조회·Row 복원·누락 조회·Database `CHECK` 위반과 같은 Transaction의 Rollback을 실제 PostgreSQL에서 검증했다. Spring Context 재생성 Test와 별도로, 실제 Browser 수직 검증에서는 같은 PostgreSQL Container를 유지한 채 Java Process를 종료·재시작하고 기존 Row를 조회했다. 최소 Ticket UI는 Session·CSRF를 유지해 생성·조회하며, Credential CORS의 Preflight와 실제 POST, Role·CSRF 실패를 실제 Browser에서 확인했다. PostgreSQL Container·Volume 재시작이나 운영 배포 검증은 아니다.
 
 ## 핵심 질문
 
@@ -92,8 +92,11 @@ Week 6에는 기존 `TicketRepository` Port를 유지한 채 Spring JDBC Adapter
 - 첫 INSERT 성공 뒤 두 번째 INSERT 실패가 같은 Transaction의 첫 INSERT까지 되돌리는 것을 최종 Row 수 0으로 확인
 - 같은 PostgreSQL Container를 유지한 채 서로 다른 두 Spring Application Context와 Repository 객체에서 같은 Row 조회 확인
 - 인증된 Session의 CSRF Token 응답과 같은 Session·Token을 사용한 후속 POST `201`을 MockMvc로 확인
-- 전체 Clean Test 53개 통과, 실패·오류·건너뜀 0
-- JVM Process·PostgreSQL Container 재시작 뒤 영속성과 실제 Browser E2E는 아직 `NOT_RUN`
+- `local-browser` Profile에서만 외부 설정으로 임시 USER·AGENT를 구성하며, Cookie 없는 Preflight를 Security 인증보다 먼저 처리하는 Credential CORS 계약 검증
+- 최소 `/tickets.html` UI에서 HTTP·JSON·Ticket 검증, `textContent`, Event Delegation과 Response Race 방어 구현
+- 실제 Browser의 AGENT 생성·조회, Cross-Origin `OPTIONS`·`POST 201`, USER 조회 `403`, CSRF 없는 POST `403`, 익명 조회 `401`과 PostgreSQL Row 확인
+- 같은 PostgreSQL Container를 유지한 새 Java Process에서 기존 Ticket 조회 확인. PostgreSQL Container·Volume 재시작은 `NOT_RUN`
+- 전체 Java Clean Test 61개, Node Ticket UI Test 12개 통과. ESLint 오류 0, UI Source Line Coverage `85.51%`·Branch Coverage `77.05%`
 
 2026-08-25 야간에 Spring Boot Dependency와 Application 진입점을 추가하고 기존 Unit Test 16개를 다시 통과했다. Application Context와 내장 Server를 기동한 뒤 Root URI에 실제 `curl.exe` 요청을 보내 `404 Not Found` JSON 응답을 관찰했다.
 
@@ -199,6 +202,7 @@ Java Package Root는 `lab.helpdesk`다. Application 진입점은 Root에 두고 
 - JDK 25
 - PowerShell 또는 동등한 명령행 환경
 - 첫 Maven Wrapper 실행 시 Maven Distribution을 받을 수 있는 네트워크
+- Week 6 JavaScript Test·Lint·Browser E2E에는 Node.js 22 이상과 Docker Engine이 필요하다. E2E는 Playwright CLI를 일회성으로 내려받는다.
 
 설치된 Java 도구의 Version을 확인한다.
 
@@ -219,7 +223,15 @@ jshell --version
 .\mvnw.cmd test
 ```
 
-`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Maven Surefire가 JUnit Platform을 통해 Test를 실행한다. 현재 Week 4 기준 42개 Test에 Domain 복원 Test 2개, PostgreSQL Adapter·Transaction Integration Test 6개, Spring Application Context 재생성 영속성 Test 1개와 CSRF Endpoint·후속 POST Test 2개를 더한 53개가 실행된다. PostgreSQL Integration Test에는 Docker와 실제 PostgreSQL Container 기동이 필요하다.
+`test` Phase를 요청하면 Main Source와 Test Source를 컴파일한 뒤 Maven Surefire가 JUnit Platform을 통해 Test를 실행한다. 2026-09-29 전체 `clean test`에서는 61개가 실패·오류·건너뜀 없이 통과했다. PostgreSQL Integration Test에는 Docker Engine과 실제 PostgreSQL Container 기동이 필요하다.
+
+최소 Browser UI의 JavaScript Test·Coverage·Lint와 Local 실제 Browser 수직 검증은 별도 명령이다. E2E Script는 Port `15432`·`18081`·`18082`가 비어 있어야 하며, 일회용 Database·Runtime 사용자만 사용하고 종료 시 정리한다. Credential 값을 출력하지 않는다.
+
+```powershell
+node --experimental-test-coverage --test src/test/js/ticket-ui.test.mjs
+npx --yes --package eslint@10.11.0 eslint src/main/resources/static/*.mjs src/test/js/*.mjs
+.\scripts\Verify-Week6BrowserE2E.ps1
+```
 
 Application 실행 시 저장 방식을 Profile로 명시한다. `in-memory` Profile은 JDBC·Flyway 자동 설정을 제외하고, `postgres` Profile은 표준 Spring DataSource 설정을 통해 실제 PostgreSQL 연결 정보를 받아야 한다. Profile을 생략해 In-memory로 조용히 대체하지 않는다.
 
@@ -275,6 +287,9 @@ target/surefire-reports/
 | Spring Application Context 재생성 영속성 | 실제 PostgreSQL 자동 검증 완료 | 같은 PostgreSQL Container를 유지하고 Context A를 닫은 뒤 Context B의 새 Repository 객체로 같은 Row 조회; JVM Process·Container 재시작 근거는 아님 |
 | Session CSRF Token 전달 | MockMvc 자동 검증 완료 | 인증된 Session으로 Token 응답의 구조를 확인하고 같은 Session·Token Header의 후속 POST `201`과 Controller 진입 확인; Browser E2E 근거는 아님 |
 | Week 6 최신 전체 회귀 | 자동 검증 완료 | 2026-09-24 23:57 KST `Tests run: 53, Failures: 0, Errors: 0, Skipped: 0` |
+| Week 6 Local Browser 수직 흐름 | 실제 Browser·PostgreSQL 확인 | AGENT 생성·조회와 안전한 Text·Event Delegation, Credential Cross-Origin Preflight·POST, USER·CSRF·익명 실패 |
+| 새 Java Process의 PostgreSQL Row 조회 | 실제 Browser·PostgreSQL 확인 | 같은 PostgreSQL Container를 유지한 채 새 Java PID에서 기존 Ticket 조회; DB Container 재시작 근거는 아님 |
+| Week 6 전체 회귀·품질 Gate | 자동 검증 완료 | 2026-09-29 Java 61개·JavaScript 12개 통과, ESLint 오류 0, Ticket UI Source Line Coverage `85.51%` |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -284,7 +299,7 @@ target/surefire-reports/
 | 실제 HTTP `curl.exe` Trace | 완료 | 정상 `201`·`200`, 공백 제목·잘못된 JSON·ID Type 불일치 `400`, 부재 `404`와 `application/problem+json` Body 확인 |
 | 대표 `500` 계약 | Test 완료 | Repository 수동 Test Double의 통제된 실패를 안전한 `500 ProblemDetail`로 변환하고 내부 Exception은 Server Log에만 보존 |
 
-이 결과는 기존 HTTP·Security 계약의 회귀, Testcontainer 안의 실제 PostgreSQL 생성·조회·Constraint·같은 Transaction Rollback, 같은 Database Container를 사용하는 Spring Context 재생성과 Server-side CSRF Token 전달을 자동 검증했다는 의미다. 동시성, JVM Process·Database Container 재시작, 외부 Database 운영과 실제 Browser E2E까지 검증했다는 의미는 아니다.
+2026-09-24까지의 53개 결과는 기존 HTTP·Security 계약, PostgreSQL 생성·조회·Constraint·Rollback, 같은 JVM의 Spring Context 재생성과 Server-side CSRF 전달의 근거였다. 2026-09-29에는 Local 실제 Browser E2E와 새 Java Process의 기존 PostgreSQL Row 조회를 별도로 확인했다. 동시성, Database Container·Volume 재시작이나 외부 운영 Database까지 검증한 것은 아니다.
 
 2026-08-25 22:27 KST에 `spring-boot:run`으로 Spring Boot `4.1.1`을 기동했고, 22:28 KST에 `curl.exe --verbose --include --header "Accept: application/json" http://localhost:8080/`를 실행했다. `localhost`의 IPv6 Loopback `::1` 연결, `GET / HTTP/1.1`, `HTTP/1.1 404`와 JSON 오류 Body를 관찰했다. Controller가 없는 상태의 예상 결과이며 Ticket API 동작 근거는 아니다. 실행 후 Server를 종료하고 Port `8080`에 Listener가 없음을 확인했다.
 
@@ -298,13 +313,11 @@ JUnit 기준선은 `cdcbee0`, 대표 Exception Message 검증은 `944aede`, Poli
 
 - 외부 운영 Database 구성과 Backup·복구
 - Production용 인증·사용자 권한 검사와 운영 Credential 관리
-- Browser UI
 - AI 분류와 외부 API 연동
 - 담당자 할당, Comment와 이력 조회
 - Ticket 전체 CRUD와 검색·정렬·Pagination
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현
 - WebFlux, GraphQL과 다른 Backend Framework 비교
-- CORS와 Preflight 실험
 - 비동기 Dispatch, 분산 Trace와 Production Monitoring
 
 현재 학습 질문에 필요하지 않은 기능은 먼저 추가하지 않는다.
@@ -326,7 +339,6 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 
 ## 다음 단계
 
-1. 최소 Browser UI를 실제 Session·CSRF·Ticket API·PostgreSQL 흐름에 연결한다.
-2. 실제 Browser에서 Cookie 자동 전송과 JavaScript의 CSRF Header 첨부를 Network Trace로 확인한다.
-3. JVM Process·PostgreSQL Container 재시작 뒤 보존을 현재 Spring Context 재생성 Test와 구분해 검증한다.
-4. Runtime 사용자 저장소는 Password 정책·영속성 범위를 별도로 설계한다.
+1. Week 6 핵심 개념을 자료 없이 다시 설명하는 복습을 이어간다.
+2. Week 7에서는 AI Native 학습을 시작하되 이미 검증한 Ticket 수직 흐름을 유지한다.
+3. Week 8 배포·HTTPS 학습에서 PostgreSQL Volume·복구 경계와 운영 Credential 정책을 별도로 다룬다.

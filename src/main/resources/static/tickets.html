@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ticket 학습 UI</title>
+    <link rel="icon" href="data:,">
+    <script type="module" src="/ticket-page.mjs"></script>
+</head>
+<body>
+<main>
+    <h1>Ticket 학습 UI</h1>
+    <p>Session·CSRF·PostgreSQL 수직 흐름을 확인하기 위한 최소 화면입니다.</p>
+    <p><a href="/login">로그인</a> 후 이 화면으로 돌아오세요.</p>
+
+    <section aria-labelledby="create-heading">
+        <h2 id="create-heading">Ticket 생성</h2>
+        <form id="create-form" novalidate>
+            <label for="ticket-title-input">제목</label>
+            <input id="ticket-title-input" name="title" required>
+            <button id="create-button" type="submit">생성</button>
+        </form>
+    </section>
+
+    <section aria-labelledby="read-heading">
+        <h2 id="read-heading">Ticket 단건 조회</h2>
+        <form id="read-form" novalidate>
+            <label for="ticket-id-input">Ticket ID</label>
+            <input id="ticket-id-input" name="id" type="number" min="1" step="1" required>
+            <button id="read-button" type="submit">조회</button>
+        </form>
+    </section>
+
+    <section aria-labelledby="result-heading">
+        <h2 id="result-heading">결과</h2>
+        <p id="ui-status" role="status" aria-live="polite">대기 중</p>
+        <dl id="ticket-detail" hidden>
+            <dt>ID</dt><dd id="ticket-id"></dd>
+            <dt>제목</dt><dd id="ticket-title"></dd>
+            <dt>상태</dt><dd id="ticket-status"></dd>
+        </dl>
+    </section>
+
+    <section aria-labelledby="created-heading">
+        <h2 id="created-heading">이 화면에서 생성한 Ticket</h2>
+        <ul id="ticket-list"></ul>
+    </section>
+</main>
+</body>
+</html>

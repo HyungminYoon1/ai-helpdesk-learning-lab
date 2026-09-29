@@ -2,6 +2,7 @@
 /out/
 /target/
 /build/
+/.playwright-cli/
 
 # IDE
 .vscode/
