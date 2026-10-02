@@ -9,6 +9,19 @@ const rules = {
 
 export default [
     {
+        files: ["scripts/week7-*.mjs"],
+        languageOptions: {
+            globals: {
+                AbortSignal: "readonly",
+                Buffer: "readonly",
+                console: "readonly",
+                performance: "readonly",
+                process: "readonly"
+            }
+        },
+        rules
+    },
+    {
         files: ["src/main/resources/static/**/*.mjs"],
         languageOptions: {
             globals: {

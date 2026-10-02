@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 Local Browser·Session·CSRF·PostgreSQL 수직 Slice 검증 — Java Test 61개, JavaScript Test 12개 통과
-> 현재 학습 영역: 최소 Ticket UI·Credential CORS·실제 Browser E2E·JavaScript 품질 Gate
+> 상태: Week 6 수직 Slice 검증 유지·Week 7 독립 AI 실험 진행 — Java 61개는 9/29 기록, 최신 JavaScript Test 54개 통과
+> 현재 학습 영역: AI 출력 계약·독립 Provider 비교·오프라인 평가 준비·가짜 Tool 검증. Spring AI·제안 저장 수직 흐름은 미구현
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -309,11 +309,37 @@ JUnit 기준선은 `cdcbee0`, 대표 Exception Message 검증은 `944aede`, Poli
 
 2026-08-27 실제 Server에서 정상 생성은 `201 Created`와 `Location: /api/tickets/1`, 정상 조회는 `200 OK`와 Ticket JSON을 반환했다. 공백 제목과 잘못된 JSON, 숫자가 아닌 ID는 각각 안전한 `400 ProblemDetail`을 반환했고, 존재하지 않는 숫자 ID는 `404 ProblemDetail`을 반환했다. RFC 9457의 기본 `type`인 `about:blank`는 JSON에서 생략될 수 있으며, `instance`는 실제 Request Path로 설정되는 것을 관찰했다.
 
-## 현재 비범위
+## Week 7 독립 Provider 비교
+
+N01 합성 문의 한 건으로 Prompt-only와 Structured Outputs를 비교하는 [독립 스크립트 실행 안내](./scripts/week7-openai-pilot.md)를 추가했다. Spring Application과 Database를 사용하지 않고 Provider 요청·응답과 공통 출력 검증부터 확인한다. 실제 API 실행은 Helpdesk 키를 임시로 설정한 전용 PowerShell에서만 진행한다.
+
+사용자가 전용 PowerShell에서 실행한 N01의 실제 Provider 응답 두 건은 별도 WIL의 예비 비교 기록에 남겼다. Spring AI 연결·AI Migration·PostgreSQL 제안 저장 검증은 아직 없다. 기존 Java 61개의 기록과 독립 JavaScript 검증을 구분한다.
+
+13건 × 두 방식 × 두 반복의 본 평가를 준비하는 `scripts/week7-ai-evaluation.mjs`를 추가했다. 현재는 유료 호출 없는 `--dry-run`만 지원한다. 입력은 제목·본문만 보내도록 구성하고, 기대 분류·우선순위는 평가자용 데이터로 분리했다. Label은 검토 후보이며 요약·Injection의 내용은 자동 정답 처리하지 않는다. 새 준비 Test 14개, Pilot Test 15개와 기존 UI Test 12개가 합쳐 41개 통과했다.
+
+```powershell
+node --test src/test/js/ticket-ui.test.mjs src/test/js/week7-openai-pilot.test.mjs
+node scripts/week7-openai-pilot.mjs --dry-run
+node --test src/test/js/week7-ai-evaluation.test.mjs
+node scripts/week7-ai-evaluation.mjs --dry-run
+```
+
+### 독립 가짜 Tool Calling 실험
+
+`scripts/week7-tool-calling-spike.mjs`는 허용 함수 `find_current_ticket`과 빈 인자 `{}`만 받아 Server가 선택한 Ticket ID로 가짜 함수를 실행한다. 금지된 함수·추가 인자는 실행 전에 거부하며, 함수 실행 중 실패와 구분한다. 실제 Provider·Database·Ticket 상태 변경은 연결하지 않았다.
+
+2026-10-03 네 독립 Case의 실행 횟수는 정상 `1`·금지 함수 `0`·금지 인자 `0`·실행 중 실패 `1`이었다. 자동 재시도는 없다. 새 Test 13개와 기존 JavaScript 41개를 함께 실행해 총 54개가 통과했다. 이 결과는 기존 Java·PostgreSQL Test 재실행의 근거가 아니다.
+
+```powershell
+node scripts/week7-tool-calling-spike.mjs --run-fake-tools
+node --test src/test/js/week7-tool-calling-spike.test.mjs
+```
+
+## 현재 Application 비범위
 
 - 외부 운영 Database 구성과 Backup·복구
 - Production용 인증·사용자 권한 검사와 운영 Credential 관리
-- AI 분류와 외부 API 연동
+- Spring Application의 AI 분류와 외부 Provider 연동. 위 독립 비교와 실제 서비스 연결은 구분한다.
 - 담당자 할당, Comment와 이력 조회
 - Ticket 전체 CRUD와 검색·정렬·Pagination
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현
