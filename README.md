@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 수직 Slice 검증 유지·Week 7 독립 AI 실험 진행 — Java 61개는 9/29 기록, 최신 JavaScript Test 54개 통과
-> 현재 학습 영역: AI 출력 계약·독립 Provider 비교·오프라인 평가 준비·가짜 Tool 검증. Spring AI·제안 저장 수직 흐름은 미구현
+> 상태: Week 6 수직 Slice 유지·Week 7 접수 원자성·출력 계약 검증 — Java 140개·JavaScript 56개 통과
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험과 PostgreSQL 접수 Service. Message 입력의 HTTP 연결·Worker·Spring AI·Suggestion 저장은 미구현
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -290,6 +290,10 @@ target/surefire-reports/
 | Week 6 Local Browser 수직 흐름 | 실제 Browser·PostgreSQL 확인 | AGENT 생성·조회와 안전한 Text·Event Delegation, Credential Cross-Origin Preflight·POST, USER·CSRF·익명 실패 |
 | 새 Java Process의 PostgreSQL Row 조회 | 실제 Browser·PostgreSQL 확인 | 같은 PostgreSQL Container를 유지한 채 새 Java PID에서 기존 Ticket 조회; DB Container 재시작 근거는 아님 |
 | Week 6 전체 회귀·품질 Gate | 자동 검증 완료 | 2026-09-29 Java 61개·JavaScript 12개 통과, ESLint 오류 0, Ticket UI Source Line Coverage `85.51%` |
+| Week 7 접수 원자성 | 실제 PostgreSQL 자동 검증 완료 | 정상 Ticket·Message·Job 각 1건, Message·Job INSERT 실패 시 앞선 성공 INSERT까지 Rollback. 새 Integration Test 15개 통과 |
+| V1에서 V2로 Migration | 실제 PostgreSQL 자동 검증 완료 | V1 상태에서 만든 기존 Ticket의 ID·제목·Status를 V2 적용 후 유지하며 Message·Job은 임의 생성하지 않음 |
+| AI 출력 계약 검증 | Java Unit Test 완료 | 정상·판단 보류 형식, 누락·추가·중복 Field, Type·Enum·공백·Unicode 길이 경계 등 64개 통과. 내용 사실성·Provider 실패·DB 저장은 별도 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-03 Java Clean Test 140개, 이후 Prompt 보완 후 JavaScript Test 56개 통과. 실패·오류·건너뜀 0 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -317,6 +321,8 @@ N01 합성 문의 한 건으로 Prompt-only와 Structured Outputs를 비교하�
 
 13건 × 두 방식 × 두 반복의 본 평가를 준비하는 `scripts/week7-ai-evaluation.mjs`를 추가했다. 현재는 유료 호출 없는 `--dry-run`만 지원한다. 입력은 제목·본문만 보내도록 구성하고, 기대 분류·우선순위는 평가자용 데이터로 분리했다. Label은 검토 후보이며 요약·Injection의 내용은 자동 정답 처리하지 않는다. 새 준비 Test 14개, Pilot Test 15개와 기존 UI Test 12개가 합쳐 41개 통과했다.
 
+공통 Prompt `prompt-v3-abstain-draft`에는 문의 의미를 해석할 수 없어 요약 자체를 만들 수 없는 경우와, 요청은 이해하지만 분류·영향 정보가 부족한 경우의 구분을 추가했다. 두 방식에 같은 지시를 적용하고 기존 13건·52회 계획은 유지한다. 새 준비 Test 2개를 더한 전체 JavaScript 56개가 통과했으며, 실제 Model의 보류 판단을 시험한 것은 아니다.
+
 ```powershell
 node --test src/test/js/ticket-ui.test.mjs src/test/js/week7-openai-pilot.test.mjs
 node scripts/week7-openai-pilot.mjs --dry-run
@@ -333,6 +339,33 @@ node scripts/week7-ai-evaluation.mjs --dry-run
 ```powershell
 node scripts/week7-tool-calling-spike.mjs --run-fake-tools
 node --test src/test/js/week7-tool-calling-spike.test.mjs
+```
+
+### 최초 Message와 Job의 접수 원자성
+
+`V1__create_tickets.sql`은 유지하고 `V2__create_ticket_messages_and_pending_jobs.sql`을 추가했다. Message는 Ticket을 참조하고 Job은 입력 Message를 참조한다. 같은 Message의 초기 Job 중복 등록은 `UNIQUE (input_message_id)`로 막는다. 기존 Ticket의 없는 본문을 복사하거나 만들어 채우지 않는다.
+
+`postgres` Profile의 [TicketReceiptApplicationService](./src/main/java/lab/helpdesk/ticket/application/TicketReceiptApplicationService.java)는 Ticket·최초 Message·`PENDING` Job을 하나의 `@Transactional` 호출에서 저장한다. [접수 Integration Test](./src/test/java/lab/helpdesk/ticket/application/TicketReceiptIntegrationTest.java)는 실제 JDBC 저장의 성공 횟수를 기록하고, 다음 INSERT의 DB Constraint 실패 뒤 세 Table의 최종 Row 수를 확인한다. [Migration Test](./src/test/java/lab/helpdesk/ticket/repository/TicketReceiptMigrationIntegrationTest.java)는 V1에 기존 Row를 만든 다음 V2를 적용한다. 두 Test의 15개 Case와 전체 Java 76개, 기존 JavaScript 54개가 통과했다.
+
+이 단계는 Service와 Database의 접수 저장 실습이다. 기존 `POST /api/tickets`는 아직 제목만 받으며 새 Service를 호출하지 않는다. V2의 Job 상태는 `PENDING`만 허용하고 Worker·Attempt·호출 예약·Suggestion Table은 후속 단계다. 본문 길이 상한과 HTTP Field 이름도 이번 단계에서 확정하지 않았다.
+
+Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User ID나 권한 판정 근거가 아니다. Service는 작성자를 매개변수로 받고 Test는 합성 이름을 전달한다. 실제 HTTP 연결에서 인증 결과만 전달하는 검증은 아직 남아 있다. 본문은 원문 그대로 저장하며 Application의 `isBlank()`와 DB의 `btrim()` 검사는 서로 다른 범위의 검증이다.
+
+```powershell
+.\mvnw.cmd "-Dtest=TicketReceiptIntegrationTest,TicketReceiptMigrationIntegrationTest" test
+.\mvnw.cmd clean test
+```
+
+### Java AI 출력 계약 검증
+
+[AiSuggestionOutputValidator](./src/main/java/lab/helpdesk/ai/validation/AiSuggestionOutputValidator.java)는 Model의 JSON 문자열을 네 Field 계약에 맞춰 검사한다. `SUGGEST`에서는 공백이 아닌 요약·중복 없는 분류 목록·허용된 우선순위가 필요하다. `UNDETERMINED`는 그대로 보존한다. `ABSTAIN`에서는 나머지 세 Field가 명시적인 `null`이어야 한다.
+
+요약 상한은 생성자 인자로 받는다. [Unit Test](./src/test/java/lab/helpdesk/ai/validation/AiSuggestionOutputValidatorTest.java)의 200자는 초안의 실험값이며 Runtime 기본값을 확정한 것은 아니다. 양끝 공백을 제외한 Unicode Code Point 수를 검사하되 요약 문자열을 바꾸거나 잘라내지 않는다. 중복 JSON Property와 뒤에 붙은 추가 JSON도 거부하며, 오류에는 입력·Parser 원문 대신 고정 코드만 남긴다.
+
+검증기는 순수 Java 객체이며 Spring Bean·Provider·Worker·DB 저장에 아직 연결하지 않았다. 내용이 틀린 요약도 구조를 통과할 수 있고, HTML처럼 생긴 문자열은 Text로 보존한다. Provider 거부를 `ABSTAIN`으로 변환하거나 구조 통과만으로 저장·Tool 실행·Ticket 상태 변경을 허용하지 않는다. 새 Unit Test 64개와 전체 Java 140개·JavaScript 54개가 통과했다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionOutputValidatorTest" test
 ```
 
 ## 현재 Application 비범위

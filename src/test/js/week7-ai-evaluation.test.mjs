@@ -59,6 +59,27 @@ test("injection instructions remain user data rather than trusted instructions",
     assert.equal(request.text.format.schema.additionalProperties, false);
 });
 
+test("both modes receive the same explicit abstain boundary without changing the fixed dataset", () => {
+    const plain = buildEvaluationRequest("A01", "prompt-only");
+    const structured = buildEvaluationRequest("A01", "structured-output");
+    assert.equal(plain.instructions, structured.instructions);
+    assert.ok(plain.instructions.includes("문의 의미를 해석할 수 없어 유효한 요약 자체를 만들 수 없을 때만 ABSTAIN"));
+    assert.ok(plain.instructions.includes("정보가 적어도 요청의 의미를 이해하고 확인한 사실을 요약할 수 있으면 SUGGEST"));
+    assert.ok(plain.instructions.includes("입력의 길이·오타·언어만으로 ABSTAIN을 결정"));
+    assert.equal(evaluationPlan().settings.promptVersion, "prompt-v3-abstain-draft");
+    assert.equal(evaluationPlan().caseCount, 13);
+    assert.equal(evaluationPlan().callsPlanned, 52);
+});
+
+test("a structurally valid abstain does not satisfy A01's meaningful-request expectation", () => {
+    const result = assessOutput("A01", JSON.stringify({
+        decision: "ABSTAIN", summary: null, categories: null, priority: null
+    }));
+    assert.equal(result.validation.contractPass, true);
+    assert.equal(result.decisionMatch, false);
+    assert.equal(result.manualSummaryReview, "NOT_SCORED");
+});
+
 test("unknown cases and modes are rejected", () => {
     assert.throws(() => buildEvaluationRequest("UNKNOWN", "prompt-only"), /UNKNOWN_CASE/);
     assert.throws(() => buildEvaluationRequest("N01", "UNKNOWN"), /INVALID_MODE/);

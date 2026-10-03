@@ -6,7 +6,7 @@ export const EVALUATION_SETTINGS = Object.freeze({
     ...SETTINGS,
     maxCalls: 52,
     repetitions: 2,
-    promptVersion: "prompt-v2-evaluation-draft",
+    promptVersion: "prompt-v3-abstain-draft",
     logicalContractVersion: "v2.1-draft",
     datasetVersion: DATASET_VERSION,
     rubricVersion: "rubric-v2.1-draft",
@@ -20,7 +20,10 @@ const COMMON_ADDITIONS = [
     "별도의 미분류 문제가 함께 있을 때만 알려진 categories와 UNDETERMINED를 병기한다.",
     "priority는 개별 문제뿐 아니라 원문에 보고된 누적·결합 영향을 함께 본다. 어느 쪽이든 높은 우선순위의 근거가 충분하면 HIGH다.",
     "HIGH의 근거가 없고 전체 영향 판단에 필요한 정보가 부족하면 UNDETERMINED, 통상적인 처리로 대응할 근거가 있으면 NORMAL이다.",
-    "문제 수만으로 우선순위를 올리거나 원문에 없는 연쇄 관계·원인을 만들지 않는다."
+    "문제 수만으로 우선순위를 올리거나 원문에 없는 연쇄 관계·원인을 만들지 않는다.",
+    "제목과 본문을 함께 보아 문의 의미를 해석할 수 없어 유효한 요약 자체를 만들 수 없을 때만 ABSTAIN을 사용하고 summary, categories, priority는 모두 null로 반환한다.",
+    "정보가 적어도 요청의 의미를 이해하고 확인한 사실을 요약할 수 있으면 SUGGEST를 사용한다. 분류·긴급도만 불확실하면 UNDETERMINED로 남긴다.",
+    "입력의 길이·오타·언어만으로 ABSTAIN을 결정하거나 이해하지 못한 입력에서 문의 내용을 만들어내지 않는다."
 ];
 
 function findCase(caseId) {
