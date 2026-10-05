@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { livePlan, readSafeJavaEvidence, executeLiveExperiment, RESERVATION_USD } from "../../../scripts/week7-java-provider-live.mjs";
-import { withDailyLedger } from "../../../scripts/week7-ai-daily-budget.mjs";
+import { livePlan, readSafeJavaEvidence, executeLiveExperiment as runLiveExperiment, RESERVATION_USD,
+    scopedChildEnvironment, runMavenPreflight } from "../../../scripts/week7-java-provider-live.mjs";
+import { withDailyLedger, reserveDailyCall } from "../../../scripts/week7-ai-daily-budget.mjs";
 
 const DAY = "2026-10-06";
 const PREFIX = "HELPDESK_JAVA_LIVE_EVIDENCE ";
@@ -15,6 +16,8 @@ const fixture = extra => ({ evidence: "LIVE_JAVA_SPRING_AI_POSTGRES", caseId: "S
     jobSucceeded: true, suggestionCount: 1, categoryCount: 1, javaExitSucceeded: true, ...extra });
 const root = () => mkdtempSync(join(tmpdir(), "week7-java-live-test-"));
 const ledgerPath = repositoryRoot => join(repositoryRoot, "local", "ai-experiments", `${DAY}-budget.json`);
+const preflightEvidence = () => ({ evidence: "MAVEN_PREFLIGHT_NO_API_CALL", passed: true, credentialsPassed: false });
+const executeLiveExperiment = options => runLiveExperiment({ runPreflight: preflightEvidence, ...options });
 
 test("dry run plans one isolated experiment and does not need a key or call a transport", () => {
     const plan = livePlan();
@@ -184,4 +187,123 @@ test("an unconfirmed-prior call with unknown outcome is still held without autom
     assert.equal(ledger.priorEstimatedUsd, null);
     await assert.rejects(executeLiveExperiment(args), /RECONCILIATION/);
     assert.equal(launches, 1);
+});
+
+test("Windows wrapper variables are forwarded without unrelated keys or Maven options", () => {
+    const host = { PATH: "safe-path", PATHEXT: ".EXE;.BAT;.CMD", COMSPEC: "safe-command-interpreter",
+        OPENAI_API_KEY: "unrelated-private-value", HELPDESK_OPENAI_API_KEY: "inherited-private-value",
+        MVNW_PASSWORD: "unrelated-private-value", MAVEN_OPTS: "unrelated-private-value" };
+    const scoped = scopedChildEnvironment({ apiKey: "synthetic-scoped-credential", day: DAY,
+        priorCostUnconfirmed: true, launcherRecoveryConfirmed: false }, host);
+    assert.equal(scoped.PATHEXT, host.PATHEXT);
+    assert.equal(scoped.COMSPEC, host.COMSPEC);
+    assert.equal(scoped.HELPDESK_OPENAI_API_KEY, "synthetic-scoped-credential");
+    for (const name of ["OPENAI_API_KEY", "MVNW_PASSWORD", "MAVEN_OPTS"]) assert.equal(name in scoped, false);
+    const preflight = scopedChildEnvironment({}, host);
+    assert.equal("HELPDESK_OPENAI_API_KEY" in preflight, false);
+    assert.equal("HELPDESK_AI_LIVE_CONFIRMED" in preflight, false);
+});
+
+test("Maven preflight checks real version output and sends no credentials", () => {
+    const evidence = runMavenPreflight({ hostEnvironment: { PATHEXT: ".CMD", COMSPEC: "safe-interpreter",
+        OPENAI_API_KEY: "PRIVATE", HELPDESK_OPENAI_API_KEY: "PRIVATE", SYSTEMROOT: "C:\\Windows" },
+    spawnProcess: (_shell, args, options) => {
+        assert.equal(args.at(-1), ".\\mvnw.cmd --version; exit $LASTEXITCODE");
+        assert.equal("OPENAI_API_KEY" in options.env, false);
+        assert.equal("HELPDESK_OPENAI_API_KEY" in options.env, false);
+        assert.equal("HELPDESK_AI_LIVE_CONFIRMED" in options.env, false);
+        return { status: 0, stdout: "Apache Maven 3.9.16\nJava version: 25.0.4\n" };
+    } });
+    assert.deepEqual(evidence, preflightEvidence());
+});
+
+test("zero exit with no Maven output and startup diagnostics are not successful preflight", () => {
+    for (const child of [{ status: 0, stdout: "" }, { status: 1, stderr: "PRIVATE" },
+        { status: 0, stdout: "Apache Maven 3.9.16\nJava version: 17.0.1" },
+        { status: 0, stdout: "Apache Maven 3.8.8\nJava version: 25.0.4" },
+        { error: new Error("PRIVATE") }]) {
+        assert.throws(() => runMavenPreflight({ hostEnvironment: { PATHEXT: ".CMD", COMSPEC: "safe-interpreter" },
+            spawnProcess: () => child }), error => error.message === "MAVEN_STARTUP_PRECHECK_FAILED"
+                && error.cause === undefined);
+    }
+});
+
+test("missing Windows wrapper variables prevent even the preflight subprocess", () => {
+    let starts = 0;
+    assert.throws(() => runMavenPreflight({ hostEnvironment: {},
+        spawnProcess: () => { starts += 1; return { status: 0 }; } }), /STARTUP_PRECHECK/);
+    assert.equal(starts, 0);
+});
+
+test("preflight failure occurs before a ledger or a paid-call reservation is created", async () => {
+    const repositoryRoot = root();
+    let starts = 0;
+    await assert.rejects(executeLiveExperiment({ repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential", runPreflight: () => ({ passed: false }),
+        runJava: () => { starts += 1; return fixture(); } }), /STARTUP_PRECHECK/);
+    assert.equal(starts, 0);
+    assert.equal(existsSync(ledgerPath(repositoryRoot)), false);
+});
+
+test("manual launcher recovery retains the old unknown reservation and counts the new one", async () => {
+    const repositoryRoot = root();
+    const args = { repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential" };
+    await assert.rejects(executeLiveExperiment({ ...args, runJava: () => { throw new Error("PRIVATE"); } }),
+        /OUTCOME_OR_USAGE_UNKNOWN/);
+    const report = await executeLiveExperiment({ ...args, recoverLauncherOnce: true,
+        runJava: ({ launcherRecoveryConfirmed }) => {
+            assert.equal(launcherRecoveryConfirmed, true);
+            const ledger = JSON.parse(readFileSync(ledgerPath(repositoryRoot), "utf8"));
+            assert.equal(ledger.reservationsMade, 2);
+            assert.equal(ledger.heldEstimatedUsd, RESERVATION_USD);
+            assert.equal(ledger.pendingReservationUsd, RESERVATION_USD);
+            assert.equal(ledger.launcherRecovery.previousStopReason, "UNKNOWN_COST");
+            return fixture();
+        } });
+    assert.equal(report.completed, true);
+    assert.equal(report.dailyLedger.heldEstimatedUsd, RESERVATION_USD);
+    assert.equal(report.priorEstimatedUsd, null);
+    assert.equal(report.dailyEstimatedTotalUsd, null);
+    await assert.rejects(executeLiveExperiment({ ...args, runJava: () => fixture() }), /SINGLE_CALL_ALREADY_RESERVED/);
+});
+
+test("failed preflight never releases an existing block or changes its history", async () => {
+    const repositoryRoot = root();
+    const args = { repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential" };
+    await assert.rejects(executeLiveExperiment({ ...args, runJava: () => { throw new Error("PRIVATE"); } }),
+        /OUTCOME_OR_USAGE_UNKNOWN/);
+    const before = readFileSync(ledgerPath(repositoryRoot), "utf8");
+    await assert.rejects(executeLiveExperiment({ ...args, recoverLauncherOnce: true,
+        runPreflight: () => ({ passed: false }), runJava: () => fixture() }), /STARTUP_PRECHECK/);
+    assert.equal(readFileSync(ledgerPath(repositoryRoot), "utf8"), before);
+});
+
+test("launcher recovery is not a way to create a fresh ledger or retry an active reservation", async () => {
+    const repositoryRoot = root();
+    const args = { repositoryRoot, day: DAY, proceedWithUnknownPrior: true, recoverLauncherOnce: true,
+        apiKey: "synthetic-test-only-credential", runJava: () => fixture() };
+    await assert.rejects(executeLiveExperiment(args), /RECOVERY_NOT_APPLICABLE/);
+    assert.equal(existsSync(ledgerPath(repositoryRoot)), false);
+    await withDailyLedger({ repositoryRoot, day: DAY, proceedWithUnknownPrior: true }, ({ ledger, persist }) => {
+        persist(reserveDailyCall(ledger, RESERVATION_USD));
+    });
+    const before = readFileSync(ledgerPath(repositoryRoot), "utf8");
+    await assert.rejects(executeLiveExperiment(args), /RECOVERY_NOT_APPLICABLE/);
+    assert.equal(readFileSync(ledgerPath(repositoryRoot), "utf8"), before);
+});
+
+test("manual launcher recovery cannot be repeated after another unknown outcome", async () => {
+    const repositoryRoot = root();
+    const args = { repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential", runJava: () => { throw new Error("PRIVATE"); } };
+    await assert.rejects(executeLiveExperiment(args), /OUTCOME_OR_USAGE_UNKNOWN/);
+    await assert.rejects(executeLiveExperiment({ ...args, recoverLauncherOnce: true }), /OUTCOME_OR_USAGE_UNKNOWN/);
+    const before = readFileSync(ledgerPath(repositoryRoot), "utf8");
+    const ledger = JSON.parse(before);
+    assert.equal(ledger.heldEstimatedUsd, 2 * RESERVATION_USD);
+    assert.equal(ledger.reservationsMade, 2);
+    await assert.rejects(executeLiveExperiment({ ...args, recoverLauncherOnce: true }), /RECOVERY_NOT_APPLICABLE/);
+    assert.equal(readFileSync(ledgerPath(repositoryRoot), "utf8"), before);
 });

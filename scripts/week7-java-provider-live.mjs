@@ -53,40 +53,66 @@ export function readSafeJavaEvidence(stdout) {
     return evidence;
 }
 
-function scopedChildEnvironment(apiKey, day, priorCostUnconfirmed) {
+export function scopedChildEnvironment({ apiKey, day, priorCostUnconfirmed, launcherRecoveryConfirmed } = {},
+    hostEnvironment = process.env) {
     const environment = {};
-    for (const name of ["PATH", "JAVA_HOME", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]) {
-        if (process.env[name]) environment[name] = process.env[name];
+    for (const name of ["PATH", "PATHEXT", "COMSPEC", "JAVA_HOME", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
+        "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]) {
+        if (hostEnvironment[name]) environment[name] = hostEnvironment[name];
     }
     // The generic OPENAI_API_KEY, other projects' credentials and custom Maven options are excluded.
+    if (apiKey === undefined) return environment;
     return { ...environment, HELPDESK_OPENAI_API_KEY: apiKey,
         HELPDESK_AI_LIVE_CONFIRMED: "true", HELPDESK_AI_LIVE_DAY: day,
-        HELPDESK_AI_PRIOR_COST_UNCONFIRMED: String(priorCostUnconfirmed) };
+        HELPDESK_AI_PRIOR_COST_UNCONFIRMED: String(priorCostUnconfirmed),
+        HELPDESK_AI_LAUNCHER_RECOVERY_CONFIRMED: String(launcherRecoveryConfirmed) };
 }
 
-function runJavaExperiment({ apiKey, day, priorCostUnconfirmed }) {
+function windowsShell(hostEnvironment = process.env) {
     if (process.platform !== "win32") throw new Error("WINDOWS_EXPERIMENT_RUNNER_REQUIRED");
     const modernShell = "C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe\\pwsh.exe";
-    const shell = existsSync(modernShell) ? modernShell : join(process.env.SYSTEMROOT, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    return existsSync(modernShell) ? modernShell
+        : join(hostEnvironment.SYSTEMROOT, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+}
+
+export function runMavenPreflight({ spawnProcess = spawnSync, hostEnvironment = process.env } = {}) {
+    const environment = scopedChildEnvironment({}, hostEnvironment);
+    if (!environment.PATHEXT || !environment.COMSPEC) throw new Error("MAVEN_STARTUP_PRECHECK_FAILED");
+    const child = spawnProcess(windowsShell(hostEnvironment), ["-NoProfile", "-NonInteractive", "-Command",
+        ".\\mvnw.cmd --version; exit $LASTEXITCODE"], {
+        cwd: ROOT, env: environment, encoding: "utf8", timeout: 60000, maxBuffer: 1048576, windowsHide: true
+    });
+    if (child.error || child.status !== 0 || !/Apache Maven 3\.9\.16\b/.test(child.stdout ?? "")
+        || !/Java version: 25[.]/.test(child.stdout ?? "")) throw new Error("MAVEN_STARTUP_PRECHECK_FAILED");
+    return { evidence: "MAVEN_PREFLIGHT_NO_API_CALL", passed: true, credentialsPassed: false };
+}
+
+function runJavaExperiment({ apiKey, day, priorCostUnconfirmed, launcherRecoveryConfirmed }) {
+    const shell = windowsShell();
     // Static command: no key or user-provided text is interpolated into the command line.
     const child = spawnSync(shell, ["-NoProfile", "-NonInteractive", "-Command",
         ".\\mvnw.cmd -q '-Dtest=SpringAiOpenAiSuggestionProviderLiveExperiment' test; exit $LASTEXITCODE"], {
-        cwd: ROOT, env: scopedChildEnvironment(apiKey, day, priorCostUnconfirmed), encoding: "utf8",
+        cwd: ROOT, env: scopedChildEnvironment({ apiKey, day, priorCostUnconfirmed, launcherRecoveryConfirmed }), encoding: "utf8",
         timeout: 240000, maxBuffer: 1048576, windowsHide: true
     });
     return { ...readSafeJavaEvidence(child.stdout), javaExitSucceeded: !child.error && child.status === 0 };
 }
 
 export async function executeLiveExperiment({ repositoryRoot, day, knownPriorUsd, apiKey,
-    proceedWithUnknownPrior = false,
+    proceedWithUnknownPrior = false, recoverLauncherOnce = false, runPreflight = runMavenPreflight,
     runJava = runJavaExperiment, persistReport = () => {} }) {
     if (typeof apiKey !== "string" || !apiKey.trim()) throw new Error("HELPDESK_SCOPED_KEY_REQUIRED");
-    return withDailyLedger({ repositoryRoot, day, limitUsd: 1, knownPriorUsd, proceedWithUnknownPrior }, async ({ ledger, persist }) => {
+    const preflight = await runPreflight();
+    if (preflight?.evidence !== "MAVEN_PREFLIGHT_NO_API_CALL" || preflight.passed !== true
+        || preflight.credentialsPassed !== false) throw new Error("MAVEN_STARTUP_PRECHECK_FAILED");
+    return withDailyLedger({ repositoryRoot, day, limitUsd: 1, knownPriorUsd, proceedWithUnknownPrior,
+        recoverLauncherOnce, recoveryReservationUsd: RESERVATION_USD }, async ({ ledger, persist }) => {
         let current = reserveDailyCall(ledger, RESERVATION_USD);
         persist(current); // Must be durable before Java is allowed to call the Provider.
         let evidence;
         try {
-            evidence = await runJava({ apiKey, day, priorCostUnconfirmed: ledger.priorCostUnconfirmed === true });
+            evidence = await runJava({ apiKey, day, priorCostUnconfirmed: ledger.priorCostUnconfirmed === true,
+                launcherRecoveryConfirmed: ledger.launcherRecovery !== undefined });
         } catch {
             current = settleDailyCall(current, null);
             persist(current);
@@ -115,7 +141,7 @@ export async function executeLiveExperiment({ repositoryRoot, day, knownPriorUsd
 }
 
 function parseArguments(args) {
-    const config = { live: false, dryRun: false, keyConfirmed: false, syntheticConfirmed: false };
+    const config = { live: false, dryRun: false, preflight: false, keyConfirmed: false, syntheticConfirmed: false };
     const seen = new Set();
     for (let index = 0; index < args.length; index += 1) {
         const flag = args[index];
@@ -123,9 +149,11 @@ function parseArguments(args) {
         seen.add(flag);
         if (flag === "--live") config.live = true;
         else if (flag === "--dry-run") config.dryRun = true;
+        else if (flag === "--preflight") config.preflight = true;
         else if (flag === "--confirm-helpdesk-key") config.keyConfirmed = true;
         else if (flag === "--confirm-synthetic") config.syntheticConfirmed = true;
         else if (flag === "--proceed-with-unknown-prior") config.proceedWithUnknownPrior = true;
+        else if (flag === "--recover-launcher-once") config.recoverLauncherOnce = true;
         else if (["--day", "--budget-usd", "--prior-estimated-usd"].includes(flag)) {
             const value = args[++index];
             if (!value || value.startsWith("--")) throw new Error("INVALID_ARGUMENTS");
@@ -134,7 +162,7 @@ function parseArguments(args) {
             else config.knownPriorUsd = Number(value);
         } else throw new Error("INVALID_ARGUMENTS");
     }
-    if (config.live === config.dryRun) throw new Error("EXPLICIT_MODE_REQUIRED");
+    if ([config.live, config.dryRun, config.preflight].filter(Boolean).length !== 1) throw new Error("EXPLICIT_MODE_REQUIRED");
     return config;
 }
 
@@ -142,6 +170,7 @@ async function main() {
     try {
         const config = parseArguments(process.argv.slice(2));
         if (config.dryRun) { console.log(safeReportJson(livePlan())); return; }
+        if (config.preflight) { console.log(safeReportJson(runMavenPreflight())); return; }
         if (!config.keyConfirmed || !config.syntheticConfirmed || config.budgetUsd !== 1) {
             throw new Error("LIVE_APPROVAL_FLAGS_REQUIRED");
         }
@@ -150,7 +179,8 @@ async function main() {
         if (config.day !== today) throw new Error("BUDGET_APPROVAL_DATE_MISMATCH");
         const apiKey = process.env.HELPDESK_OPENAI_API_KEY;
         const report = await executeLiveExperiment({ repositoryRoot: ROOT, day: config.day,
-            knownPriorUsd: config.knownPriorUsd, proceedWithUnknownPrior: config.proceedWithUnknownPrior, apiKey,
+            knownPriorUsd: config.knownPriorUsd, proceedWithUnknownPrior: config.proceedWithUnknownPrior,
+            recoverLauncherOnce: config.recoverLauncherOnce, apiKey,
             persistReport: value => writeFileSync(join(ROOT, "local", "ai-experiments",
                 `${config.day}-java-provider-${Date.now()}.json`), safeReportJson(value, apiKey) + "\n", "utf8") });
         console.log(safeReportJson(report, apiKey));
@@ -162,6 +192,7 @@ async function main() {
             "DAILY_CALL_OR_BUDGET_LIMIT_EXCEEDED", "DAILY_BUDGET_LOCK_UNAVAILABLE",
             "INVALID_PRIOR_COST_MODE", "UNCONFIRMED_PRIOR_SINGLE_CALL_APPROVAL_REQUIRED",
             "UNCONFIRMED_PRIOR_SINGLE_CALL_ALREADY_RESERVED",
+            "MAVEN_STARTUP_PRECHECK_FAILED", "LAUNCHER_RECOVERY_NOT_APPLICABLE",
             "JAVA_OUTCOME_OR_USAGE_UNKNOWN_RECONCILE_BUDGET", "WINDOWS_EXPERIMENT_RUNNER_REQUIRED"]);
         console.error(safeCodes.has(error?.message) ? error.message : "JAVA_LIVE_EXPERIMENT_NOT_STARTED_OR_STOPPED");
         process.exitCode = 1;

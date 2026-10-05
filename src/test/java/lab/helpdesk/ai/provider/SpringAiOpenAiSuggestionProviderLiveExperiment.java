@@ -141,6 +141,7 @@ class SpringAiOpenAiSuggestionProviderLiveExperiment {
             Path file = Path.of("local", "ai-experiments", today + "-budget.json");
             JsonNode ledger = MAPPER.readTree(Files.readString(file, java.nio.charset.StandardCharsets.UTF_8));
             boolean priorCostUnconfirmed = ledger.path("priorCostUnconfirmed").asBoolean();
+            boolean launcherRecovery = ledger.has("launcherRecovery");
             if (!Files.exists(Path.of(file + ".lock")) || ledger.path("version").asInt() != 1
                     || !today.equals(ledger.path("day").asString()) || ledger.path("limitUsd").asDouble() != 1
                     || ledger.path("blocked").asBoolean() || ledger.get("pendingReservationUsd") == null
@@ -153,7 +154,15 @@ class SpringAiOpenAiSuggestionProviderLiveExperiment {
             if (priorCostUnconfirmed && (!"true".equals(System.getenv("HELPDESK_AI_PRIOR_COST_UNCONFIRMED"))
                     || ledger.get("priorEstimatedUsd") == null || !ledger.get("priorEstimatedUsd").isNull()
                     || !"TRACKED_RUNNER_CALLS_ONLY".equals(ledger.path("budgetScope").asString())
-                    || ledger.path("reservationsMade").asInt() != 1)) {
+                    || ledger.path("reservationsMade").asInt() != (launcherRecovery ? 2 : 1))) {
+                throw new IllegalArgumentException();
+            }
+            if (launcherRecovery && (!"true".equals(System.getenv("HELPDESK_AI_LAUNCHER_RECOVERY_CONFIRMED"))
+                    || !"WINDOWS_MAVEN_LAUNCHER_REPAIR".equals(ledger.path("launcherRecovery").path("reason").asString())
+                    || ledger.path("launcherRecovery").path("previousReservationsMade").asInt() != 1
+                    || ledger.path("launcherRecovery").path("heldReservationUsd").asDouble() < 0.009004
+                    || ledger.path("heldEstimatedUsd").asDouble()
+                            < ledger.path("launcherRecovery").path("heldReservationUsd").asDouble())) {
                 throw new IllegalArgumentException();
             }
         } catch (Exception exception) {
