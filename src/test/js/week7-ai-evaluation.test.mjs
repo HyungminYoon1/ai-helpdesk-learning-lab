@@ -66,9 +66,55 @@ test("both modes receive the same explicit abstain boundary without changing the
     assert.ok(plain.instructions.includes("문의 의미를 해석할 수 없어 유효한 요약 자체를 만들 수 없을 때만 ABSTAIN"));
     assert.ok(plain.instructions.includes("정보가 적어도 요청의 의미를 이해하고 확인한 사실을 요약할 수 있으면 SUGGEST"));
     assert.ok(plain.instructions.includes("입력의 길이·오타·언어만으로 ABSTAIN을 결정"));
-    assert.equal(evaluationPlan().settings.promptVersion, "prompt-v3-abstain-draft");
+    assert.equal(evaluationPlan().settings.promptVersion, "prompt-v4-policy-alignment");
     assert.equal(evaluationPlan().caseCount, 13);
     assert.equal(evaluationPlan().callsPlanned, 52);
+});
+
+test("both modes receive the same damage and unknown-cause policy without case-specific answer keys", () => {
+    for (const value of EVALUATION_CASES) {
+        const plain = buildEvaluationRequest(value.id, "prompt-only");
+        const structured = buildEvaluationRequest(value.id, "structured-output");
+        assert.equal(plain.instructions, structured.instructions);
+        assert.ok(plain.instructions.includes("한 사람의 피해이거나 원인을 몰라도 HIGH"));
+        assert.ok(plain.instructions.includes("BILLING이라는 분류만으로 HIGH를 정하지 않는다"));
+        assert.ok(plain.instructions.includes("구체적 고장 위치를 모르는 경우는 TECHNICAL"));
+        assert.ok(plain.instructions.includes("함께 보고된 피해 사실은 보존한다"));
+        for (const item of EVALUATION_CASES) {
+            assert.equal(plain.instructions.includes(item.id), false);
+        }
+        assert.equal(plain.instructions.includes("expectedPriority"), false);
+        assert.equal(plain.instructions.includes("coreFacts"), false);
+    }
+});
+
+test("policy clarification preserves the fixed dataset, model, schema, and rubric versions", () => {
+    const settings = evaluationPlan().settings;
+    assert.equal(settings.model, "gpt-6-luna");
+    assert.equal(settings.providerSchemaVersion, "provider-schema-v1-pilot");
+    assert.equal(settings.logicalContractVersion, "v2.1-draft");
+    assert.equal(settings.datasetVersion, "dataset-v2-draft");
+    assert.equal(settings.rubricVersion, "rubric-v2.1-draft");
+    for (const id of ["N02", "M01", "I03"]) {
+        assert.equal(EVALUATION_CASES.find(item => item.id === id).expectedPriority, "HIGH");
+    }
+    assert.deepEqual(EVALUATION_CASES.find(item => item.id === "A03").expectedCategories, ["TECHNICAL"]);
+    assert.equal(EVALUATION_CASES.find(item => item.id === "S02").expectedPriority, "NORMAL");
+});
+
+test("wrong policy judgments can pass the format contract and are not silently rewritten", () => {
+    for (const [id, priority] of [["N02", "NORMAL"], ["M01", "NORMAL"], ["I03", "UNDETERMINED"]]) {
+        const output = outputFor(id, { priority });
+        const result = assessOutput(id, output);
+        assert.equal(result.validation.contractPass, true);
+        assert.equal(result.priorityMatch, false);
+        assert.equal(result.manualSummaryReview, "NOT_SCORED");
+        assert.equal(JSON.parse(output).priority, priority);
+    }
+    const result = assessOutput("A03", outputFor("A03", { categories: ["UNDETERMINED"] }));
+    assert.equal(result.validation.contractPass, true);
+    assert.equal(result.categoriesMatch, false);
+    assert.equal(result.priorityMatch, true);
 });
 
 test("a structurally valid abstain does not satisfy A01's meaningful-request expectation", () => {

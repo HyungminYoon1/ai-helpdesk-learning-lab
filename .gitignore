@@ -3,6 +3,7 @@
 /target/
 /build/
 /.playwright-cli/
+/local/ai-experiments/
 
 # IDE
 .vscode/
