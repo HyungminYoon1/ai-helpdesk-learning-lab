@@ -25,6 +25,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit-jupiter.version>6.1.3</junit-jupiter.version>
         <maven-surefire-plugin.version>3.5.5</maven-surefire-plugin.version>
+        <spring-ai.version>2.0.1</spring-ai.version>
     </properties>
 
     <!-- 의존성 -->
@@ -52,6 +53,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+
+        <!-- Library only: no auto-configured live Model or environment-key fallback. -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-openai</artifactId>
+            <version>${spring-ai.version}</version>
         </dependency>
 
         <dependency>

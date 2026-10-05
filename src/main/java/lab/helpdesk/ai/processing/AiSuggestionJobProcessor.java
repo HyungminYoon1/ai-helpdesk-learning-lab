@@ -103,6 +103,10 @@ public final class AiSuggestionJobProcessor {
             return switch (exception.kind()) {
                 case REFUSED -> fail(claim, AiJobFailureCode.PROVIDER_REFUSED);
                 case CONFIGURATION -> fail(claim, AiJobFailureCode.ADAPTER_CONFIGURATION_ERROR);
+                case INVALID_RESPONSE -> fail(claim, AiJobFailureCode.OUTPUT_INVALID);
+                // The caller must honor Retry-After and Job limits. Do not hide a second call
+                // here or reuse lease recovery as a temporary-rejection retry policy.
+                case TEMPORARY_REJECTION -> throw exception;
                 // An unconfirmed request is not ABSTAIN or proof of no Provider execution.
                 case OUTCOME_UNKNOWN -> result(Outcome.PROVIDER_OUTCOME_UNKNOWN, claim);
             };

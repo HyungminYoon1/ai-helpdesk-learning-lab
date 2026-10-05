@@ -372,7 +372,7 @@ Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User I
 
 요약 상한은 생성자 인자로 받는다. [Unit Test](./src/test/java/lab/helpdesk/ai/validation/AiSuggestionOutputValidatorTest.java)의 200자는 초안의 실험값이며 Runtime 기본값을 확정한 것은 아니다. 양끝 공백을 제외한 Unicode Code Point 수를 검사하되 요약 문자열을 바꾸거나 잘라내지 않는다. 중복 JSON Property와 뒤에 붙은 추가 JSON도 거부하며, 오류에는 입력·Parser 원문 대신 고정 코드만 남긴다.
 
-검증기는 순수 Java 객체다. 결과 저장 Service는 이 검증기가 반환한 객체를 받으며 현재 Attempt와 상태를 별도로 확인한다. Provider·Worker의 Runtime 연결은 아직 없다. 내용이 틀린 요약도 구조를 통과할 수 있고, HTML처럼 생긴 문자열은 Text로 보존한다. Provider 거부를 `ABSTAIN`으로 변환하거나 구조 통과만으로 Tool 실행·Ticket 상태 변경을 허용하지 않는다. 첫 구현의 새 Unit Test 64개와 전체 Java 140개·JavaScript 54개가 통과했다.
+검증기는 순수 Java 객체다. 결과 저장 Service는 이 검증기가 반환한 객체를 받으며 현재 Attempt와 상태를 별도로 확인한다. 아래 단일 Job 처리와 Provider Adapter로 연결하며 자동 Worker는 아직 등록하지 않았다. 내용이 틀린 요약도 구조를 통과할 수 있고, HTML처럼 생긴 문자열은 Text로 보존한다. Provider 거부를 `ABSTAIN`으로 변환하거나 구조 통과만으로 Tool 실행·Ticket 상태 변경을 허용하지 않는다. 첫 구현의 새 Unit Test 64개와 전체 Java 140개·JavaScript 54개가 통과했다.
 
 ```powershell
 .\mvnw.cmd "-Dtest=AiSuggestionOutputValidatorTest" test
@@ -388,7 +388,7 @@ Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User I
 
 [실행권 Integration Test](./src/test/java/lab/helpdesk/ai/job/AiSuggestionJobExecutionIntegrationTest.java)는 경쟁 Claim·복구, 잠긴 Job 건너뛰기, 원장 실패 Rollback, 전체·보완 한도, 처리 기한과 정책 복원을 실제 PostgreSQL에서 확인한다. 새 Repository 객체의 복원 Test는 Application·JVM 재시작 근거와 구분한다. 설정 10개·Migration 1개·실행권 18개와 전체 Java 236개·JavaScript 79개가 통과했다.
 
-이 단계는 Worker의 실행권 기반이다. V3 검증 뒤 이어서 아래 V4 결과 저장을 추가했다. 자동 Polling·Provider 조회와 호출·실제 요청 Timeout은 아직 연결하지 않았고 Spring AI 의존성도 추가하지 않았다. 실행권 Test의 유료 API 호출은 0회다.
+이 단계는 Worker의 실행권 기반이다. V3 검증 뒤 이어서 아래 V4 결과 저장과 단일 처리·Provider Adapter를 추가했다. V3 실행권 Test 자체에는 자동 Polling이나 실제 AI 호출이 없으며 유료 API 호출은 0회다.
 
 ```powershell
 .\mvnw.cmd "-Dtest=AiJobPolicyTest,AiJobPolicyMigrationIntegrationTest,AiSuggestionJobExecutionIntegrationTest" test
@@ -426,11 +426,27 @@ Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User I
 .\mvnw.cmd "-Dtest=AiSuggestionJobProcessorIntegrationTest" test
 ```
 
+### Spring AI OpenAI Provider Adapter
+
+[SpringAiOpenAiSuggestionProvider](./src/main/java/lab/helpdesk/ai/provider/SpringAiOpenAiSuggestionProvider.java)는 `AiSuggestionProvider` Port 뒤에서 Spring AI 2.0.1의 `OpenAiChatModel`을 사용한다. Starter가 아닌 Library만 추가하고 명시적으로 생성한다. 일반 Application 실행·`mvn test`가 유료 호출을 시작하거나 전역 `OPENAI_API_KEY`를 자동으로 읽지 않는다. Key와 요약 상한은 생성자 인자다. 200자는 기존 Test의 실험값을 유지하며 운영 기본값을 새로 정하지 않았다.
+
+Model은 `gpt-6-luna`, reasoning은 `none`, 출력 상한은 600 Token, `store=false`, Structured Output을 사용한다. 이 Adapter는 Chat Completions 경로다. 기존 Node 비교의 Responses API와 업무 판단 기준을 맞추되 실행 근거는 구분한다. [Spring AI OpenAI 문서](https://docs.spring.io/spring-ai/reference/api/chat/openai-chat.html)
+
+[단일 전송 HTTP Client](./src/main/java/lab/helpdesk/ai/provider/SingleAttemptOpenAiHttpClient.java)는 SDK 재시도와 HTTP 연결 재시도·자동 Redirect·환경 Proxy를 끈다. 직렬화가 끝난 실제 Body를 개인정보 Guard와 Credential 검사에 통과시킨 뒤 한 번 전송한다. 요청은 32 KiB, 응답은 64 KiB 상한을 둔다. DB의 원문은 변경하지 않으며 Guard는 설정한 민감 값만 검사하는 현재 범위를 유지한다.
+
+명시적 거부, 인증·과금 설정 오류, 완료되지 않은 출력, 일시적 Rate Limit, 결과 불명 실패를 구분한다. 유효한 `Retry-After`의 초·HTTP-date 값은 최소 대기로 전달하고 Adapter 안에서는 재호출하거나 대기하지 않는다. Processor는 일시적 거절 정보를 호출자에게 전달하며, 이를 안전하게 재예약할 자동 Worker 정책은 후속 단계다. 응답 원문·Credential·SDK 예외 Cause는 오류에 복사하지 않는다. 사용량이나 반환 Model·Service Tier에 대한 요금 확인이 없으면 비용을 0으로 기록하지 않는다.
+
+[Adapter HTTP Test](./src/test/java/lab/helpdesk/ai/provider/SpringAiOpenAiSuggestionProviderTest.java) 44개는 실제 HTTP·Spring AI·SDK와 통제된 로컬 응답을 사용한다. 재시도 대상 Status·Timeout에도 요청 1회, 마스킹·Credential 검사 실패에는 요청 0회를 확인했다. 요청별 옵션의 기본 Model 덮어쓰기도 실제 전송 Body Assertion으로 잡아 수정했다. PostgreSQL 처리 Test는 19개이며, 전체 Java Clean Test 318개가 통과했다. 이 회귀 검증의 유료 호출은 0회다. 실제 AI 호출·자동 Worker·Browser E2E는 별도 실행 근거가 필요하다.
+
+```powershell
+.\mvnw.cmd "-Dtest=SpringAiOpenAiSuggestionProviderTest,AiSuggestionJobProcessorIntegrationTest" test
+```
+
 ## 현재 Application 비범위
 
 - 외부 운영 Database 구성과 Backup·복구
 - Production용 인증·사용자 권한 검사와 운영 Credential 관리
-- Spring Application의 AI 분류와 외부 Provider 연동. 위 독립 비교와 실제 서비스 연결은 구분한다.
+- 자동 Worker Polling·실패 유형별 대기 재예약·Provider 결과 조회와 운영 Application의 AI 자동 처리. 명시적으로 생성한 Provider Adapter·단일 처리 Test와 구분한다.
 - 담당자 할당, Comment와 이력 조회
 - Ticket 전체 CRUD와 검색·정렬·Pagination
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현

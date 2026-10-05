@@ -192,6 +192,34 @@ class AiSuggestionJobProcessorIntegrationTest {
     }
 
     @Test
+    void incomplete_provider_response_is_failed_not_repaired_or_stored() {
+        TicketReceiptResult receipt = receive();
+        assertThat(processor((input, timeout, kind) -> {
+            throw new AiProviderFailureException(Kind.INVALID_RESPONSE);
+        }).processNextPending().outcome()).isEqualTo(Outcome.FAILED);
+        assertThat(failure(receipt)).isEqualTo("OUTPUT_INVALID");
+        assertThat(count("ticket_suggestions")).isZero();
+        assertReceiptPreserved(receipt);
+    }
+
+    @Test
+    void temporary_rejection_preserves_the_wait_hint_and_does_not_schedule_an_unchecked_retry() {
+        TicketReceiptResult receipt = receive();
+        AiSuggestionJobProcessor processor = processor((input, timeout, kind) -> {
+            throw new AiProviderFailureException(Kind.TEMPORARY_REJECTION,
+                    AiProviderFailureException.Reason.RATE_LIMIT, Duration.ofSeconds(10));
+        });
+        AiProviderFailureException rejection = org.assertj.core.api.Assertions.catchThrowableOfType(
+                AiProviderFailureException.class, processor::processNextPending);
+        assertThat(rejection.retryAfter()).contains(Duration.ofSeconds(10));
+        assertThat(processor.processNextPending().outcome()).isEqualTo(Outcome.NO_JOB);
+        assertThat(status(receipt)).isEqualTo("RUNNING");
+        assertThat(count("ai_suggestion_attempts")).isOne();
+        assertThat(count("ticket_suggestions")).isZero();
+        assertReceiptPreserved(receipt);
+    }
+
+    @Test
     void invalid_json_is_rejected_without_repair_or_suggestion_storage() {
         TicketReceiptResult receipt = receive();
 
