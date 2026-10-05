@@ -12,12 +12,17 @@
     <h1>Ticket 학습 UI</h1>
     <p>Session·CSRF·PostgreSQL 수직 흐름을 확인하기 위한 최소 화면입니다.</p>
     <p><a href="/login">로그인</a> 후 이 화면으로 돌아오세요.</p>
+    <p>새 문의 접수는 postgres 모드에서 Ticket·본문·작성자·Job을 저장합니다.
+        in-memory 모드는 이전 제목 전용 실험이며 본문과 Job은 저장하지 않습니다.</p>
 
     <section aria-labelledby="create-heading">
         <h2 id="create-heading">Ticket 생성</h2>
         <form id="create-form" novalidate>
             <label for="ticket-title-input">제목</label>
             <input id="ticket-title-input" name="title" required>
+            <label for="ticket-body-input">최초 문의 본문</label>
+            <textarea id="ticket-body-input" name="body" rows="5" required></textarea>
+            <p>앞뒤 공백 제외 2,000자 이내입니다. 접수한 본문은 원문 그대로 저장합니다.</p>
             <button id="create-button" type="submit">생성</button>
         </form>
     </section>

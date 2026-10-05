@@ -258,3 +258,78 @@ test("POST 응답을 읽지 못하면 성공·실패를 단정하거나 자동 �
     assert.equal(view.states.at(-1).kind, "unknown-outcome");
     assert.deepEqual(view.tickets, []);
 });
+
+test("접수는 원문 body를 보존하며 작성자나 Role을 요청에 추가하지 않는다", async () => {
+    const original = "  로그인 오류가 납니다.\n새 링크를 요청합니다.  ";
+    const calls = [];
+    const view = recordView();
+    const client = createTicketClient({
+        fetchImpl: async (url, options) => {
+            calls.push({ url, options });
+            return url === "/api/csrf"
+                ? jsonResponse(200, { headerName: "X-CSRF-TOKEN", token: randomUUID() })
+                : jsonResponse(201, { id: 9, title: "문의", status: "OPEN" });
+        },
+        view
+    });
+    await client.createTicket("문의", original);
+    assert.deepEqual(JSON.parse(calls[1].options.body), { title: "문의", body: original });
+    assert.equal(view.states.at(-1).kind, "created");
+});
+
+test("공백·null 본문은 CSRF 조회나 접수 요청 전에 거부한다", async () => {
+    for (const body of [null, "", "   ", "\t\n", "\u2003"]) {
+        let calls = 0;
+        const view = recordView();
+        const client = createTicketClient({
+            fetchImpl: async () => { calls++; throw new Error("must not be called"); },
+            view
+        });
+        await client.createTicket("문의", body);
+        assert.equal(calls, 0);
+        assert.equal(view.states.at(-1).kind, "invalid-body");
+    }
+});
+
+test("2,001 Code Point 본문은 잘라 보내지 않고 거부한다", async () => {
+    let calls = 0;
+    const view = recordView();
+    const client = createTicketClient({
+        fetchImpl: async () => { calls++; throw new Error("must not be called"); },
+        view
+    });
+    await client.createTicket("문의", "😀".repeat(2001));
+    assert.equal(calls, 0);
+    assert.equal(view.states.at(-1).kind, "invalid-body");
+});
+
+test("2,000 Emoji와 앞뒤 공백은 UTF-16 길이로 거부하거나 원문에서 제거하지 않는다", async () => {
+    const original = "\u2003" + "😀".repeat(2000) + "\n";
+    let submittedBody;
+    const view = recordView();
+    const client = createTicketClient({
+        fetchImpl: async (url, options) => {
+            if (url === "/api/csrf") {
+                return jsonResponse(200, { headerName: "X-CSRF-TOKEN", token: randomUUID() });
+            }
+            submittedBody = JSON.parse(options.body).body;
+            return jsonResponse(201, { id: 10, title: "문의", status: "OPEN" });
+        },
+        view
+    });
+    await client.createTicket("문의", original);
+    assert.equal(submittedBody, original);
+    assert.equal(view.states.at(-1).kind, "created");
+});
+
+test("NBSP는 Java strip처럼 문자 수에 포함한다", async () => {
+    let calls = 0;
+    const view = recordView();
+    const client = createTicketClient({
+        fetchImpl: async () => { calls++; throw new Error("must not be called"); },
+        view
+    });
+    await client.createTicket("문의", "\u00a0" + "a".repeat(2000));
+    assert.equal(calls, 0);
+    assert.equal(view.states.at(-1).kind, "invalid-body");
+});

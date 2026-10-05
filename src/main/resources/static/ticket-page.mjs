@@ -3,6 +3,7 @@ import { createTicketClient } from "./ticket-ui.mjs";
 const createForm = document.querySelector("#create-form");
 const readForm = document.querySelector("#read-form");
 const titleInput = document.querySelector("#ticket-title-input");
+const bodyInput = document.querySelector("#ticket-body-input");
 const idInput = document.querySelector("#ticket-id-input");
 const createButton = document.querySelector("#create-button");
 const readButton = document.querySelector("#read-button");
@@ -18,6 +19,7 @@ const messages = {
     "creating": "Ticket 생성 중입니다.",
     "invalid-id": "올바른 Ticket ID를 입력하세요.",
     "invalid-title": "공백이 아닌 제목을 입력하세요.",
+    "invalid-body": "공백이 아닌 본문을 앞뒤 공백 제외 2,000자 이내로 입력하세요.",
     "login-required": "로그인이 필요합니다.",
     "forbidden": "이 작업에 대한 권한이 없습니다.",
     "not-found": "Ticket을 찾을 수 없습니다.",
@@ -75,7 +77,7 @@ const client = createTicketClient({
 
 createForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    void client.createTicket(titleInput.value);
+    void client.createTicket(titleInput.value, bodyInput.value);
 });
 
 readForm.addEventListener("submit", (event) => {

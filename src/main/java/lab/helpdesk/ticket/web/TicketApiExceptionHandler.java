@@ -114,14 +114,14 @@ public class TicketApiExceptionHandler
     }
 
     // 전역 500 Handler 추가: 예상하지 못한 내부 실패를 안전한 500 ProblemDetail로 변환
-    // Client: 안전한 일반 메시지만 수신, Server Log: 원래 Exception과 Stack Trace 보존, Error까지 무조건 잡지 않고 일반적인 Exception만 처리
+    // DB 예외의 메시지·Cause에는 실패 Row의 본문·작성자·비밀값이 포함될 수 있다.
+    // 원문 Exception 대신 고정 코드와 예외 종류만 기록한다. Error까지 잡지는 않는다.
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleUnexpectedException(
             Exception exception) {
 
-        logger.error(
-                "unexpected server error",
-                exception);
+        logger.error("unexpected server error; code=UNEXPECTED_SERVER_ERROR; exceptionType="
+                + exception.getClass().getSimpleName());
 
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.INTERNAL_SERVER_ERROR,

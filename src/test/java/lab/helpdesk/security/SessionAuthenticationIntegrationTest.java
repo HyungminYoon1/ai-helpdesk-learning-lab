@@ -25,6 +25,7 @@ import org.springframework.test.context.ActiveProfiles;
 import lab.helpdesk.ticket.application.TicketApplicationService;
 import lab.helpdesk.ticket.application.TicketResult;
 import lab.helpdesk.ticket.web.TicketController;
+import lab.helpdesk.ticket.web.InMemoryTicketCreationController;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestBuilders.formLogin;
@@ -188,7 +189,7 @@ class SessionAuthenticationIntegrationTest {
                         .withRoles("USER"))
                 .andExpect(status().isCreated())
                 .andExpect(handler()
-                        .handlerType(TicketController.class))
+                        .handlerType(InMemoryTicketCreationController.class))
                 .andExpect(handler()
                         .methodName("create"));
     }
@@ -252,7 +253,7 @@ class SessionAuthenticationIntegrationTest {
                         .withRoles("USER"))
                 .andExpect(status().isCreated())
                 .andExpect(handler()
-                        .handlerType(TicketController.class))
+                        .handlerType(InMemoryTicketCreationController.class))
                 .andExpect(handler()
                         .methodName("create"));
     }

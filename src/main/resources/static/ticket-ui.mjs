@@ -25,6 +25,12 @@ function isCsrfInfo(value) {
         && value.token.length > 0;
 }
 
+// Java String.strip()/isBlank()의 edge whitespace와 같은 범위를 사용한다.
+// JS trim()은 NBSP 등을 추가로 제거하므로 서버의 문자 수 계산과 섞지 않는다.
+function measuredMessage(value) {
+    return value.replace(/^[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+$/gu, "");
+}
+
 export function createTicketClient({ fetchImpl, view }) {
     let latestReadRequestId = 0;
     let activeReadController = null;
@@ -121,7 +127,7 @@ export function createTicketClient({ fetchImpl, view }) {
         }
     }
 
-    async function createTicket(title) {
+    async function createTicket(title, messageBody) {
         if (creating) {
             return;
         }
@@ -129,6 +135,20 @@ export function createTicketClient({ fetchImpl, view }) {
         if (typeof title !== "string" || title.trim().length === 0) {
             view.render({ kind: "invalid-title" });
             return;
+        }
+
+        // undefined는 이전 in-memory 제목 전용 실험 호출에만 사용한다.
+        // PostgreSQL은 body 누락을 서버에서도 거부한다.
+        if (messageBody !== undefined) {
+            if (typeof messageBody !== "string") {
+                view.render({ kind: "invalid-body" });
+                return;
+            }
+            const measured = measuredMessage(messageBody);
+            if (measured.length === 0 || [...measured].length > 2000) {
+                view.render({ kind: "invalid-body" });
+                return;
+            }
         }
 
         creating = true;
@@ -177,7 +197,9 @@ export function createTicketClient({ fetchImpl, view }) {
                         "Content-Type": "application/json",
                         [csrf.headerName]: csrf.token
                     },
-                    body: JSON.stringify({ title })
+                    body: JSON.stringify(messageBody === undefined
+                        ? { title }
+                        : { title, body: messageBody })
                 });
             } catch {
                 // The server may already have committed the POST.

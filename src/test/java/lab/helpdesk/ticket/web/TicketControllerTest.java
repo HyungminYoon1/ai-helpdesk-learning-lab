@@ -38,7 +38,7 @@ class TicketControllerTest {
         TicketController controller = new TicketController(this.service);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(controller)
+                .standaloneSetup(controller, new InMemoryTicketCreationController(this.service))
                 .setControllerAdvice(
                         new TicketApiExceptionHandler())
                 .build();
