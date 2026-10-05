@@ -140,6 +140,7 @@ class SpringAiOpenAiSuggestionProviderLiveExperiment {
             }
             Path file = Path.of("local", "ai-experiments", today + "-budget.json");
             JsonNode ledger = MAPPER.readTree(Files.readString(file, java.nio.charset.StandardCharsets.UTF_8));
+            boolean priorCostUnconfirmed = ledger.path("priorCostUnconfirmed").asBoolean();
             if (!Files.exists(Path.of(file + ".lock")) || ledger.path("version").asInt() != 1
                     || !today.equals(ledger.path("day").asString()) || ledger.path("limitUsd").asDouble() != 1
                     || ledger.path("blocked").asBoolean() || ledger.get("pendingReservationUsd") == null
@@ -147,6 +148,12 @@ class SpringAiOpenAiSuggestionProviderLiveExperiment {
                     || ledger.get("pendingReservationUsd").asDouble() < 0.009004
                     || ledger.path("usedEstimatedUsd").asDouble() + ledger.path("heldEstimatedUsd").asDouble()
                             + ledger.get("pendingReservationUsd").asDouble() > 1) {
+                throw new IllegalArgumentException();
+            }
+            if (priorCostUnconfirmed && (!"true".equals(System.getenv("HELPDESK_AI_PRIOR_COST_UNCONFIRMED"))
+                    || ledger.get("priorEstimatedUsd") == null || !ledger.get("priorEstimatedUsd").isNull()
+                    || !"TRACKED_RUNNER_CALLS_ONLY".equals(ledger.path("budgetScope").asString())
+                    || ledger.path("reservationsMade").asInt() != 1)) {
                 throw new IllegalArgumentException();
             }
         } catch (Exception exception) {

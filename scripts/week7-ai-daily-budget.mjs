@@ -17,6 +17,12 @@ export function createDailyLedger(day, knownPriorUsd, limitUsd = 1) {
         pendingReservationUsd: null, reservationsMade: 0, blocked: false, stopReason: null };
 }
 
+// Explicit one-call exception: track this runner, without inventing earlier spending.
+export function createUnconfirmedPriorLedger(day, limitUsd = 1) {
+    return { ...createDailyLedger(day, 0, limitUsd), priorCostUnconfirmed: true,
+        priorEstimatedUsd: null, budgetScope: "TRACKED_RUNNER_CALLS_ONLY" };
+}
+
 function validateLedger(ledger, day, limitUsd) {
     if (!ledger || ledger.version !== 1 || ledger.day !== day || ledger.limitUsd !== limitUsd
         || ![ledger.usedEstimatedUsd, ledger.heldEstimatedUsd].every(value => Number.isFinite(value) && value >= 0)
@@ -27,11 +33,19 @@ function validateLedger(ledger, day, limitUsd) {
         || ![null, "UNKNOWN_COST", "COST_ESTIMATE_EXCEEDED"].includes(ledger.stopReason)) {
         throw new Error("DAILY_LEDGER_INVALID");
     }
+    if (ledger.priorCostUnconfirmed !== undefined
+        && (ledger.priorCostUnconfirmed !== true || ledger.priorEstimatedUsd !== null
+            || ledger.budgetScope !== "TRACKED_RUNNER_CALLS_ONLY" || ledger.reservationsMade > 1)) {
+        throw new Error("DAILY_LEDGER_INVALID");
+    }
 }
 
 export function reserveDailyCall(ledger, reservationUsd) {
     validateLedger(ledger, ledger.day, ledger.limitUsd);
     if (ledger.blocked || ledger.pendingReservationUsd !== null) throw new Error("BUDGET_RECONCILIATION_REQUIRED");
+    if (ledger.priorCostUnconfirmed && ledger.reservationsMade >= 1) {
+        throw new Error("UNCONFIRMED_PRIOR_SINGLE_CALL_ALREADY_RESERVED");
+    }
     if (!Number.isFinite(reservationUsd) || reservationUsd <= 0 || ledger.reservationsMade >= MAX_DAILY_CALLS
         || ledger.usedEstimatedUsd + ledger.heldEstimatedUsd + reservationUsd > ledger.limitUsd) {
         throw new Error("DAILY_CALL_OR_BUDGET_LIMIT_EXCEEDED");
@@ -55,9 +69,14 @@ export function settleDailyCall(ledger, estimatedUsageUsd) {
 }
 
 // Only this experimental runner's calls share the ledger. This is not an account-wide billing limit.
-export async function withDailyLedger({ repositoryRoot, day, limitUsd = 1, knownPriorUsd }, callback) {
+export async function withDailyLedger({ repositoryRoot, day, limitUsd = 1, knownPriorUsd,
+    proceedWithUnknownPrior = false }, callback) {
     if (!validDay(day) || !Number.isFinite(limitUsd) || limitUsd <= 0 || limitUsd > 1) {
         throw new Error("KNOWN_PRIOR_COST_AND_VALID_BUDGET_REQUIRED");
+    }
+    if (typeof proceedWithUnknownPrior !== "boolean"
+        || proceedWithUnknownPrior && knownPriorUsd !== undefined) {
+        throw new Error("INVALID_PRIOR_COST_MODE");
     }
     const directory = resolve(repositoryRoot, "local", "ai-experiments");
     const file = join(directory, `${day}-budget.json`);
@@ -72,9 +91,14 @@ export async function withDailyLedger({ repositoryRoot, day, limitUsd = 1, known
     try {
         const present = existsSync(file);
         if (present && knownPriorUsd !== undefined) throw new Error("PRIOR_COST_ONLY_ON_NEW_LEDGER");
-        let ledger = present ? JSON.parse(readFileSync(file, "utf8")) : createDailyLedger(day, knownPriorUsd, limitUsd);
+        let ledger = present ? JSON.parse(readFileSync(file, "utf8"))
+            : proceedWithUnknownPrior ? createUnconfirmedPriorLedger(day, limitUsd)
+                : createDailyLedger(day, knownPriorUsd, limitUsd);
         validateLedger(ledger, day, limitUsd);
         if (ledger.blocked || ledger.pendingReservationUsd !== null) throw new Error("BUDGET_RECONCILIATION_REQUIRED");
+        if (ledger.priorCostUnconfirmed && !proceedWithUnknownPrior) {
+            throw new Error("UNCONFIRMED_PRIOR_SINGLE_CALL_APPROVAL_REQUIRED");
+        }
         const persist = value => {
             validateLedger(value, day, limitUsd);
             const temporaryFile = `${file}.tmp`;

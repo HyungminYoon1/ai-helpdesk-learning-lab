@@ -53,38 +53,40 @@ export function readSafeJavaEvidence(stdout) {
     return evidence;
 }
 
-function scopedChildEnvironment(apiKey, day) {
+function scopedChildEnvironment(apiKey, day, priorCostUnconfirmed) {
     const environment = {};
     for (const name of ["PATH", "JAVA_HOME", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]) {
         if (process.env[name]) environment[name] = process.env[name];
     }
     // The generic OPENAI_API_KEY, other projects' credentials and custom Maven options are excluded.
     return { ...environment, HELPDESK_OPENAI_API_KEY: apiKey,
-        HELPDESK_AI_LIVE_CONFIRMED: "true", HELPDESK_AI_LIVE_DAY: day };
+        HELPDESK_AI_LIVE_CONFIRMED: "true", HELPDESK_AI_LIVE_DAY: day,
+        HELPDESK_AI_PRIOR_COST_UNCONFIRMED: String(priorCostUnconfirmed) };
 }
 
-function runJavaExperiment({ apiKey, day }) {
+function runJavaExperiment({ apiKey, day, priorCostUnconfirmed }) {
     if (process.platform !== "win32") throw new Error("WINDOWS_EXPERIMENT_RUNNER_REQUIRED");
     const modernShell = "C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe\\pwsh.exe";
     const shell = existsSync(modernShell) ? modernShell : join(process.env.SYSTEMROOT, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     // Static command: no key or user-provided text is interpolated into the command line.
     const child = spawnSync(shell, ["-NoProfile", "-NonInteractive", "-Command",
         ".\\mvnw.cmd -q '-Dtest=SpringAiOpenAiSuggestionProviderLiveExperiment' test; exit $LASTEXITCODE"], {
-        cwd: ROOT, env: scopedChildEnvironment(apiKey, day), encoding: "utf8",
+        cwd: ROOT, env: scopedChildEnvironment(apiKey, day, priorCostUnconfirmed), encoding: "utf8",
         timeout: 240000, maxBuffer: 1048576, windowsHide: true
     });
     return { ...readSafeJavaEvidence(child.stdout), javaExitSucceeded: !child.error && child.status === 0 };
 }
 
 export async function executeLiveExperiment({ repositoryRoot, day, knownPriorUsd, apiKey,
+    proceedWithUnknownPrior = false,
     runJava = runJavaExperiment, persistReport = () => {} }) {
     if (typeof apiKey !== "string" || !apiKey.trim()) throw new Error("HELPDESK_SCOPED_KEY_REQUIRED");
-    return withDailyLedger({ repositoryRoot, day, limitUsd: 1, knownPriorUsd }, async ({ ledger, persist }) => {
+    return withDailyLedger({ repositoryRoot, day, limitUsd: 1, knownPriorUsd, proceedWithUnknownPrior }, async ({ ledger, persist }) => {
         let current = reserveDailyCall(ledger, RESERVATION_USD);
         persist(current); // Must be durable before Java is allowed to call the Provider.
         let evidence;
         try {
-            evidence = await runJava({ apiKey, day });
+            evidence = await runJava({ apiKey, day, priorCostUnconfirmed: ledger.priorCostUnconfirmed === true });
         } catch {
             current = settleDailyCall(current, null);
             persist(current);
@@ -96,7 +98,12 @@ export async function executeLiveExperiment({ repositoryRoot, day, knownPriorUsd
                 ? (usage.inputTokens * 0.125 + usage.outputTokens * 0.50) / 1000000 : null;
         current = settleDailyCall(current, cost);
         persist(current);
-        const report = { ...evidence, day, priorEstimatedUsd: ledger.usedEstimatedUsd,
+        const priorCostUnconfirmed = ledger.priorCostUnconfirmed === true;
+        const report = { ...evidence, day,
+            priorEstimatedUsd: priorCostUnconfirmed ? null : ledger.usedEstimatedUsd,
+            dailyEstimateComplete: !priorCostUnconfirmed,
+            dailyEstimatedTotalUsd: priorCostUnconfirmed ? null : current.usedEstimatedUsd,
+            budgetScope: priorCostUnconfirmed ? "TRACKED_RUNNER_CALLS_ONLY" : "DECLARED_PRIOR_AND_TRACKED_CALLS",
             estimatedCostUsd: cost, dailyLedger: current,
             completed: evidence.javaExitSucceeded && evidence.outcome === "STORED"
                 && evidence.httpAttempts === 1 && evidence.reservedGenerationCount === 1
@@ -118,6 +125,7 @@ function parseArguments(args) {
         else if (flag === "--dry-run") config.dryRun = true;
         else if (flag === "--confirm-helpdesk-key") config.keyConfirmed = true;
         else if (flag === "--confirm-synthetic") config.syntheticConfirmed = true;
+        else if (flag === "--proceed-with-unknown-prior") config.proceedWithUnknownPrior = true;
         else if (["--day", "--budget-usd", "--prior-estimated-usd"].includes(flag)) {
             const value = args[++index];
             if (!value || value.startsWith("--")) throw new Error("INVALID_ARGUMENTS");
@@ -142,7 +150,7 @@ async function main() {
         if (config.day !== today) throw new Error("BUDGET_APPROVAL_DATE_MISMATCH");
         const apiKey = process.env.HELPDESK_OPENAI_API_KEY;
         const report = await executeLiveExperiment({ repositoryRoot: ROOT, day: config.day,
-            knownPriorUsd: config.knownPriorUsd, apiKey,
+            knownPriorUsd: config.knownPriorUsd, proceedWithUnknownPrior: config.proceedWithUnknownPrior, apiKey,
             persistReport: value => writeFileSync(join(ROOT, "local", "ai-experiments",
                 `${config.day}-java-provider-${Date.now()}.json`), safeReportJson(value, apiKey) + "\n", "utf8") });
         console.log(safeReportJson(report, apiKey));
@@ -152,6 +160,8 @@ async function main() {
             "LIVE_APPROVAL_FLAGS_REQUIRED", "BUDGET_APPROVAL_DATE_MISMATCH", "DAILY_LEDGER_INVALID",
             "KNOWN_PRIOR_COST_AND_VALID_BUDGET_REQUIRED", "PRIOR_COST_ONLY_ON_NEW_LEDGER", "BUDGET_RECONCILIATION_REQUIRED",
             "DAILY_CALL_OR_BUDGET_LIMIT_EXCEEDED", "DAILY_BUDGET_LOCK_UNAVAILABLE",
+            "INVALID_PRIOR_COST_MODE", "UNCONFIRMED_PRIOR_SINGLE_CALL_APPROVAL_REQUIRED",
+            "UNCONFIRMED_PRIOR_SINGLE_CALL_ALREADY_RESERVED",
             "JAVA_OUTCOME_OR_USAGE_UNKNOWN_RECONCILE_BUDGET", "WINDOWS_EXPERIMENT_RUNNER_REQUIRED"]);
         console.error(safeCodes.has(error?.message) ? error.message : "JAVA_LIVE_EXPERIMENT_NOT_STARTED_OR_STOPPED");
         process.exitCode = 1;

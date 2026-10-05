@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·단일 Job 처리와 결과 저장 — Java 272개·JavaScript 79개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 자동 Polling·Spring AI·실제 Provider의 Application 연결은 미구현
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·단일 Job 처리·Spring AI Adapter와 결과 저장 — Java 318개·JavaScript 95개 통과
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 실제 Java AI 호출·자동 Polling·새 Browser 수직 검증은 미실시
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -296,8 +296,9 @@ target/surefire-reports/
 | Week 7 HTTP 접수 연결 | 실제 PostgreSQL 자동 검증 완료 | USER·AGENT 인증 작성자, 원문·PENDING Job 저장, 본문 검증·CSRF·익명 거부, Message·Job 실패의 Rollback 등 HTTP Test 17개 통과 |
 | Job 정책·실행권·예약 기반 | 실제 PostgreSQL 자동 검증 완료 | 정책 설정 10개·V2→V3 Migration 1개·실행권 18개 Test 통과. 예약 Commit 뒤 Provider Port 호출·결과 저장은 아래 처리 Test에서 확인 |
 | Suggestion·복수 Category·Job 결과 저장 | 실제 PostgreSQL 자동 검증 완료 | 결과 Test 18개·V3→V4 Migration 1개 통과. 저장·복원·중복·이전 Attempt·부분 실패 Rollback·원문 보존 확인 |
-| 단일 Job 처리 흐름 | 실제 PostgreSQL·통제된 Provider 자동 검증 완료 | 처리 Test 17개 통과. 예약 Commit·Row Lock 해제 뒤 호출, 고정 Message의 전송용 복사본, 출력 보완 한도·결과 저장 재시도 확인. 실제 AI 호출은 0회 |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 272개·JavaScript Test 79개, ESLint 통과. 실패·오류·건너뜀 0 |
+| 단일 Job 처리 흐름 | 실제 PostgreSQL·통제된 Provider 자동 검증 완료 | 처리 Test 19개 통과. 예약 Commit·Row Lock 해제 뒤 호출, 고정 Message의 전송용 복사본, 출력 보완 한도·결과 저장 재시도·미완료 응답·일시 거절 확인. 실제 AI 호출은 0회 |
+| Spring AI Provider Adapter | 실제 HTTP·통제된 응답 자동 검증 완료 | Adapter Test 44개 통과. 직렬화 Body·단일 전송·실패 분류·안전한 Log 확인. 실제 AI 모델 호출은 별도 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 318개·JavaScript Test 95개, ESLint 통과. 실패·오류·건너뜀 0 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -456,9 +457,11 @@ node .\scripts\week7-java-provider-live.mjs --dry-run
 
 Live 실행에는 `--live --confirm-helpdesk-key --confirm-synthetic --day YYYY-MM-DD --budget-usd 1`을 명시한다. 해당 날짜의 원장이 처음 만들어지는 경우에만 `--prior-estimated-usd`로 확인한 이전 누적 비용을 추가한다. 기존 원장이 있으면 이전 비용을 다시 넣지 않는다. 날짜나 이전 비용을 임의로 채우지 않는다. $1은 하루 누적 상한이며 이번 실행만의 예산이 아니다.
 
+추가 비용 확인 없이 한 건의 실험을 진행하도록 명시적으로 요청한 경우에는 `--proceed-with-unknown-prior`를 사용한다. 확인한 이전 비용을 넣는 옵션과 함께 사용할 수 없다. 새 원장은 이전 비용과 하루 총액을 `null`·미확인으로 표시하고 이 실행기에서 확인한 사용량만 누적한다. 이전 비용을 0으로 확인했다고 기록하거나 하루 전체가 $1 이내라고 주장하지 않는다. 이 예외 원장에서는 생성 예약 한 번만 허용하며 자동 재실행·다른 실행기의 묵시적 승계를 막는다. 기존 원장의 비용·예약·보류 상태는 초기화하지 않는다.
+
 32 KiB 요청 Byte 상한·600 출력 Token을 사용한 보수적 1회 예약은 $0.009004다. 응답 Token 수와 반환 Model·Service Tier가 확인되면 사용량 추정치로 정산한다. 사용량·실행 결과가 불명확하면 원장을 잠정 보류하고 추가 호출을 막는다. 이 원장은 실행기 밖의 호출이나 계정의 실제 청구를 자동 수집하지 않는다.
 
-출력은 HTTP 시도 횟수·Status·사용량, 예약 횟수·원문 보존·제안 Row 수·Job 완료 여부만 포함한다. Prompt·요약·Credential·Cookie는 Log에 출력하지 않는다. 실행기 Unit Test 9개는 가짜 Java 실행 결과로 예산과 판정 경계를 확인하며 실제 AI Test를 대신하지 않는다. 실제 Java 호출 결과는 실행 후 별도로 기록한다. Browser E2E·자동 Worker·내용 수동 채점은 이 한 건 실험의 범위가 아니다.
+출력은 HTTP 시도 횟수·Status·사용량, 예약 횟수·원문 보존·제안 Row 수·Job 완료 여부와 비용 집계 범위만 포함한다. Prompt·요약·Credential·Cookie는 Log에 출력하지 않는다. 실행기 Unit Test 16개는 가짜 Java 실행 결과로 예산과 판정 경계를 확인하며 실제 AI Test를 대신하지 않는다. 실제 Java 호출 결과는 실행 후 별도로 기록한다. Browser E2E·자동 Worker·내용 수동 채점은 이 한 건 실험의 범위가 아니다.
 
 ## 현재 Application 비범위
 

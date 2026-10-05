@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { livePlan, readSafeJavaEvidence, executeLiveExperiment, RESERVATION_USD } from "../../../scripts/week7-java-provider-live.mjs";
+import { withDailyLedger } from "../../../scripts/week7-ai-daily-budget.mjs";
 
 const DAY = "2026-10-06";
 const PREFIX = "HELPDESK_JAVA_LIVE_EVIDENCE ";
@@ -98,4 +99,89 @@ test("no database row or failed Java process is presented as a completed live fl
             apiKey: "synthetic-test-only-credential", runJava: () => fixture(extra) });
         assert.equal(report.completed, false);
     }
+});
+
+test("explicit continuation keeps earlier cost unknown while reserving one tracked call", async () => {
+    const repositoryRoot = root();
+    const report = await executeLiveExperiment({ repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential", runJava: ({ priorCostUnconfirmed }) => {
+            assert.equal(priorCostUnconfirmed, true);
+            const ledger = JSON.parse(readFileSync(ledgerPath(repositoryRoot), "utf8"));
+            assert.equal(ledger.priorEstimatedUsd, null);
+            assert.equal(ledger.priorCostUnconfirmed, true);
+            assert.equal(ledger.budgetScope, "TRACKED_RUNNER_CALLS_ONLY");
+            assert.equal(ledger.pendingReservationUsd, RESERVATION_USD);
+            assert.equal(ledger.reservationsMade, 1);
+            return fixture();
+        } });
+    assert.equal(report.completed, true);
+    assert.equal(report.priorEstimatedUsd, null);
+    assert.equal(report.dailyEstimatedTotalUsd, null);
+    assert.equal(report.dailyEstimateComplete, false);
+    assert.equal(report.dailyLedger.usedEstimatedUsd, report.estimatedCostUsd);
+});
+
+test("unknown earlier cost is not silently accepted without the continuation flag", async () => {
+    let launches = 0;
+    await assert.rejects(executeLiveExperiment({ repositoryRoot: root(), day: DAY,
+        apiKey: "synthetic-test-only-credential", runJava: () => { launches += 1; return fixture(); } }),
+    /KNOWN_PRIOR_COST/);
+    assert.equal(launches, 0);
+});
+
+test("unconfirmed earlier cost does not permit another call or reset the ledger", async () => {
+    const repositoryRoot = root();
+    let launches = 0;
+    const args = { repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential", runJava: () => { launches += 1; return fixture(); } };
+    await executeLiveExperiment(args);
+    const before = readFileSync(ledgerPath(repositoryRoot), "utf8");
+    await assert.rejects(executeLiveExperiment(args), /SINGLE_CALL_ALREADY_RESERVED/);
+    assert.equal(launches, 1);
+    assert.equal(readFileSync(ledgerPath(repositoryRoot), "utf8"), before);
+});
+
+test("other runners cannot adopt the unconfirmed-prior exception implicitly", async () => {
+    const repositoryRoot = root();
+    await executeLiveExperiment({ repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential", runJava: () => fixture() });
+    let callbacks = 0;
+    await assert.rejects(withDailyLedger({ repositoryRoot, day: DAY }, () => { callbacks += 1; }),
+        /SINGLE_CALL_APPROVAL_REQUIRED/);
+    assert.equal(callbacks, 0);
+});
+
+test("continuation never replaces confirmed earlier spending or an existing ledger", async () => {
+    const repositoryRoot = root();
+    await withDailyLedger({ repositoryRoot, day: DAY, knownPriorUsd: 0.5 }, () => {});
+    const report = await executeLiveExperiment({ repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential", runJava: ({ priorCostUnconfirmed }) => {
+            assert.equal(priorCostUnconfirmed, false);
+            return fixture();
+        } });
+    assert.equal(report.priorEstimatedUsd, 0.5);
+    assert.equal(report.dailyEstimateComplete, true);
+    assert.equal(report.dailyEstimatedTotalUsd, 0.500175);
+});
+
+test("confirmed and unconfirmed prior modes cannot be combined", async () => {
+    let launches = 0;
+    await assert.rejects(executeLiveExperiment({ repositoryRoot: root(), day: DAY, knownPriorUsd: 0,
+        proceedWithUnknownPrior: true, apiKey: "synthetic-test-only-credential",
+        runJava: () => { launches += 1; return fixture(); } }), /INVALID_PRIOR_COST_MODE/);
+    assert.equal(launches, 0);
+});
+
+test("an unconfirmed-prior call with unknown outcome is still held without automatic retry", async () => {
+    const repositoryRoot = root();
+    let launches = 0;
+    const args = { repositoryRoot, day: DAY, proceedWithUnknownPrior: true,
+        apiKey: "synthetic-test-only-credential", runJava: () => { launches += 1; throw new Error("PRIVATE"); } };
+    await assert.rejects(executeLiveExperiment(args), /OUTCOME_OR_USAGE_UNKNOWN/);
+    const ledger = JSON.parse(readFileSync(ledgerPath(repositoryRoot), "utf8"));
+    assert.equal(ledger.blocked, true);
+    assert.equal(ledger.heldEstimatedUsd, RESERVATION_USD);
+    assert.equal(ledger.priorEstimatedUsd, null);
+    await assert.rejects(executeLiveExperiment(args), /RECONCILIATION/);
+    assert.equal(launches, 1);
 });
