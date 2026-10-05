@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 수직 Slice 유지·Week 7 접수 원자성·출력 계약 검증 — Java 140개·JavaScript 56개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험과 PostgreSQL 접수 Service. Message 입력의 HTTP 연결·Worker·Spring AI·Suggestion 저장은 미구현
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·단일 Job 처리와 결과 저장 — Java 272개·JavaScript 79개 통과
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 자동 Polling·Spring AI·실제 Provider의 Application 연결은 미구현
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -293,7 +293,11 @@ target/surefire-reports/
 | Week 7 접수 원자성 | 실제 PostgreSQL 자동 검증 완료 | 정상 Ticket·Message·Job 각 1건, Message·Job INSERT 실패 시 앞선 성공 INSERT까지 Rollback. 새 Integration Test 15개 통과 |
 | V1에서 V2로 Migration | 실제 PostgreSQL 자동 검증 완료 | V1 상태에서 만든 기존 Ticket의 ID·제목·Status를 V2 적용 후 유지하며 Message·Job은 임의 생성하지 않음 |
 | AI 출력 계약 검증 | Java Unit Test 완료 | 정상·판단 보류 형식, 누락·추가·중복 Field, Type·Enum·공백·Unicode 길이 경계 등 64개 통과. 내용 사실성·Provider 실패·DB 저장은 별도 |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-03 Java Clean Test 140개, 이후 Prompt 보완 후 JavaScript Test 56개 통과. 실패·오류·건너뜀 0 |
+| Week 7 HTTP 접수 연결 | 실제 PostgreSQL 자동 검증 완료 | USER·AGENT 인증 작성자, 원문·PENDING Job 저장, 본문 검증·CSRF·익명 거부, Message·Job 실패의 Rollback 등 HTTP Test 17개 통과 |
+| Job 정책·실행권·예약 기반 | 실제 PostgreSQL 자동 검증 완료 | 정책 설정 10개·V2→V3 Migration 1개·실행권 18개 Test 통과. 예약 Commit 뒤 Provider Port 호출·결과 저장은 아래 처리 Test에서 확인 |
+| Suggestion·복수 Category·Job 결과 저장 | 실제 PostgreSQL 자동 검증 완료 | 결과 Test 18개·V3→V4 Migration 1개 통과. 저장·복원·중복·이전 Attempt·부분 실패 Rollback·원문 보존 확인 |
+| 단일 Job 처리 흐름 | 실제 PostgreSQL·통제된 Provider 자동 검증 완료 | 처리 Test 17개 통과. 예약 Commit·Row Lock 해제 뒤 호출, 고정 Message의 전송용 복사본, 출력 보완 한도·결과 저장 재시도 확인. 실제 AI 호출은 0회 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 272개·JavaScript Test 79개, ESLint 통과. 실패·오류·건너뜀 0 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -301,7 +305,7 @@ target/surefire-reports/
 | Validation·오류 응답 | 완료 | `@NotBlank`·`@Valid`, `TicketNotFoundException`, `ResponseEntityExceptionHandler`와 `ProblemDetail` 적용 |
 | Filter·Interceptor | 최소 실험 완료 | Request ID·Chain 진행, 요청별 시작 시각과 `preHandle()` 반환을 단위 Test로 확인하고 전체 Context Test에서 등록·404 완료 로그를 검증 |
 | 실제 HTTP `curl.exe` Trace | 완료 | 정상 `201`·`200`, 공백 제목·잘못된 JSON·ID Type 불일치 `400`, 부재 `404`와 `application/problem+json` Body 확인 |
-| 대표 `500` 계약 | Test 완료 | Repository 수동 Test Double의 통제된 실패를 안전한 `500 ProblemDetail`로 변환하고 내부 Exception은 Server Log에만 보존 |
+| 대표 `500` 계약 | Test 완료 | 안전한 `500 ProblemDetail`과 고정 오류 코드·예외 종류만 기록. 원문 Exception·Cause의 실패 Row는 Log로 출력하지 않음 |
 
 2026-09-24까지의 53개 결과는 기존 HTTP·Security 계약, PostgreSQL 생성·조회·Constraint·Rollback, 같은 JVM의 Spring Context 재생성과 Server-side CSRF 전달의 근거였다. 2026-09-29에는 Local 실제 Browser E2E와 새 Java Process의 기존 PostgreSQL Row 조회를 별도로 확인했다. 동시성, Database Container·Volume 재시작이나 외부 운영 Database까지 검증한 것은 아니다.
 
@@ -347,9 +351,15 @@ node --test src/test/js/week7-tool-calling-spike.test.mjs
 
 `postgres` Profile의 [TicketReceiptApplicationService](./src/main/java/lab/helpdesk/ticket/application/TicketReceiptApplicationService.java)는 Ticket·최초 Message·`PENDING` Job을 하나의 `@Transactional` 호출에서 저장한다. [접수 Integration Test](./src/test/java/lab/helpdesk/ticket/application/TicketReceiptIntegrationTest.java)는 실제 JDBC 저장의 성공 횟수를 기록하고, 다음 INSERT의 DB Constraint 실패 뒤 세 Table의 최종 Row 수를 확인한다. [Migration Test](./src/test/java/lab/helpdesk/ticket/repository/TicketReceiptMigrationIntegrationTest.java)는 V1에 기존 Row를 만든 다음 V2를 적용한다. 두 Test의 15개 Case와 전체 Java 76개, 기존 JavaScript 54개가 통과했다.
 
-이 단계는 Service와 Database의 접수 저장 실습이다. 기존 `POST /api/tickets`는 아직 제목만 받으며 새 Service를 호출하지 않는다. V2의 Job 상태는 `PENDING`만 허용하고 Worker·Attempt·호출 예약·Suggestion Table은 후속 단계다. 본문 길이 상한과 HTTP Field 이름도 이번 단계에서 확정하지 않았다.
+첫 Service 실습 이후 10/5에는 `postgres`의 `POST /api/tickets`를 접수 Service에 연결했다. 새 요청은 `title`·`body`를 받으며 앞뒤 Java `String.strip()` 공백을 제외한 본문의 상한은 2,000 Unicode Code Point다. DTO와 Domain에서 같은 길이 규칙을 적용하고, 통과한 원문은 공백까지 그대로 저장한다. V2까지의 Job 상태는 `PENDING`만 허용했고 이후 V3에서 실행권·예약, V4에서 Suggestion 저장을 추가했다. 자동 Polling은 후속 단계다.
 
-Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User ID나 권한 판정 근거가 아니다. Service는 작성자를 매개변수로 받고 Test는 합성 이름을 전달한다. 실제 HTTP 연결에서 인증 결과만 전달하는 검증은 아직 남아 있다. 본문은 원문 그대로 저장하며 Application의 `isBlank()`와 DB의 `btrim()` 검사는 서로 다른 범위의 검증이다.
+Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User ID나 권한 판정 근거가 아니다. HTTP에서는 `Authentication.getName()`만 Service에 전달한다. 서로 다른 USER·AGENT로 실제 Form Login을 수행한 MockMvc Session을 재사용해 작성자를 검증하고, Browser의 다른 작성자·Role 주장이 저장 작성자를 바꾸지 않는 것을 확인했다. 인증 계정은 In-memory이고 Ticket·Message·Job은 PostgreSQL에 저장된다.
+
+생성 Controller는 Profile별로 분리했다. `InMemoryTicketCreationController`는 기존 제목 전용 학습 경로를 보존하며 Message·Job을 저장하지 않는다. `TicketReceiptController`는 PostgreSQL 접수를 수행하고 `TicketController`는 두 모드의 공통 조회를 담당한다. 저장 Profile은 `in-memory` 또는 `postgres` 중 하나를 선택한다. 새 UI는 본문을 함께 보내므로 접수 검증은 `postgres,local-browser` 실행에서 진행한다. JavaScript 함수의 본문 생략 호출은 이전 In-memory 실험에만 사용한다.
+
+[HTTP 접수 Integration Test](./src/test/java/lab/helpdesk/ticket/web/TicketReceiptHttpIntegrationTest.java)는 실제 Security Filter Chain·MVC·Service·JDBC·PostgreSQL을 사용한다. 본문 검증의 `400`과 CSRF의 `403`은 Service 미호출·세 Table의 Row 0건으로 확인하며, Message·Job 저장 실패의 `500`은 접수 전체 Rollback과 안전한 Log를 확인한다. Testcontainer 연결을 확인한 뒤에만 Test DB를 비운다. 새 Test 17개, Domain 길이 Test 4개를 포함한 전체 Java 207개·JavaScript 79개와 ESLint가 통과했다. 변경한 본문 UI의 실제 Browser E2E와 AI 호출은 이번 검증에 포함하지 않았다.
+
+`201`의 응답 Body는 기존 `id`·`title`·`status`를 유지하며 AI 완료를 뜻하지 않는다. 기존 DB `btrim()` CHECK와 Application의 Unicode 공백·길이 검증은 같지 않다. 이번에 본문 길이 CHECK Migration이나 전체 HTTP 요청 Byte 상한을 추가하지는 않았다.
 
 ```powershell
 .\mvnw.cmd "-Dtest=TicketReceiptIntegrationTest,TicketReceiptMigrationIntegrationTest" test
@@ -362,10 +372,58 @@ Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User I
 
 요약 상한은 생성자 인자로 받는다. [Unit Test](./src/test/java/lab/helpdesk/ai/validation/AiSuggestionOutputValidatorTest.java)의 200자는 초안의 실험값이며 Runtime 기본값을 확정한 것은 아니다. 양끝 공백을 제외한 Unicode Code Point 수를 검사하되 요약 문자열을 바꾸거나 잘라내지 않는다. 중복 JSON Property와 뒤에 붙은 추가 JSON도 거부하며, 오류에는 입력·Parser 원문 대신 고정 코드만 남긴다.
 
-검증기는 순수 Java 객체이며 Spring Bean·Provider·Worker·DB 저장에 아직 연결하지 않았다. 내용이 틀린 요약도 구조를 통과할 수 있고, HTML처럼 생긴 문자열은 Text로 보존한다. Provider 거부를 `ABSTAIN`으로 변환하거나 구조 통과만으로 저장·Tool 실행·Ticket 상태 변경을 허용하지 않는다. 새 Unit Test 64개와 전체 Java 140개·JavaScript 54개가 통과했다.
+검증기는 순수 Java 객체다. 결과 저장 Service는 이 검증기가 반환한 객체를 받으며 현재 Attempt와 상태를 별도로 확인한다. Provider·Worker의 Runtime 연결은 아직 없다. 내용이 틀린 요약도 구조를 통과할 수 있고, HTML처럼 생긴 문자열은 Text로 보존한다. Provider 거부를 `ABSTAIN`으로 변환하거나 구조 통과만으로 Tool 실행·Ticket 상태 변경을 허용하지 않는다. 첫 구현의 새 Unit Test 64개와 전체 Java 140개·JavaScript 54개가 통과했다.
 
 ```powershell
 .\mvnw.cmd "-Dtest=AiSuggestionOutputValidatorTest" test
+```
+
+### Job 정책 Snapshot·실행권·호출 예약
+
+`postgres`의 [AiJobPolicy](./src/main/java/lab/helpdesk/ai/job/AiJobPolicy.java)는 `helpdesk.ai.job` 설정을 새 Job에 저장한다. 기본값은 전체 생성 3회·추가 보완 1회, 요청 대기 60초·Attempt 실행권 120초·Backoff 5초·전체 처리 300초다. 전체 기한은 최초 Claim부터 계산하고 Queue 대기는 제외한다. 기존 Job은 설정 변경·재예약 후에도 원래 정책·누적 횟수·마감 시각을 유지한다.
+
+[V3 Migration](./src/main/resources/db/migration/V3__add_job_policy_and_execution_reservations.sql)은 V1·V2를 수정하지 않고 Job Column과 예약 원장을 추가한다. 기존 V2 Job은 기본 정책으로 이행하고 출처를 `V2_MIGRATION`으로 표시한다. Application의 새 등록은 `APPLICATION`으로 표시한다. 예약 원장에는 Job·Attempt·요청 종류·예약 시각만 저장하며 문의 본문·Prompt·Credential을 복사하지 않는다.
+
+[AiSuggestionJobClaimService](./src/main/java/lab/helpdesk/ai/job/AiSuggestionJobClaimService.java)는 `REQUIRES_NEW` Transaction에서 실행권 변경과 원장 INSERT를 함께 Commit한 뒤 반환한다. `PENDING` 조회는 `FOR UPDATE SKIP LOCKED`를 사용한다. `RUNNING`의 기한 만료만으로 자동 재호출하지 않으며 가능한 기존 결과 확인 뒤 사용할 복구 경로를 분리했다. 실패 기록·출력 보완은 현재 Attempt만 반영한다.
+
+[실행권 Integration Test](./src/test/java/lab/helpdesk/ai/job/AiSuggestionJobExecutionIntegrationTest.java)는 경쟁 Claim·복구, 잠긴 Job 건너뛰기, 원장 실패 Rollback, 전체·보완 한도, 처리 기한과 정책 복원을 실제 PostgreSQL에서 확인한다. 새 Repository 객체의 복원 Test는 Application·JVM 재시작 근거와 구분한다. 설정 10개·Migration 1개·실행권 18개와 전체 Java 236개·JavaScript 79개가 통과했다.
+
+이 단계는 Worker의 실행권 기반이다. V3 검증 뒤 이어서 아래 V4 결과 저장을 추가했다. 자동 Polling·Provider 조회와 호출·실제 요청 Timeout은 아직 연결하지 않았고 Spring AI 의존성도 추가하지 않았다. 실행권 Test의 유료 API 호출은 0회다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiJobPolicyTest,AiJobPolicyMigrationIntegrationTest,AiSuggestionJobExecutionIntegrationTest" test
+```
+
+### 제안·복수 Category와 Job 결과 저장
+
+[V4 Migration](./src/main/resources/db/migration/V4__add_suggestions_and_result_completion.sql)은 기존 Migration을 바꾸지 않고 `ticket_suggestions`와 `ticket_suggestion_categories`를 추가한다. 같은 Job의 제안은 `UNIQUE (job_id)`, 같은 제안의 분류 중복은 `(suggestion_id, category)` 복합 Primary Key로 막는다. Foreign Key와 허용값·공백 CHECK를 적용하며 원문이나 전체 Provider 응답을 복사하지 않는다.
+
+[AiSuggestionResultService](./src/main/java/lab/helpdesk/ai/suggestion/AiSuggestionResultService.java)는 검증된 객체와 Claim을 받아 현재 `RUNNING`·Attempt·전체 처리 기한을 Row Lock 안에서 확인한다. `SUGGEST`의 부모 제안·모든 분류·`SUCCEEDED`를 한 결과 Transaction으로 저장한다. 유효한 `ABSTAIN`이면 제안을 만들지 않고 `ABSTAINED`를 기록한다. 이미 완료한 Job이나 이전 Attempt는 변경 없이 `NOT_CURRENT`를 반환한다.
+
+중간 저장이나 완료 UPDATE가 실패하면 결과 변경만 Rollback하고 접수 원문·호출 예약은 유지한다. 이전 `RUNNING`이 남으며 `FAILED`는 자동 기록하지 않는다. DB 예외는 실패 Row와 Cause를 복사하지 않는 고정 코드로 전달한다. Commit 여부가 불명확할 때 사용할 내부 결과 조회는 읽기 전용 `REPEATABLE_READ`로 여러 SELECT의 Snapshot을 맞춘다. HTTP 조회 API·자동 재시도·AI 호출은 추가하지 않았다.
+
+[결과 Integration Test](./src/test/java/lab/helpdesk/ai/suggestion/AiSuggestionResultIntegrationTest.java) 18개와 [V3→V4 Migration Test](./src/test/java/lab/helpdesk/ai/suggestion/AiSuggestionResultMigrationIntegrationTest.java) 1개가 통과했다. 실제 PostgreSQL에서 복수 분류·불확실한 값·Text 복원, 늦은 이전 Attempt·반복·동시 완료, Category·상태 저장 실패와 Rollback을 확인했다. 전체 Java Clean Test 255개·JavaScript 79개와 ESLint도 통과했다. Test의 JSON은 합성 입력이며 이 결과를 실제 Provider·Worker·Browser 연결로 해석하지 않는다.
+
+요약 상한 200은 이 Test의 검증기 인자다. Runtime 기본값은 아직 확정하지 않았고 DB는 TEXT·공백 CHECK를 사용한다. 빈 분류 목록은 Java 검증기가 거부하고 결과 Service가 전체 저장을 묶는다. 일반 Row CHECK만으로 자식 Row 최소 개수나 Job과 Suggestion의 상태 일치를 강제하지 않으므로 직접 SQL Writer를 추가할 때는 이 경계를 검토한다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionResultIntegrationTest,AiSuggestionResultMigrationIntegrationTest" test
+```
+
+### 예약부터 결과 저장까지의 단일 Job 처리
+
+[AiSuggestionJobProcessor](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionJobProcessor.java)는 한 Job의 Claim·입력 조회·전송용 개인정보 처리·Provider 호출·출력 검증·결과 저장을 연결한다. Claim의 예약 Transaction이 Commit된 다음 Provider Port를 호출하며, 호출 대기 중 Job Row Lock이나 바깥 Transaction을 유지하지 않는다. 자동 실행 Bean이나 Scheduler는 아직 등록하지 않았다.
+
+[입력 Repository](./src/main/java/lab/helpdesk/ai/input/JdbcAiSuggestionInputRepository.java)는 Job에 고정한 `input_message_id`의 원문을 읽는다. 새 Message가 추가돼도 처리 대상을 바꾸지 않는다. DB 원문은 유지하고 [개인정보 Guard](./src/main/java/lab/helpdesk/ai/input/AiInputPrivacyGuard.java)가 만든 전송용 복사본만 Provider Port에 전달한다. 전송 전에 현재 Attempt·예약·실행권·전체 기한을 다시 확인한다.
+
+필수 Field만 누락된 응답은 기존 보완 한도와 Backoff에 따라 다음 예약을 준비한다. 추가 Field·잘못된 JSON·다른 계약 위반과 Provider 거부·설정 오류는 구분해 실패를 기록한다. 외부 처리 결과가 불명확하면 현재 `RUNNING`을 유지하며 곧바로 재호출하지 않는다.
+
+결과 저장 실패 시 같은 Job의 Commit 결과를 먼저 조회한다. 아직 저장되지 않았다면 검증된 객체를 유지하고 `storeValidatedResult`로 DB 저장만 다시 시도할 수 있다. 이 경로에서는 Provider 호출과 예약 횟수를 추가하지 않는다. 결과 저장이나 Provider 실패가 이미 접수한 Ticket·Message를 되돌리지 않는다.
+
+[처리 Integration Test](./src/test/java/lab/helpdesk/ai/processing/AiSuggestionJobProcessorIntegrationTest.java) 17개는 실제 PostgreSQL과 통제된 Provider 응답을 사용한다. 예약의 다른 Connection 조회·별도 Transaction의 `FOR UPDATE NOWAIT`, 이전 Attempt 거부·보완 상한, Category 저장 실패와 저장 전용 재시도를 확인했다. 이 Test의 유료 API 호출은 0회이며 독립 Node 실험의 실제 AI 결과와 구분한다. 전체 Java 272개·JavaScript 79개와 ESLint가 통과했다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionJobProcessorIntegrationTest" test
 ```
 
 ## 현재 Application 비범위
