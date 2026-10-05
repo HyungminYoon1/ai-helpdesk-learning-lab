@@ -33,7 +33,9 @@ public final class AiSuggestionOutputValidator {
             throw invalid(Violation.ROOT_SHAPE);
         }
         if (root.size() != FIELDS.size() || !root.propertyNames().containsAll(FIELDS)) {
-            throw invalid(Violation.FIELD_SET);
+            boolean missingOnly = FIELDS.containsAll(root.propertyNames())
+                    && !root.propertyNames().containsAll(FIELDS);
+            throw new InvalidOutputException(Violation.FIELD_SET, missingOnly);
         }
 
         Decision decision = readEnum(root.get("decision"), Decision.class, Violation.DECISION);
@@ -146,14 +148,24 @@ public final class AiSuggestionOutputValidator {
     public static final class InvalidOutputException extends IllegalArgumentException {
 
         private final Violation violation;
+        private final boolean repairableRequiredFieldMissing;
 
         private InvalidOutputException(Violation violation) {
+            this(violation, false);
+        }
+
+        private InvalidOutputException(Violation violation, boolean repairableRequiredFieldMissing) {
             super("AI_OUTPUT_" + violation.name());
             this.violation = violation;
+            this.repairableRequiredFieldMissing = repairableRequiredFieldMissing;
         }
 
         public Violation violation() {
             return violation;
+        }
+
+        public boolean repairableRequiredFieldMissing() {
+            return repairableRequiredFieldMissing;
         }
     }
 
