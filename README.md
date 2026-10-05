@@ -442,6 +442,24 @@ Model은 `gpt-6-luna`, reasoning은 `none`, 출력 상한은 600 Token, `store=f
 .\mvnw.cmd "-Dtest=SpringAiOpenAiSuggestionProviderTest,AiSuggestionJobProcessorIntegrationTest" test
 ```
 
+### 실제 Java AI 호출과 PostgreSQL의 선택 실행
+
+[실행기](./scripts/week7-java-provider-live.mjs)와 [Live Experiment](./src/test/java/lab/helpdesk/ai/provider/SpringAiOpenAiSuggestionProviderLiveExperiment.java)는 합성 문의 한 건만 처리한다. 실행기는 기존 Node 실험과 같은 날짜별 비용 원장을 사용하고 Java 실행 전에 한 번의 비용을 예약한다. 실험은 새 PostgreSQL Testcontainer에서 접수 Service·예약·실제 Spring AI 호출·검증·결과 저장을 연결한다. 기존 로컬 DB에 정리 SQL을 실행하지 않는다.
+
+Live Experiment는 일반 `mvn test`의 Class 이름 규칙에서 제외한다. Helpdesk 전용 키·당일 확인·파일 원장의 예약과 Lock이 있어야 호출하며, 자식 Process에 일반 `OPENAI_API_KEY`를 넘기지 않는다. 전용 PowerShell에 설정한 키를 명시적으로 `HELPDESK_OPENAI_API_KEY`로 전달한다. 전역 환경 변수는 수정하지 않는다. 키 값은 출력하지 않는다.
+
+```powershell
+# Helpdesk 키가 있는 전용 창에서만 실행한다. 다른 프로젝트 창에서 실행하지 않는다.
+$env:HELPDESK_OPENAI_API_KEY = $env:OPENAI_API_KEY
+node .\scripts\week7-java-provider-live.mjs --dry-run
+```
+
+Live 실행에는 `--live --confirm-helpdesk-key --confirm-synthetic --day YYYY-MM-DD --budget-usd 1`을 명시한다. 해당 날짜의 원장이 처음 만들어지는 경우에만 `--prior-estimated-usd`로 확인한 이전 누적 비용을 추가한다. 기존 원장이 있으면 이전 비용을 다시 넣지 않는다. 날짜나 이전 비용을 임의로 채우지 않는다. $1은 하루 누적 상한이며 이번 실행만의 예산이 아니다.
+
+32 KiB 요청 Byte 상한·600 출력 Token을 사용한 보수적 1회 예약은 $0.009004다. 응답 Token 수와 반환 Model·Service Tier가 확인되면 사용량 추정치로 정산한다. 사용량·실행 결과가 불명확하면 원장을 잠정 보류하고 추가 호출을 막는다. 이 원장은 실행기 밖의 호출이나 계정의 실제 청구를 자동 수집하지 않는다.
+
+출력은 HTTP 시도 횟수·Status·사용량, 예약 횟수·원문 보존·제안 Row 수·Job 완료 여부만 포함한다. Prompt·요약·Credential·Cookie는 Log에 출력하지 않는다. 실행기 Unit Test 9개는 가짜 Java 실행 결과로 예산과 판정 경계를 확인하며 실제 AI Test를 대신하지 않는다. 실제 Java 호출 결과는 실행 후 별도로 기록한다. Browser E2E·자동 Worker·내용 수동 채점은 이 한 건 실험의 범위가 아니다.
+
 ## 현재 Application 비범위
 
 - 외부 운영 Database 구성과 Backup·복구
