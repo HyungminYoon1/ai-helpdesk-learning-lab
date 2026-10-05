@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
 > 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·단일 Job 처리·Spring AI Adapter와 결과 저장 — Java 318개·JavaScript 104개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. Java Live 기동 오류 수정·실제 AI 결과는 미확인. 자동 Polling·새 Browser 수직 검증은 미실시
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 실제 Java AI→PostgreSQL 합성 문의 한 건 확인. 자동 Polling·새 Browser 수직 검증은 미실시
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -298,6 +298,7 @@ target/surefire-reports/
 | Suggestion·복수 Category·Job 결과 저장 | 실제 PostgreSQL 자동 검증 완료 | 결과 Test 18개·V3→V4 Migration 1개 통과. 저장·복원·중복·이전 Attempt·부분 실패 Rollback·원문 보존 확인 |
 | 단일 Job 처리 흐름 | 실제 PostgreSQL·통제된 Provider 자동 검증 완료 | 처리 Test 19개 통과. 예약 Commit·Row Lock 해제 뒤 호출, 고정 Message의 전송용 복사본, 출력 보완 한도·결과 저장 재시도·미완료 응답·일시 거절 확인. 실제 AI 호출은 0회 |
 | Spring AI Provider Adapter | 실제 HTTP·통제된 응답 자동 검증 완료 | Adapter Test 44개 통과. 직렬화 Body·단일 전송·실패 분류·안전한 Log 확인. 실제 AI 모델 호출은 별도 |
+| 실제 Java AI→PostgreSQL | 선택 Live Test 완료 | 2026-10-06 실제 HTTP 1회·`200`, 원문 보존·Job `SUCCEEDED`·Suggestion 1건·Category 1건과 별도 Live Test 1개 통과. 자동 Worker·Browser·요약 수동 평가는 별도 |
 | Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 318개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
@@ -466,7 +467,11 @@ Live 실행에는 `--live --confirm-helpdesk-key --confirm-synthetic --day YYYY-
 
 Windows 기동 오류를 수정한 뒤 사용자가 명시적으로 재실행할 때만 `--recover-launcher-once`를 함께 사용할 수 있다. 적용 대상은 이전 비용 미확인 원장의 첫 예약 한 건이 `UNKNOWN_COST`로 보류되고 진행 중 예약이 없는 경우다. 수정된 Wrapper의 사전 점검을 통과한 뒤 기존 보류 금액·횟수와 사유를 보존하고 새 예약을 한 번 추가한다. 원장 삭제·횟수 초기화·이전 비용의 0원 판정은 하지 않는다. 복구 이력은 `launcherRecovery`에 남기며 같은 복구를 반복하거나 진행 중 예약·상한 초과를 우회할 수 없다. 이는 합성 Live 실험의 수동 기동 복구이며 Runtime Job의 Provider 재시도 정책과 별개다.
 
-출력은 HTTP 시도 횟수·Status·사용량, 예약 횟수·원문 보존·제안 Row 수·Job 완료 여부와 비용 집계 범위만 포함한다. Prompt·요약·Credential·Cookie는 Log에 출력하지 않는다. 실행기 Unit Test 25개는 가짜 Java 실행 결과로 기동·예산·판정 경계를 확인하며 실제 AI Test를 대신하지 않는다. 실제 Java 호출 결과는 실행 후 별도로 기록한다. Browser E2E·자동 Worker·내용 수동 채점은 이 한 건 실험의 범위가 아니다.
+출력은 HTTP 시도 횟수·Status·사용량, 예약 횟수·원문 보존·제안 Row 수·Job 완료 여부와 비용 집계 범위만 포함한다. Prompt·요약·Credential·Cookie는 Log에 출력하지 않는다. 실행기 Unit Test 25개는 가짜 Java 실행 결과로 기동·예산·판정 경계를 확인하며 실제 AI Test를 대신하지 않는다.
+
+2026-10-06 선택 Live 실행에서 합성 문의 `SYNTHETIC_LOGIN_RECOVERY`를 처리했다. 실제 HTTP 전송은 1회·`200`, 결과는 `STORED`였으며 PostgreSQL 원문 보존·Job `SUCCEEDED`·Suggestion 1건·Category 1건을 확인했다. 별도 Live JUnit Test는 실패·오류·건너뜀 없이 한 건 통과했다. 입력 1,169·출력 54 Token과 해당 호출 추정치 `$0.000173125`를 기록했다. 이전 기동의 보류 예약은 유지하며, 이전 비용과 하루 전체 합계는 미확인이다.
+
+이 실행은 접수 Service 뒤 Processor를 직접 한 번 호출했다. Browser E2E·자동 Worker·내용 수동 채점은 별도 확인한다. 회귀 Java Test 318개와 이 유료 Live Test 한 건을 구분해 기록한다.
 
 ## 현재 Application 비범위
 
