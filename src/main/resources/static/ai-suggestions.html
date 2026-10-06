@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>담당자 AI 제안 조회</title>
+    <link rel="icon" href="data:,">
+    <script type="module" src="/ai-suggestion-page.mjs"></script>
+</head>
+<body>
+<main>
+    <h1>담당자 AI 제안 조회</h1>
+    <p><a href="/login">AGENT로 로그인</a>한 뒤 조회하세요.
+        <a href="/tickets.html">Ticket 접수·조회 화면</a></p>
+    <p>postgres 모드에서 최초 문의의 AI 작업과 저장된 제안을 읽습니다.
+        조회는 AI 호출·재시도·Ticket 상태 변경을 실행하지 않습니다.</p>
+    <form id="ai-query-form" novalidate>
+        <label for="ai-ticket-id-input">Ticket ID</label>
+        <input id="ai-ticket-id-input" name="id" type="number" min="1" step="1" required>
+        <button type="submit">AI 상태·제안 조회</button>
+    </form>
+
+    <section aria-labelledby="ai-result-heading">
+        <h2 id="ai-result-heading">조회 결과</h2>
+        <p id="ai-ui-status" role="status" aria-live="polite">조회 전입니다.</p>
+        <dl id="ai-result" hidden>
+            <dt>Ticket ID</dt><dd id="ai-ticket-id"></dd>
+            <dt>AI 작업 상태</dt><dd id="ai-job-status"></dd>
+            <dt>최종 실패 코드</dt><dd id="ai-failure-code"></dd>
+        </dl>
+    </section>
+
+    <section id="ai-suggestion" aria-labelledby="ai-suggestion-heading" hidden>
+        <h2 id="ai-suggestion-heading">AI 제안 — 담당자 검토 전</h2>
+        <p>공식 답변이나 확정된 사실이 아닙니다. 원문과 대조해 검토해야 합니다.</p>
+        <dl>
+            <dt>요약</dt><dd id="ai-summary"></dd>
+            <dt>분류</dt><dd id="ai-categories"></dd>
+            <dt>우선순위</dt><dd id="ai-priority"></dd>
+            <dt>검토 상태</dt><dd id="ai-review-status"></dd>
+        </dl>
+    </section>
+</main>
+</body>
+</html>

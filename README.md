@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·저장 재시도·조건부 복구·실제 JVM 재시작·AGENT 조회 — Java 444개·JavaScript 104개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장과 AGENT 읽기 전용 조회까지의 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·조건부 복구·서로 다른 JVM Process 재시작 확인. 유료 자동 Worker·새 Browser 검증·요약 수동 평가는 후속 단계
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI — Java 449개·JavaScript 133개 통과
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장, AGENT 읽기 전용 조회와 최소 화면의 응답 분기까지의 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·조건부 복구·서로 다른 JVM Process 재시작 확인. 유료 자동 Worker·새 Browser 수직 검증·요약 수동 평가는 후속 단계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -304,7 +304,8 @@ target/surefire-reports/
 | Attempt별 결과와 조건부 RUNNING 복구 | 실제 PostgreSQL·통제된 Provider 검증 완료 | V7·결과 분류·DB 결과 확인 뒤의 조건부 Claim. 새 Test 20개, 경쟁 선점·조회 실패·원장 실패 Rollback과 새 Context의 재시도 미승인 유지 확인. 원격 Provider 조회는 미구현 |
 | Worker의 실제 JVM 종료·재시작 | 실제 PostgreSQL·통제된 Provider 검증 완료 | 새 Test 5개. 첫 Java Process 종료를 확인하고 다른 PID로 같은 DB를 연결해 PENDING·결과 미확인/불명·재시도 금지·미래 대기를 확인. 정책·누적 예약·원래 기한·원문 유지 |
 | AGENT 전용 AI 상태·제안 조회 | 실제 PostgreSQL·Security·MockMvc 검증 완료 | 새 Test 55개. 익명 401·USER 403, 최초 Message의 Job 조회, 다섯 상태·명시적 null·고정 실패 코드, 정합성/조회 오류의 안전한 500, 반복 조회의 불변과 Provider 미호출 |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 444개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
+| 담당자 최소 AI 조회 화면 | JavaScript·정적 Resource MockMvc 검증 완료 | 조회 Client·Text 표시·Page 연결의 새 Node Test 29개와 정적 파일·익명 API 차단의 MockMvc Test 5개 통과. 실제 Browser·새 유료 Worker는 별도 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 449개·JavaScript Test 133개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -571,6 +572,21 @@ Lease·다음 실행 시각은 검증한 Test DB의 해당 Row만 이동해 경�
 
 ```powershell
 .\mvnw.cmd "-Dtest=AiSuggestionQueryServiceTest,AiSuggestionQueryHttpIntegrationTest,AiSuggestionQueryProfileIntegrationTest" test
+```
+
+### 담당자의 최소 AI 조회 화면
+
+`/ai-suggestions.html`은 Ticket ID로 최초 문의의 Job·제안을 읽는 별도 화면이다. 기존 `/tickets.html`에는 이 화면으로 가는 링크만 추가했다. 빈 HTML·Module은 기존 정적 파일 정책을 유지하고, 데이터 API는 Server에서 AGENT 권한을 검사한다. `postgres` 모드에서 사용하며 `in-memory`에는 AI 조회 API가 없다.
+
+조회 버튼은 Session Cookie가 포함될 수 있는 같은 Origin GET 한 건을 보낸다. CSRF Token 조회·자동 Polling·AI 생성·실패 재시도를 실행하지 않는다. HTTP `200`의 `FAILED`는 AI 처리 실패로, `SUCCEEDED`·`PENDING_REVIEW`는 ‘AI 제안 생성 완료·담당자 검토 대기’로 표시한다. Job 미등록·대기·실행·생성 보류도 구분한다. HTTP 조회 오류·JSON 오류·잘못된 응답 구조는 Job 실패 상태로 바꾸지 않는다.
+
+[조회 Client와 View](./src/main/resources/static/ai-suggestion-ui.mjs)는 응답의 ID·필드·허용값·Job과 Suggestion 관계를 확인한 뒤 요약을 `textContent`로 표시한다. 새 조회에서 이전 요약·실패 코드를 지우며 Abort Signal과 현재 요청 번호를 함께 사용한다. UI의 별도 요약 길이 상한은 추가하지 않았다. Runtime 출력 검증기의 주입 정책은 그대로다.
+
+새 Node Test 29개는 합성 Response·DOM Test Double과 Page 연결을 확인한다. [정적 Resource Test](./src/test/java/lab/helpdesk/ai/web/AiSuggestionPageIntegrationTest.java) 5개는 `in-memory` Context에서 HTML·Module 제공과 익명 데이터 GET의 `401`을 확인한다. HTML은 UTF-8이며 MockMvc의 한글 Body 검증에도 UTF-8을 명시했다. 전체 Java Clean Test 449개·JavaScript 133개·ESLint가 통과했다. 실제 Browser의 Cookie·PostgreSQL 조회·유료 자동 Worker는 다음 수직 검증에서 확인한다.
+
+```powershell
+node --test src/test/js/ai-suggestion-ui.test.mjs src/test/js/ai-suggestion-page.test.mjs
+.\mvnw.cmd "-Dtest=AiSuggestionPageIntegrationTest" test
 ```
 
 ## 현재 Application 비범위
