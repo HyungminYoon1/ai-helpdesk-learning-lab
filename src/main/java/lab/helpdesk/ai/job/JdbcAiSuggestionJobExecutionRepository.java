@@ -24,7 +24,7 @@ public class JdbcAiSuggestionJobExecutionRepository implements AiSuggestionJobEx
                   AND (j.next_attempt_at IS NULL OR j.next_attempt_at <= m.now)
                   AND (j.processing_deadline_at IS NULL OR j.processing_deadline_at > m.now)
                   AND j.reserved_generation_count < j.max_generation_attempts
-                  AND (j.next_request_kind = 'INITIAL'
+                  AND (j.next_request_kind IN ('INITIAL', 'TEMPORARY_RETRY')
                     OR (j.next_request_kind = 'OUTPUT_REPAIR'
                         AND j.reserved_output_repair_count < j.max_output_repair_attempts))
                 ORDER BY j.created_at, j.id
@@ -120,6 +120,30 @@ public class JdbcAiSuggestionJobExecutionRepository implements AiSuggestionJobEx
               AND j.processing_deadline_at > m.now
             """;
 
+    private static final String SCHEDULE_RATE_LIMIT_SQL = """
+            WITH moment AS MATERIALIZED (SELECT clock_timestamp() AS now)
+            UPDATE ai_suggestion_jobs j
+            SET status = 'PENDING', next_request_kind = 'TEMPORARY_RETRY',
+                next_attempt_at = m.now
+                    + GREATEST(j.retry_backoff_ms, ?) * INTERVAL '1 millisecond',
+                lease_expires_at = NULL, last_failure_code = 'PROVIDER_RATE_LIMITED'
+            FROM moment m
+            WHERE j.id = ? AND j.current_attempt = ? AND j.status = 'RUNNING'
+              AND j.processing_deadline_at > m.now
+              AND j.reserved_generation_count < j.max_generation_attempts
+            """;
+
+    private static final String EXHAUSTED_GENERATION_SQL = """
+            WITH moment AS MATERIALIZED (SELECT clock_timestamp() AS now)
+            UPDATE ai_suggestion_jobs j
+            SET status = 'FAILED', last_failure_code = 'GENERATION_LIMIT_EXHAUSTED',
+                finished_at = m.now, lease_expires_at = NULL, next_attempt_at = NULL
+            FROM moment m
+            WHERE j.id = ? AND j.current_attempt = ? AND j.status = 'RUNNING'
+              AND j.processing_deadline_at > m.now
+              AND j.reserved_generation_count >= j.max_generation_attempts
+            """;
+
     private final JdbcTemplate jdbcTemplate;
 
     public JdbcAiSuggestionJobExecutionRepository(JdbcTemplate jdbcTemplate) {
@@ -173,6 +197,24 @@ public class JdbcAiSuggestionJobExecutionRepository implements AiSuggestionJobEx
         requireTransaction();
         Objects.requireNonNull(claim);
         return jdbcTemplate.update(EXHAUSTED_REPAIR_SQL, claim.jobId(), claim.attemptNumber()) == 1;
+    }
+
+    @Override
+    public boolean scheduleRateLimitRetry(AiJobClaim claim, long minimumWaitMs) {
+        requireTransaction();
+        Objects.requireNonNull(claim);
+        if (minimumWaitMs < 0) {
+            throw new IllegalArgumentException("AI_RETRY_DELAY_INVALID");
+        }
+        return jdbcTemplate.update(SCHEDULE_RATE_LIMIT_SQL,
+                minimumWaitMs, claim.jobId(), claim.attemptNumber()) == 1;
+    }
+
+    @Override
+    public boolean failForExhaustedGeneration(AiJobClaim claim) {
+        requireTransaction();
+        Objects.requireNonNull(claim);
+        return jdbcTemplate.update(EXHAUSTED_GENERATION_SQL, claim.jobId(), claim.attemptNumber()) == 1;
     }
 
     @Override

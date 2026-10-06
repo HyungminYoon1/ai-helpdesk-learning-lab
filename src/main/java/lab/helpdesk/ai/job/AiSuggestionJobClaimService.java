@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.job;
 
+import java.time.Duration;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.springframework.context.annotation.Profile;
@@ -44,6 +46,33 @@ public class AiSuggestionJobClaimService {
         }
         jobs.failForExhaustedRepair(claim);
         return false;
+    }
+
+    // A retry schedule is not a new reservation. The next Claim commits its own reservation.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public AiJobRetryScheduleOutcome scheduleRateLimitRetry(AiJobClaim claim, Duration minimumWait) {
+        Objects.requireNonNull(claim);
+        Objects.requireNonNull(minimumWait);
+        if (minimumWait.isNegative()) {
+            throw new IllegalArgumentException("AI_RETRY_DELAY_INVALID");
+        }
+        long minimumWaitMs;
+        try {
+            minimumWaitMs = minimumWait.toMillis();
+            if (!minimumWait.minusMillis(minimumWaitMs).isZero()) {
+                minimumWaitMs = Math.addExact(minimumWaitMs, 1);
+            }
+        } catch (ArithmeticException exception) {
+            throw new IllegalArgumentException("AI_RETRY_DELAY_INVALID");
+        }
+        jobs.expireProcessingDeadlines();
+        if (jobs.scheduleRateLimitRetry(claim, minimumWaitMs)) {
+            return AiJobRetryScheduleOutcome.SCHEDULED;
+        }
+        if (jobs.failForExhaustedGeneration(claim)) {
+            return AiJobRetryScheduleOutcome.FAILED;
+        }
+        return AiJobRetryScheduleOutcome.NOT_CURRENT;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

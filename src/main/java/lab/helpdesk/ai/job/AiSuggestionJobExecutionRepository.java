@@ -16,5 +16,9 @@ public interface AiSuggestionJobExecutionRepository {
 
     boolean failForExhaustedRepair(AiJobClaim claim);
 
+    boolean scheduleRateLimitRetry(AiJobClaim claim, long minimumWaitMs);
+
+    boolean failForExhaustedGeneration(AiJobClaim claim);
+
     boolean failIfCurrent(AiJobClaim claim, AiJobFailureCode failureCode);
 }

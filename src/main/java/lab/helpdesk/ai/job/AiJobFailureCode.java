@@ -2,6 +2,7 @@ package lab.helpdesk.ai.job;
 
 public enum AiJobFailureCode {
     PROVIDER_REFUSED,
+    PROVIDER_RATE_LIMITED,
     PROVIDER_OUTCOME_UNKNOWN,
     OUTPUT_INVALID,
     OUTPUT_REQUIRED_FIELD_MISSING,
