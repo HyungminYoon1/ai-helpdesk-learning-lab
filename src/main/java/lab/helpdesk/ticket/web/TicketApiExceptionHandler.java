@@ -1,6 +1,8 @@
 package lab.helpdesk.ticket.web;
 
 import lab.helpdesk.ticket.application.TicketNotFoundException;
+import lab.helpdesk.ai.query.AiSuggestionQueryException;
+import lab.helpdesk.ai.query.AiSuggestionQueryException.Code;
 
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -111,6 +113,20 @@ public class TicketApiExceptionHandler
                 headers,
                 status,
                 request);
+    }
+
+    @ExceptionHandler(AiSuggestionQueryException.class)
+    public ProblemDetail handleAiSuggestionQuery(AiSuggestionQueryException exception) {
+        boolean invalidId = exception.code() == Code.INVALID_TICKET_ID;
+        HttpStatus status = invalidId ? HttpStatus.BAD_REQUEST : HttpStatus.INTERNAL_SERVER_ERROR;
+        if (!invalidId) {
+            logger.error("ai suggestion query failed; code=" + exception.code().name());
+        }
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status,
+                invalidId ? "ticket id must be positive" : "AI result could not be read");
+        problem.setTitle(invalidId ? "Bad Request" : "Internal Server Error");
+        problem.setProperty("code", exception.code().name());
+        return problem;
     }
 
     // 전역 500 Handler 추가: 예상하지 못한 내부 실패를 안전한 500 ProblemDetail로 변환

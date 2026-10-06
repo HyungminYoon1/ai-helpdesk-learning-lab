@@ -36,6 +36,10 @@ public class SecurityConfiguration {
                 PathPatternRequestMatcher.pathPattern(
                         HttpMethod.GET,
                         "/api/tickets/{id}");
+        // GET Mapping이 HEAD도 처리하므로 일반 인증 규칙으로 우회하지 않게 URI를 보호한다.
+        RequestMatcher suggestionReadRequest =
+                PathPatternRequestMatcher.pathPattern(
+                        "/api/tickets/{id}/ai-suggestion");
 
         http
                 .cors(Customizer.withDefaults())
@@ -43,6 +47,8 @@ public class SecurityConfiguration {
                         .requestMatchers(ticketCreateRequest)
                         .hasAnyRole("USER", "AGENT")
                         .requestMatchers(ticketReadRequest)
+                        .hasRole("AGENT")
+                        .requestMatchers(suggestionReadRequest)
                         .hasRole("AGENT")
                         .requestMatchers(apiRequest).authenticated()
                         .anyRequest().permitAll())

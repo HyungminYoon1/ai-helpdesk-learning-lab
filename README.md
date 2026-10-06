@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·저장 재시도·조건부 복구·실제 JVM 재시작 — Java 389개·JavaScript 104개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·조건부 복구·서로 다른 JVM Process 재시작 확인. 유료 자동 Worker·제안 조회·새 Browser 검증은 후속 단계
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·저장 재시도·조건부 복구·실제 JVM 재시작·AGENT 조회 — Java 444개·JavaScript 104개 통과
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장과 AGENT 읽기 전용 조회까지의 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·조건부 복구·서로 다른 JVM Process 재시작 확인. 유료 자동 Worker·새 Browser 검증·요약 수동 평가는 후속 단계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -303,7 +303,8 @@ target/surefire-reports/
 | 검증 객체의 제한된 저장 재시도 | 실제 PostgreSQL·통제된 Provider 검증 완료 | 기본 총 3회·최소 5초, 기존 결과 재조회·현재 Attempt·원래 기한 확인. 새 Test 15개, 실제 Rollback·저장 후 응답 유실 주입·조회 실패·종료 경쟁과 원문 보존 확인. 추가 AI 생성 없음 |
 | Attempt별 결과와 조건부 RUNNING 복구 | 실제 PostgreSQL·통제된 Provider 검증 완료 | V7·결과 분류·DB 결과 확인 뒤의 조건부 Claim. 새 Test 20개, 경쟁 선점·조회 실패·원장 실패 Rollback과 새 Context의 재시도 미승인 유지 확인. 원격 Provider 조회는 미구현 |
 | Worker의 실제 JVM 종료·재시작 | 실제 PostgreSQL·통제된 Provider 검증 완료 | 새 Test 5개. 첫 Java Process 종료를 확인하고 다른 PID로 같은 DB를 연결해 PENDING·결과 미확인/불명·재시도 금지·미래 대기를 확인. 정책·누적 예약·원래 기한·원문 유지 |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 389개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
+| AGENT 전용 AI 상태·제안 조회 | 실제 PostgreSQL·Security·MockMvc 검증 완료 | 새 Test 55개. 익명 401·USER 403, 최초 Message의 Job 조회, 다섯 상태·명시적 null·고정 실패 코드, 정합성/조회 오류의 안전한 500, 반복 조회의 불변과 Provider 미호출 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 444개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -541,6 +542,35 @@ Lease·다음 실행 시각은 검증한 Test DB의 해당 Row만 이동해 경�
 
 ```powershell
 .\mvnw.cmd "-Dtest=AiSuggestionWorkerProcessRestartIntegrationTest" test
+```
+
+### AGENT 전용 AI 상태·제안 조회
+
+`postgres` Profile의 `GET /api/tickets/{id}/ai-suggestion`은 최초 Message의 Job 상태와 검증되어 저장된 제안을 읽는다. 익명은 `401`, USER는 `403`, AGENT는 정상 결과를 조회할 수 있다. 조회 URI의 권한 규칙을 일반 `/api/**` 인증 규칙보다 먼저 적용했다. `@GetMapping`이 자동 지원하는 HEAD도 USER가 접근하지 못하도록 Method와 무관하게 이 URI에 AGENT를 요구한다. 새 POST 실행 API는 없다. 허용된 CORS Preflight는 기존 CORS Filter에서 먼저 처리한다. `in-memory`에는 이 Controller·Service·JDBC Adapter가 등록되지 않는다. [Spring의 HEAD 매핑](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-requestmapping.html)
+
+응답은 `ticketId`·`job`·`suggestion`으로 나눈다. Job에는 `id`·`status`·`failureCode`, 제안에는 `id`·`summary`·`categories`·`priority`·`reviewStatus`만 담는다. 조회가 원문·Prompt·Provider 오류 전체·예약 원장·Credential을 공개하거나 AI를 호출하지 않는다. 정상 응답은 `Cache-Control: no-store`다.
+
+| DB에서 확인한 결과 | HTTP 응답 |
+|---|---|
+| 없는 Ticket | `404` |
+| 기존 Ticket에 최초 Message 또는 그 Job이 없음 | `200`, `job: null`·`suggestion: null` |
+| PENDING·RUNNING | `200`, 저장된 Job·`suggestion: null`·`failureCode: null` |
+| FAILED | `200`, 저장된 Job·허용된 고정 실패 코드·`suggestion: null` |
+| ABSTAINED | `200`, 해당 Job·`suggestion: null` |
+| SUCCEEDED와 저장된 제안 | `200`, 해당 Job·제안·`PENDING_REVIEW` |
+| SUCCEEDED인데 제안 부재 등 저장 결과의 모순 | `500 ProblemDetail`, `code: AI_RESULT_INCONSISTENT` |
+| DB 읽기 예외 | `500 ProblemDetail`, `code: AI_RESULT_QUERY_FAILED` |
+
+숫자가 아닌 ID와 양수가 아닌 ID는 `400`이다. Job의 FAILED는 AI 작업 결과이고 HTTP 200은 그 결과 조회가 성공했다는 뜻이다. 읽기 예외나 정합성 오류를 정상적인 null·UNDETERMINED로 바꾸지 않으며, Job 상태를 고치거나 복구를 시작하지 않는다.
+
+[조회 Service](./src/main/java/lab/helpdesk/ai/query/AiSuggestionQueryService.java)는 기존 Worker·Claim·결과 저장 Service와 분리한다. [JDBC 조회 Adapter](./src/main/java/lab/helpdesk/ai/query/JdbcAiSuggestionQueryRepository.java)는 하나의 Parameterized SELECT로 Ticket·최초 Message·Job·제안·분류를 읽는다. 최초 Message는 해당 Ticket의 가장 작은 Message ID이며, 최근 Message의 Job을 대신 가져오지 않는다. 단일 SELECT의 Statement Snapshot으로 결과 Commit 전후를 섞지 않고 읽기 전용 Transaction 안에서 상태·허용값·제안 존재의 정합성을 검사한다. 새 Index·Migration·Row Lock은 추가하지 않았다. [PostgreSQL SELECT Snapshot](https://www.postgresql.org/docs/17/transaction-iso.html#XACT-READ-COMMITTED)
+
+[HTTP Integration Test](./src/test/java/lab/helpdesk/ai/web/AiSuggestionQueryHttpIntegrationTest.java) 34개는 실제 Form Login·Session·Security Filter·MVC·JDBC·PostgreSQL을 사용한다. 반복 조회 전후 여섯 Table과 Provider·Claim·저장 Service 미호출을 비교했고, 기한 만료 Job을 조회만으로 종료하지 않는 것도 확인했다. 결과 SQL 실행 뒤 Commit 전에는 RUNNING·제안 없음, Commit 뒤에는 SUCCEEDED·전체 분류가 보이며 읽기가 Writer Row Lock을 기다리지 않았다. PostgreSQL의 `transaction_read_only=on`도 확인했다.
+
+[Service Unit Test](./src/test/java/lab/helpdesk/ai/query/AiSuggestionQueryServiceTest.java) 20개와 [Profile Test](./src/test/java/lab/helpdesk/ai/web/AiSuggestionQueryProfileIntegrationTest.java) 1개를 포함해 새 Test 55개가 통과했다. DB 읽기 예외는 Test용으로 주입해 원문·Cause가 HTTP와 Log에 나오지 않는지 확인했다. 실제 DB 네트워크 장애·Browser E2E·새 유료 AI 호출을 실행한 것은 아니다. 전체 Java Clean Test 444개·JavaScript 104개·ESLint가 통과했다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionQueryServiceTest,AiSuggestionQueryHttpIntegrationTest,AiSuggestionQueryProfileIntegrationTest" test
 ```
 
 ## 현재 Application 비범위
