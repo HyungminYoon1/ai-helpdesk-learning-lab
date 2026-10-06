@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·단일 Job 처리·Spring AI Adapter와 결과 저장 — Java 318개·JavaScript 104개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 실제 Java AI→PostgreSQL 합성 문의 한 건 확인. 자동 Polling·새 Browser 수직 검증은 미실시
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 자동 Worker — Java 349개·JavaScript 104개 통과
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·Context 재시작 확인. 결과 불명 자동 복구·새 Browser 검증은 후속 단계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -299,7 +299,8 @@ target/surefire-reports/
 | 단일 Job 처리 흐름 | 실제 PostgreSQL·통제된 Provider 자동 검증 완료 | 처리 Test 19개 통과. 예약 Commit·Row Lock 해제 뒤 호출, 고정 Message의 전송용 복사본, 출력 보완 한도·결과 저장 재시도·미완료 응답·일시 거절 확인. 실제 AI 호출은 0회 |
 | Spring AI Provider Adapter | 실제 HTTP·통제된 응답 자동 검증 완료 | Adapter Test 44개 통과. 직렬화 Body·단일 전송·실패 분류·안전한 Log 확인. 실제 AI 모델 호출은 별도 |
 | 실제 Java AI→PostgreSQL | 선택 Live Test 완료 | 2026-10-06 실제 HTTP 1회·`200`, 원문 보존·Job `SUCCEEDED`·Suggestion 1건·Category 1건과 별도 Live Test 1개 통과. 자동 Worker·Browser·요약 수동 평가는 별도 |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 318개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0 |
+| 선택 자동 Worker·Rate Limit 대기 | 실제 PostgreSQL·통제된 Provider 검증 완료 | V5·대기 예약·자동 처리·설정·안전한 Log의 새 Test 31개 통과. 재시도 전 추가 예약 없음, 최종 FAILED 제외, 같은 JVM의 새 Context에서 정책·횟수·기한 유지 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 349개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -414,7 +415,7 @@ Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User I
 
 ### 예약부터 결과 저장까지의 단일 Job 처리
 
-[AiSuggestionJobProcessor](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionJobProcessor.java)는 한 Job의 Claim·입력 조회·전송용 개인정보 처리·Provider 호출·출력 검증·결과 저장을 연결한다. Claim의 예약 Transaction이 Commit된 다음 Provider Port를 호출하며, 호출 대기 중 Job Row Lock이나 바깥 Transaction을 유지하지 않는다. 자동 실행 Bean이나 Scheduler는 아직 등록하지 않았다.
+[AiSuggestionJobProcessor](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionJobProcessor.java)는 한 Job의 Claim·입력 조회·전송용 개인정보 처리·Provider 호출·출력 검증·결과 저장을 연결한다. Claim의 예약 Transaction이 Commit된 다음 Provider Port를 호출하며, 호출 대기 중 Job Row Lock이나 바깥 Transaction을 유지하지 않는다. 아래 선택 Worker 설정에서만 자동 실행 Bean과 Scheduler를 등록한다.
 
 [입력 Repository](./src/main/java/lab/helpdesk/ai/input/JdbcAiSuggestionInputRepository.java)는 Job에 고정한 `input_message_id`의 원문을 읽는다. 새 Message가 추가돼도 처리 대상을 바꾸지 않는다. DB 원문은 유지하고 [개인정보 Guard](./src/main/java/lab/helpdesk/ai/input/AiInputPrivacyGuard.java)가 만든 전송용 복사본만 Provider Port에 전달한다. 전송 전에 현재 Attempt·예약·실행권·전체 기한을 다시 확인한다.
 
@@ -436,7 +437,7 @@ Model은 `gpt-6-luna`, reasoning은 `none`, 출력 상한은 600 Token, `store=f
 
 [단일 전송 HTTP Client](./src/main/java/lab/helpdesk/ai/provider/SingleAttemptOpenAiHttpClient.java)는 SDK 재시도와 HTTP 연결 재시도·자동 Redirect·환경 Proxy를 끈다. 직렬화가 끝난 실제 Body를 개인정보 Guard와 Credential 검사에 통과시킨 뒤 한 번 전송한다. 요청은 32 KiB, 응답은 64 KiB 상한을 둔다. DB의 원문은 변경하지 않으며 Guard는 설정한 민감 값만 검사하는 현재 범위를 유지한다.
 
-명시적 거부, 인증·과금 설정 오류, 완료되지 않은 출력, 일시적 Rate Limit, 결과 불명 실패를 구분한다. 유효한 `Retry-After`의 초·HTTP-date 값은 최소 대기로 전달하고 Adapter 안에서는 재호출하거나 대기하지 않는다. Processor는 일시적 거절 정보를 호출자에게 전달하며, 이를 안전하게 재예약할 자동 Worker 정책은 후속 단계다. 응답 원문·Credential·SDK 예외 Cause는 오류에 복사하지 않는다. 사용량이나 반환 Model·Service Tier에 대한 요금 확인이 없으면 비용을 0으로 기록하지 않는다.
+명시적 거부, 인증·과금 설정 오류, 완료되지 않은 출력, 일시적 Rate Limit, 결과 불명 실패를 구분한다. 유효한 `Retry-After`의 초·HTTP-date 값은 최소 대기로 전달하고 Adapter 안에서는 재호출하거나 대기하지 않는다. Processor는 일시적 거절의 안전한 Metadata를 Worker에 전달한다. 아래 Worker는 확인된 Rate Limit과 유효한 최소 대기만 재예약하며 결과 불명 복구는 별도로 남긴다. 응답 원문·Credential·SDK 예외 Cause는 오류에 복사하지 않는다. 사용량이나 반환 Model·Service Tier에 대한 요금 확인이 없으면 비용을 0으로 기록하지 않는다.
 
 [Adapter HTTP Test](./src/test/java/lab/helpdesk/ai/provider/SpringAiOpenAiSuggestionProviderTest.java) 44개는 실제 HTTP·Spring AI·SDK와 통제된 로컬 응답을 사용한다. 재시도 대상 Status·Timeout에도 요청 1회, 마스킹·Credential 검사 실패에는 요청 0회를 확인했다. 요청별 옵션의 기본 Model 덮어쓰기도 실제 전송 Body Assertion으로 잡아 수정했다. PostgreSQL 처리 Test는 19개이며, 전체 Java Clean Test 318개가 통과했다. 이 회귀 검증의 유료 호출은 0회다. 실제 AI 호출·자동 Worker·Browser E2E는 별도 실행 근거가 필요하다.
 
@@ -473,11 +474,27 @@ Windows 기동 오류를 수정한 뒤 사용자가 명시적으로 재실행할
 
 이 실행은 접수 Service 뒤 Processor를 직접 한 번 호출했다. Browser E2E·자동 Worker·내용 수동 채점은 별도 확인한다. 회귀 Java Test 318개와 이 유료 Live Test 한 건을 구분해 기록한다.
 
+### 선택 자동 Worker와 영속 재시도 대기
+
+[Worker](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionJobWorker.java)는 한 번의 Tick에서 Processor를 실행하고, 확인된 Rate Limit과 유효한 최소 대기가 있으면 다음 실행 가능 시각을 DB에 기록한다. 재시도를 예약하는 것만으로 호출 횟수를 늘리지 않는다. 다음 Claim이 현재 상태·시각·전체 한도를 다시 확인하고 새 예약을 Commit한 뒤 Provider를 호출한다.
+
+[V5 Migration](./src/main/resources/db/migration/V5__add_rate_limit_retry_kind.sql)은 `TEMPORARY_RETRY`와 `PROVIDER_RATE_LIMITED`를 허용한다. 기존 원문·정책 Snapshot·예약·제안과 V1~V4는 유지한다. `next_attempt_at`은 DB 시각에 `max(Backoff, Retry-After)`를 더해 저장한다. 재시도는 전체 생성 횟수만 사용하고 출력 보완 횟수는 늘리지 않는다. 최소 대기가 전체 기한을 넘으면 더 일찍 호출하지 않고 기한 종료 때 Job을 실패로 마감한다.
+
+[설정](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionWorkerConfiguration.java)은 `postgres` Profile과 `helpdesk.ai.worker.enabled=true`에서만 활성화된다. 기본은 꺼짐이며 확인 간격 `helpdesk.ai.worker.poll-delay-ms`의 기본값은 1,000ms다. Provider·개인정보 Guard·출력 검증기를 명시적으로 제공해야 하며, 전역 Key나 Runtime 요약 상한을 자동 선택하지 않는다. 설정값을 켜는 것만으로 Live Provider가 만들어지지는 않는다.
+
+최종 `FAILED`는 일반 Polling 대상에서 제외한다. 크레딧·설정 오류를 같은 요청으로 반복하지 않는다. 대기 Header가 없거나 원인이 불명확하면 이번 Worker가 새로운 자동 재호출 규칙을 부여하지 않는다. 결과 불명 `RUNNING`·메모리의 검증 객체를 이용한 저장 재시도·관리자 재개와 실제 유료 Runtime 조립은 후속 단계다. Scheduler 오류는 메시지·Cause 없이 `AI_WORKER_TICK_FAILED`만 Log에 남긴다.
+
+재시도·Migration Test 11개, Worker Test 9개, 설정 Test 5개, Scheduler Test 2개, Context Test 4개가 통과했다. 같은 PostgreSQL을 유지한 Context 재시작에서 미실행 `PENDING`과 미래 대기 시각을 이어갔고, 최종 실패와 Lease가 만료된 결과 불명 `RUNNING`은 임의로 재실행하지 않았다. 이는 같은 JVM의 Spring Context 재시작이며 실제 JVM Process·DB Container 재시작은 별도 검증한다. 이번 Provider 응답은 통제된 합성값이고 새 유료 AI 호출은 0회다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiRateLimitRetryIntegrationTest,AiRateLimitRetryMigrationIntegrationTest,AiSuggestionJobWorkerIntegrationTest,AiSuggestionWorkerConfigurationTest,AiSuggestionWorkerSchedulerTest,AiSuggestionWorkerContextIntegrationTest" test
+```
+
 ## 현재 Application 비범위
 
 - 외부 운영 Database 구성과 Backup·복구
 - Production용 인증·사용자 권한 검사와 운영 Credential 관리
-- 자동 Worker Polling·실패 유형별 대기 재예약·Provider 결과 조회와 운영 Application의 AI 자동 처리. 명시적으로 생성한 Provider Adapter·단일 처리 Test와 구분한다.
+- 결과 불명 RUNNING의 자동 복구·Provider 결과 조회·저장 자동 재시도와 운영 Application의 유료 AI 자동 처리. 선택 Worker의 통제된 Provider Test와 구분한다.
 - 담당자 할당, Comment와 이력 조회
 - Ticket 전체 CRUD와 검색·정렬·Pagination
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현

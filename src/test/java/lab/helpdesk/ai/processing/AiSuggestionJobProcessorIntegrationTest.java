@@ -209,9 +209,10 @@ class AiSuggestionJobProcessorIntegrationTest {
             throw new AiProviderFailureException(Kind.TEMPORARY_REJECTION,
                     AiProviderFailureException.Reason.RATE_LIMIT, Duration.ofSeconds(10));
         });
-        AiProviderFailureException rejection = org.assertj.core.api.Assertions.catchThrowableOfType(
-                AiProviderFailureException.class, processor::processNextPending);
-        assertThat(rejection.retryAfter()).contains(Duration.ofSeconds(10));
+        AiSuggestionProcessingResult rejection = processor.processNextPending();
+        assertThat(rejection.outcome()).isEqualTo(Outcome.TEMPORARY_REJECTION);
+        assertThat(rejection.minimumRetryDelay()).isEqualTo(Duration.ofSeconds(10));
+        assertThat(rejection.claim().jobId()).isEqualTo(receipt.jobId());
         assertThat(processor.processNextPending().outcome()).isEqualTo(Outcome.NO_JOB);
         assertThat(status(receipt)).isEqualTo("RUNNING");
         assertThat(count("ai_suggestion_attempts")).isOne();

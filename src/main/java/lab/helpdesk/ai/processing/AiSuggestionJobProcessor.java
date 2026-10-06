@@ -104,9 +104,12 @@ public final class AiSuggestionJobProcessor {
                 case REFUSED -> fail(claim, AiJobFailureCode.PROVIDER_REFUSED);
                 case CONFIGURATION -> fail(claim, AiJobFailureCode.ADAPTER_CONFIGURATION_ERROR);
                 case INVALID_RESPONSE -> fail(claim, AiJobFailureCode.OUTPUT_INVALID);
-                // The caller must honor Retry-After and Job limits. Do not hide a second call
-                // here or reuse lease recovery as a temporary-rejection retry policy.
-                case TEMPORARY_REJECTION -> throw exception;
+                // Return safe Claim metadata so the Worker can persist a separate retry schedule.
+                // Only a confirmed rate limit with a usable hint has an approved retry path.
+                case TEMPORARY_REJECTION -> new AiSuggestionProcessingResult(
+                        Outcome.TEMPORARY_REJECTION, claim, null,
+                        exception.reason() == AiProviderFailureException.Reason.RATE_LIMIT
+                                ? exception.retryAfter().orElse(null) : null);
                 // An unconfirmed request is not ABSTAIN or proof of no Provider execution.
                 case OUTCOME_UNKNOWN -> result(Outcome.PROVIDER_OUTCOME_UNKNOWN, claim);
             };
