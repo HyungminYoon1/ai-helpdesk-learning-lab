@@ -4,6 +4,7 @@
 /build/
 /.playwright-cli/
 /local/ai-experiments/
+/output/playwright/
 
 # IDE
 .vscode/

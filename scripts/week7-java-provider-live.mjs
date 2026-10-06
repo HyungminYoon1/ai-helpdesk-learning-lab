@@ -57,7 +57,7 @@ export function scopedChildEnvironment({ apiKey, day, priorCostUnconfirmed, laun
     hostEnvironment = process.env) {
     const environment = {};
     for (const name of ["PATH", "PATHEXT", "COMSPEC", "JAVA_HOME", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
-        "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]) {
+        "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA"]) {
         if (hostEnvironment[name]) environment[name] = hostEnvironment[name];
     }
     // The generic OPENAI_API_KEY, other projects' credentials and custom Maven options are excluded.
@@ -68,7 +68,7 @@ export function scopedChildEnvironment({ apiKey, day, priorCostUnconfirmed, laun
         HELPDESK_AI_LAUNCHER_RECOVERY_CONFIRMED: String(launcherRecoveryConfirmed) };
 }
 
-function windowsShell(hostEnvironment = process.env) {
+export function windowsShell(hostEnvironment = process.env) {
     if (process.platform !== "win32") throw new Error("WINDOWS_EXPERIMENT_RUNNER_REQUIRED");
     const modernShell = "C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe\\pwsh.exe";
     return existsSync(modernShell) ? modernShell

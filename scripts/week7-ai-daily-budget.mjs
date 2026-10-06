@@ -24,15 +24,18 @@ export function createUnconfirmedPriorLedger(day, limitUsd = 1) {
 }
 
 function validateLedger(ledger, day, limitUsd) {
+    const waived = ledger?.costLimitWaiver?.reason === "USER_APPROVED_NO_COST_LIMIT"
+        && ledger.costLimitWaiver.day === day;
     if (!ledger || ledger.version !== 1 || ledger.day !== day || ledger.limitUsd !== limitUsd
         || ![ledger.usedEstimatedUsd, ledger.heldEstimatedUsd].every(value => Number.isFinite(value) && value >= 0)
         || !(ledger.pendingReservationUsd === null
             || Number.isFinite(ledger.pendingReservationUsd) && ledger.pendingReservationUsd > 0)
         || !Number.isSafeInteger(ledger.reservationsMade) || ledger.reservationsMade < 0
-        || ledger.reservationsMade > MAX_DAILY_CALLS || typeof ledger.blocked !== "boolean"
+        || !waived && ledger.reservationsMade > MAX_DAILY_CALLS || typeof ledger.blocked !== "boolean"
         || ![null, "UNKNOWN_COST", "COST_ESTIMATE_EXCEEDED"].includes(ledger.stopReason)) {
         throw new Error("DAILY_LEDGER_INVALID");
     }
+    if (ledger.costLimitWaiver !== undefined && !waived) throw new Error("DAILY_LEDGER_INVALID");
     const recovery = ledger.launcherRecovery;
     if (recovery !== undefined && (!recovery || recovery.reason !== "WINDOWS_MAVEN_LAUNCHER_REPAIR"
         || recovery.previousStopReason !== "UNKNOWN_COST" || recovery.previousReservationsMade !== 1
@@ -42,7 +45,8 @@ function validateLedger(ledger, day, limitUsd) {
     }
     if (ledger.priorCostUnconfirmed !== undefined
         && (ledger.priorCostUnconfirmed !== true || ledger.priorEstimatedUsd !== null
-            || ledger.budgetScope !== "TRACKED_RUNNER_CALLS_ONLY" || ledger.reservationsMade > (recovery ? 2 : 1))) {
+            || ledger.budgetScope !== "TRACKED_RUNNER_CALLS_ONLY"
+            || !waived && ledger.reservationsMade > (recovery ? 2 : 1))) {
         throw new Error("DAILY_LEDGER_INVALID");
     }
 }
@@ -66,11 +70,13 @@ function authorizeLauncherRecovery(ledger, reservationUsd) {
 export function reserveDailyCall(ledger, reservationUsd) {
     validateLedger(ledger, ledger.day, ledger.limitUsd);
     if (ledger.blocked || ledger.pendingReservationUsd !== null) throw new Error("BUDGET_RECONCILIATION_REQUIRED");
-    if (ledger.priorCostUnconfirmed && ledger.reservationsMade >= (ledger.launcherRecovery ? 2 : 1)) {
+    const waived = ledger.costLimitWaiver !== undefined;
+    if (!waived && ledger.priorCostUnconfirmed && ledger.reservationsMade >= (ledger.launcherRecovery ? 2 : 1)) {
         throw new Error("UNCONFIRMED_PRIOR_SINGLE_CALL_ALREADY_RESERVED");
     }
-    if (!Number.isFinite(reservationUsd) || reservationUsd <= 0 || ledger.reservationsMade >= MAX_DAILY_CALLS
-        || ledger.usedEstimatedUsd + ledger.heldEstimatedUsd + reservationUsd > ledger.limitUsd) {
+    if (!Number.isFinite(reservationUsd) || reservationUsd <= 0 || ledger.reservationsMade >= Number.MAX_SAFE_INTEGER
+        || !waived && (ledger.reservationsMade >= MAX_DAILY_CALLS
+            || ledger.usedEstimatedUsd + ledger.heldEstimatedUsd + reservationUsd > ledger.limitUsd)) {
         throw new Error("DAILY_CALL_OR_BUDGET_LIMIT_EXCEEDED");
     }
     return { ...ledger, pendingReservationUsd: reservationUsd, reservationsMade: ledger.reservationsMade + 1 };
@@ -85,20 +91,22 @@ export function settleDailyCall(ledger, estimatedUsageUsd) {
     }
     if (!Number.isFinite(estimatedUsageUsd) || estimatedUsageUsd < 0) throw new Error("INVALID_USAGE_ESTIMATE");
     const usedEstimatedUsd = ledger.usedEstimatedUsd + estimatedUsageUsd;
-    const exceeded = estimatedUsageUsd > ledger.pendingReservationUsd
-        || usedEstimatedUsd + ledger.heldEstimatedUsd > ledger.limitUsd;
+    const exceeded = ledger.costLimitWaiver === undefined && (estimatedUsageUsd > ledger.pendingReservationUsd
+        || usedEstimatedUsd + ledger.heldEstimatedUsd > ledger.limitUsd);
     return { ...ledger, usedEstimatedUsd, pendingReservationUsd: null, blocked: exceeded,
         stopReason: exceeded ? "COST_ESTIMATE_EXCEEDED" : null };
 }
 
 // Only this experimental runner's calls share the ledger. This is not an account-wide billing limit.
 export async function withDailyLedger({ repositoryRoot, day, limitUsd = 1, knownPriorUsd,
-    proceedWithUnknownPrior = false, recoverLauncherOnce = false, recoveryReservationUsd }, callback) {
+    proceedWithUnknownPrior = false, recoverLauncherOnce = false, recoveryReservationUsd,
+    confirmCostLimitWaiver = false }, callback) {
     if (!validDay(day) || !Number.isFinite(limitUsd) || limitUsd <= 0 || limitUsd > 1) {
         throw new Error("KNOWN_PRIOR_COST_AND_VALID_BUDGET_REQUIRED");
     }
     if (typeof proceedWithUnknownPrior !== "boolean"
         || typeof recoverLauncherOnce !== "boolean"
+        || typeof confirmCostLimitWaiver !== "boolean"
         || proceedWithUnknownPrior && knownPriorUsd !== undefined
         || recoverLauncherOnce && !proceedWithUnknownPrior) {
         throw new Error("INVALID_PRIOR_COST_MODE");
@@ -131,6 +139,17 @@ export async function withDailyLedger({ repositoryRoot, day, limitUsd = 1, known
         if (recoverLauncherOnce) {
             ledger = authorizeLauncherRecovery(ledger, recoveryReservationUsd);
             persist(ledger);
+        }
+        if (ledger.costLimitWaiver !== undefined && !confirmCostLimitWaiver) {
+            throw new Error("COST_LIMIT_WAIVER_CONFIRMATION_REQUIRED");
+        }
+        if (confirmCostLimitWaiver) {
+            // A new, explicit daily approval removes spending caps, not the usage history.
+            // An unfinished reservation still needs reconciliation; it is not erased.
+            if (ledger.pendingReservationUsd !== null) throw new Error("BUDGET_RECONCILIATION_REQUIRED");
+            const previousStopReason = ledger.costLimitWaiver?.previousStopReason ?? ledger.stopReason;
+            persist({ ...ledger, blocked: false, stopReason: null,
+                costLimitWaiver: { reason: "USER_APPROVED_NO_COST_LIMIT", day, previousStopReason } });
         }
         if (ledger.blocked || ledger.pendingReservationUsd !== null) throw new Error("BUDGET_RECONCILIATION_REQUIRED");
         if (ledger.priorCostUnconfirmed && !proceedWithUnknownPrior) {

@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI — Java 449개·JavaScript 133개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장, AGENT 읽기 전용 조회와 최소 화면의 응답 분기까지의 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·조건부 복구·서로 다른 JVM Process 재시작 확인. 유료 자동 Worker·새 Browser 수직 검증·요약 수동 평가는 후속 단계
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI — Java 449개·JavaScript 145개 통과
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장, AGENT 읽기 전용 조회와 최소 화면의 응답 분기까지의 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·조건부 복구·서로 다른 JVM Process 재시작·실제 Browser 흐름 확인. 유료 자동 Worker 연결과 요약 수동 평가는 후속 단계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -588,6 +588,35 @@ Lease·다음 실행 시각은 검증한 Test DB의 해당 Row만 이동해 경�
 node --test src/test/js/ai-suggestion-ui.test.mjs src/test/js/ai-suggestion-page.test.mjs
 .\mvnw.cmd "-Dtest=AiSuggestionPageIntegrationTest" test
 ```
+
+### 실제 Browser·자동 Worker·PostgreSQL 실험 구성
+
+[실행기](./scripts/week7-worker-browser-live.mjs)는 실제 Browser의 USER 로그인·접수, 예약된 Worker, 제안 저장과 AGENT 화면을 연결한다. [Test 전용 조립](./src/test/java/lab/helpdesk/ai/provider/Week7WorkerBrowserExperiment.java)만 명시적인 Provider·Guard·검증기와 Worker를 활성화한다. 일반 Application의 유료 Provider 자동 구성은 추가하지 않았다.
+
+새 PostgreSQL 17.6 Testcontainer, 임의 Port의 Loopback Server, 일회용 USER·AGENT와 별도의 Browser Session을 사용한다. 기존 DB·사용자 Process를 종료하거나 정리하지 않는다. Browser 실행 자식 Process에는 AI Key를 넘기지 않는다. 문의는 로그인 복구 사실과 합성 이메일 표식을 포함한 고정 입력 한 건이다.
+
+Browser는 실제 접수 화면의 제목·본문을 입력하고 생성 버튼을 누른다. 같은 Session의 CSRF 없는 대조 POST는 `403`, 정상 UI 접수는 `201`이다. Scheduler가 Commit된 Job을 처리한 뒤 AGENT가 실제 조회 버튼으로 읽는다. 화면·HTTP 응답·DB의 요약·분류·우선순위·검토 상태를 대조하고, 조회 전후 여섯 Table의 변화가 없는지도 확인한다. Screenshot에는 화면만 저장하며 Cookie·Token·Prompt·Header를 출력하지 않는다. 끝나면 일회용 Session 기록과 Container는 정리하고 Screenshot은 Git 제외 `output/playwright/`에 남긴다.
+
+이 실험 Job만 생성 한도 1회·출력 보완 0회 Snapshot을 사용한다. 한 문의의 수직 연결을 확인하기 위한 실험값이며, 일반 Job 정책의 3회·보완 1회와 실패별 재시도 조건은 바꾸지 않았다. Test용 추가 호출 차단도 적용한다.
+
+```powershell
+node .\scripts\week7-worker-browser-live.mjs --dry-run
+node .\scripts\week7-worker-browser-live.mjs --smoke
+```
+
+`--smoke`는 통제된 Provider를 사용한다. 실제 Browser·Session·CSRF·자동 Worker·PostgreSQL·화면을 확인하지만 유료 AI 호출은 0회다. 일반 Java 회귀와 별도로 선택하는 Experiment 한 건이다. 실제 Provider 모드는 전용 PowerShell에서 실행한다.
+
+```powershell
+# 해당 날짜에 비용 상한 해제를 명시적으로 승인한 경우에만 실행한다.
+# HELPDESK_OPENAI_API_KEY는 이미 Helpdesk 전용 창의 Process에 있어야 한다.
+node .\scripts\week7-worker-browser-live.mjs --live --confirm-helpdesk-key --confirm-synthetic --confirm-cost-limit-waiver --day YYYY-MM-DD
+```
+
+2026-10-06에 사용자가 당일 비용 상한 해제를 승인했다. 실행기는 기존 날짜별 원장에 `costLimitWaiver`를 추가하고 이전 비용 미확인·보류 금액·예약 횟수를 그대로 유지한다. `limitUsd`는 이전 승인값이며 새 Report의 `costLimitEnforced: false`가 현재 적용 여부다. 미정산 진행 예약은 삭제하지 않고, 비용 상한 해제 옵션을 받지 않은 다른 실행기는 이 원장을 자동 승계하지 못한다. Job의 생성 한도와 일일 실험 비용 제한은 서로 다른 정책이다.
+
+사용량 추정에는 기존의 보수적인 입력 `$0.125/M`·출력 `$0.50/M`을 유지한다. 현재 공식 Standard 입력 단가는 `$0.10/M`이며, 추정 원장을 실제 청구액으로 표현하지 않는다. [GPT-6 Luna 요금](https://developers.openai.com/api/docs/models/gpt-6-luna)
+
+새 실행기 Test 12개를 포함한 JavaScript 145개와 ESLint가 통과했다. 통제된 Provider의 실제 Browser Experiment는 접수 `201`·누락 CSRF `403`·익명 조회 `401`·USER 조회 `403`·AGENT 조회 `200`, 원문·인증 작성자 보존, 예약·제안·분류 각 1건, 화면과 DB 일치·조회 무변경을 확인했다. 실제 유료 자동 Worker 결과는 별도 Live Report를 받은 뒤 기록한다.
 
 ## 현재 Application 비범위
 
