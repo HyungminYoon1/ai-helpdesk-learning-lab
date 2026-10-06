@@ -8,8 +8,10 @@ import java.util.Optional;
 import lab.helpdesk.ai.input.AiInputPrivacyGuard;
 import lab.helpdesk.ai.input.AiSuggestionInputRepository;
 import lab.helpdesk.ai.input.StoredAiSuggestionInput;
+import lab.helpdesk.ai.job.AiAttemptResultCode;
 import lab.helpdesk.ai.job.AiJobClaim;
 import lab.helpdesk.ai.job.AiJobFailureCode;
+import lab.helpdesk.ai.job.AiJobRecoveryCandidate;
 import lab.helpdesk.ai.job.AiJobStatus;
 import lab.helpdesk.ai.job.AiSuggestionJobClaimService;
 import lab.helpdesk.ai.processing.AiSuggestionProcessingResult.Outcome;
@@ -61,7 +63,43 @@ public final class AiSuggestionJobProcessor {
         if (next.isEmpty()) {
             return result(Outcome.NO_JOB, null);
         }
-        AiJobClaim claim = next.orElseThrow();
+        return processClaim(next.orElseThrow());
+    }
+
+    /** DB result lookup is available here; remote Provider result lookup is not implemented. */
+    public AiSuggestionProcessingResult processNextRecoverable() {
+        requireNoOuterTransaction();
+        Optional<AiJobRecoveryCandidate> candidate;
+        Optional<AiSuggestionStoredResult> existing;
+        try {
+            candidate = claims.findNextRecoveryCandidate();
+            if (candidate.isEmpty()) {
+                return result(Outcome.NO_JOB, null);
+            }
+            existing = results.findStoredResult(candidate.orElseThrow().jobId());
+        } catch (RuntimeException exception) {
+            // A failed lookup is not a missing result and cannot authorize a new reservation.
+            return result(Outcome.RECOVERY_STATE_UNCONFIRMED, null);
+        }
+        AiJobRecoveryCandidate selected = candidate.orElseThrow();
+        if (existing.isEmpty()
+                || existing.orElseThrow().job().currentAttempt() != selected.attemptNumber()
+                || existing.orElseThrow().job().status() != AiJobStatus.RUNNING
+                || existing.orElseThrow().suggestion().isPresent()) {
+            return result(Outcome.NO_JOB, null);
+        }
+        Optional<AiJobClaim> recovered;
+        try {
+            // Selection/read is not ownership. Claim repeats eligibility under a short lock,
+            // and commits both the new Attempt and its reservation before returning.
+            recovered = claims.claimRecoveryAfterResultCheck(selected.jobId(), selected.attemptNumber());
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("AI_JOB_CLAIM_FAILED");
+        }
+        return recovered.map(this::processClaim).orElseGet(() -> result(Outcome.NO_JOB, null));
+    }
+
+    private AiSuggestionProcessingResult processClaim(AiJobClaim claim) {
         Optional<StoredAiSuggestionInput> stored;
         try {
             stored = inputs.findCurrentInput(claim);
@@ -100,6 +138,11 @@ public final class AiSuggestionJobProcessor {
             // Claim Service has returned through its proxy: reservation Commit is already done.
             rawOutput = provider.generate(prepared, timeout, claim.requestKind());
         } catch (AiProviderFailureException exception) {
+            AiAttemptResultCode code = exception.kind() == AiProviderFailureException.Kind.OUTCOME_UNKNOWN
+                    ? AiAttemptResultCode.OUTCOME_UNKNOWN : AiAttemptResultCode.AUTO_RETRY_BLOCKED;
+            if (!recordAttemptResult(claim, code)) {
+                return result(Outcome.NOT_CURRENT, claim);
+            }
             return switch (exception.kind()) {
                 case REFUSED -> fail(claim, AiJobFailureCode.PROVIDER_REFUSED);
                 case CONFIGURATION -> fail(claim, AiJobFailureCode.ADAPTER_CONFIGURATION_ERROR);
@@ -114,6 +157,7 @@ public final class AiSuggestionJobProcessor {
                 case OUTCOME_UNKNOWN -> result(Outcome.PROVIDER_OUTCOME_UNKNOWN, claim);
             };
         } catch (RuntimeException exception) {
+            recordAttemptResult(claim, AiAttemptResultCode.AUTO_RETRY_BLOCKED);
             throw new IllegalStateException("AI_PROVIDER_ADAPTER_FAILED");
         }
 
@@ -121,6 +165,9 @@ public final class AiSuggestionJobProcessor {
         try {
             output = validator.validate(rawOutput);
         } catch (InvalidOutputException exception) {
+            if (!recordAttemptResult(claim, AiAttemptResultCode.AUTO_RETRY_BLOCKED)) {
+                return result(Outcome.NOT_CURRENT, claim);
+            }
             if (exception.repairableRequiredFieldMissing()) {
                 if (claims.scheduleOutputRepair(claim)) {
                     return result(Outcome.OUTPUT_REPAIR_SCHEDULED, claim);
@@ -176,6 +223,14 @@ public final class AiSuggestionJobProcessor {
 
     private AiSuggestionProcessingResult fail(AiJobClaim claim, AiJobFailureCode code) {
         return result(claims.failIfCurrent(claim, code) ? Outcome.FAILED : Outcome.NOT_CURRENT, claim);
+    }
+
+    private boolean recordAttemptResult(AiJobClaim claim, AiAttemptResultCode code) {
+        try {
+            return claims.recordAttemptResultIfCurrent(claim, code);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("AI_ATTEMPT_RESULT_RECORD_FAILED");
+        }
     }
 
     /** A failed read is not proof of an absent result and never authorizes a write. */

@@ -61,7 +61,7 @@ class AiStorageRetryMigrationIntegrationTest {
                 + "finished_at = clock_timestamp(), last_failure_code = 'RESULT_STORAGE_RETRY_EXHAUSTED' WHERE id = ?", secondJob))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
-        Flyway.configure().dataSource(dataSource).load().migrate();
+        Flyway.configure().dataSource(dataSource).target("6").load().migrate();
 
         assertThat(jdbc.queryForMap("SELECT * FROM ai_suggestion_jobs WHERE id = ?", jobId)).isEqualTo(jobBefore);
         assertThat(jdbc.queryForMap("SELECT * FROM ai_suggestion_attempts WHERE job_id = ?", jobId)).isEqualTo(reservationBefore);

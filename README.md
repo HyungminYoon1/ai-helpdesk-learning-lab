@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·저장 재시도 — Java 364개·JavaScript 104개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·Context 재시작 확인. 결과 불명 자동 복구·새 Browser 검증은 후속 단계
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·저장 재시도·조건부 복구 — Java 384개·JavaScript 104개 통과
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·조건부 복구·Context 재시작 확인. 실제 JVM 재시작·새 Browser 검증은 후속 단계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -301,7 +301,8 @@ target/surefire-reports/
 | 실제 Java AI→PostgreSQL | 선택 Live Test 완료 | 2026-10-06 실제 HTTP 1회·`200`, 원문 보존·Job `SUCCEEDED`·Suggestion 1건·Category 1건과 별도 Live Test 1개 통과. 자동 Worker·Browser·요약 수동 평가는 별도 |
 | 선택 자동 Worker·Rate Limit 대기 | 실제 PostgreSQL·통제된 Provider 검증 완료 | V5·대기 예약·자동 처리·설정·안전한 Log의 새 Test 31개 통과. 재시도 전 추가 예약 없음, 최종 FAILED 제외, 같은 JVM의 새 Context에서 정책·횟수·기한 유지 |
 | 검증 객체의 제한된 저장 재시도 | 실제 PostgreSQL·통제된 Provider 검증 완료 | 기본 총 3회·최소 5초, 기존 결과 재조회·현재 Attempt·원래 기한 확인. 새 Test 15개, 실제 Rollback·저장 후 응답 유실 주입·조회 실패·종료 경쟁과 원문 보존 확인. 추가 AI 생성 없음 |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 364개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
+| Attempt별 결과와 조건부 RUNNING 복구 | 실제 PostgreSQL·통제된 Provider 검증 완료 | V7·결과 분류·DB 결과 확인 뒤의 조건부 Claim. 새 Test 20개, 경쟁 선점·조회 실패·원장 실패 Rollback과 새 Context의 재시도 미승인 유지 확인. 원격 Provider 조회·실제 JVM 재시작은 별도 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 384개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -388,7 +389,7 @@ Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User I
 
 [V3 Migration](./src/main/resources/db/migration/V3__add_job_policy_and_execution_reservations.sql)은 V1·V2를 수정하지 않고 Job Column과 예약 원장을 추가한다. 기존 V2 Job은 기본 정책으로 이행하고 출처를 `V2_MIGRATION`으로 표시한다. Application의 새 등록은 `APPLICATION`으로 표시한다. 예약 원장에는 Job·Attempt·요청 종류·예약 시각만 저장하며 문의 본문·Prompt·Credential을 복사하지 않는다.
 
-[AiSuggestionJobClaimService](./src/main/java/lab/helpdesk/ai/job/AiSuggestionJobClaimService.java)는 `REQUIRES_NEW` Transaction에서 실행권 변경과 원장 INSERT를 함께 Commit한 뒤 반환한다. `PENDING` 조회는 `FOR UPDATE SKIP LOCKED`를 사용한다. `RUNNING`의 기한 만료만으로 자동 재호출하지 않으며 가능한 기존 결과 확인 뒤 사용할 복구 경로를 분리했다. 실패 기록·출력 보완은 현재 Attempt만 반영한다.
+[AiSuggestionJobClaimService](./src/main/java/lab/helpdesk/ai/job/AiSuggestionJobClaimService.java)는 `REQUIRES_NEW` Transaction에서 실행권 변경과 원장 INSERT를 함께 Commit한 뒤 반환한다. `PENDING` 조회는 `FOR UPDATE SKIP LOCKED`를 사용한다. `RUNNING`의 기한 만료만으로 재호출하지 않으며, 아래 V7 단계에서 기존 결과·현재 Attempt별 분류·횟수·기한 확인 뒤의 조건부 복구를 연결했다. 실패 기록·출력 보완은 현재 Attempt만 반영한다.
 
 [실행권 Integration Test](./src/test/java/lab/helpdesk/ai/job/AiSuggestionJobExecutionIntegrationTest.java)는 경쟁 Claim·복구, 잠긴 Job 건너뛰기, 원장 실패 Rollback, 전체·보완 한도, 처리 기한과 정책 복원을 실제 PostgreSQL에서 확인한다. 새 Repository 객체의 복원 Test는 Application·JVM 재시작 근거와 구분한다. 설정 10개·Migration 1개·실행권 18개와 전체 Java 236개·JavaScript 79개가 통과했다.
 
@@ -438,7 +439,7 @@ Model은 `gpt-6-luna`, reasoning은 `none`, 출력 상한은 600 Token, `store=f
 
 [단일 전송 HTTP Client](./src/main/java/lab/helpdesk/ai/provider/SingleAttemptOpenAiHttpClient.java)는 SDK 재시도와 HTTP 연결 재시도·자동 Redirect·환경 Proxy를 끈다. 직렬화가 끝난 실제 Body를 개인정보 Guard와 Credential 검사에 통과시킨 뒤 한 번 전송한다. 요청은 32 KiB, 응답은 64 KiB 상한을 둔다. DB의 원문은 변경하지 않으며 Guard는 설정한 민감 값만 검사하는 현재 범위를 유지한다.
 
-명시적 거부, 인증·과금 설정 오류, 완료되지 않은 출력, 일시적 Rate Limit, 결과 불명 실패를 구분한다. 유효한 `Retry-After`의 초·HTTP-date 값은 최소 대기로 전달하고 Adapter 안에서는 재호출하거나 대기하지 않는다. Processor는 일시적 거절의 안전한 Metadata를 Worker에 전달한다. 아래 Worker는 확인된 Rate Limit과 유효한 최소 대기만 재예약하며 결과 불명 복구는 별도로 남긴다. 응답 원문·Credential·SDK 예외 Cause는 오류에 복사하지 않는다. 사용량이나 반환 Model·Service Tier에 대한 요금 확인이 없으면 비용을 0으로 기록하지 않는다.
+명시적 거부, 인증·과금 설정 오류, 완료되지 않은 출력, 일시적 Rate Limit, 결과 불명 실패를 구분한다. 유효한 `Retry-After`의 초·HTTP-date 값은 최소 대기로 전달하고 Adapter 안에서는 재호출하거나 대기하지 않는다. Processor는 일시적 거절의 안전한 Metadata를 Worker에 전달한다. 아래 Worker는 확인된 Rate Limit과 유효한 최소 대기만 재예약하며, 결과 불명 복구는 Attempt별 코드·기한·한도를 확인하는 별도 Claim으로 처리한다. 응답 원문·Credential·SDK 예외 Cause는 오류에 복사하지 않는다. 사용량이나 반환 Model·Service Tier에 대한 요금 확인이 없으면 비용을 0으로 기록하지 않는다.
 
 [Adapter HTTP Test](./src/test/java/lab/helpdesk/ai/provider/SpringAiOpenAiSuggestionProviderTest.java) 44개는 실제 HTTP·Spring AI·SDK와 통제된 로컬 응답을 사용한다. 재시도 대상 Status·Timeout에도 요청 1회, 마스킹·Credential 검사 실패에는 요청 0회를 확인했다. 요청별 옵션의 기본 Model 덮어쓰기도 실제 전송 Body Assertion으로 잡아 수정했다. PostgreSQL 처리 Test는 19개이며, 전체 Java Clean Test 318개가 통과했다. 이 회귀 검증의 유료 호출은 0회다. 실제 AI 호출·자동 Worker·Browser E2E는 별도 실행 근거가 필요하다.
 
@@ -483,7 +484,7 @@ Windows 기동 오류를 수정한 뒤 사용자가 명시적으로 재실행할
 
 [설정](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionWorkerConfiguration.java)은 `postgres` Profile과 `helpdesk.ai.worker.enabled=true`에서만 활성화된다. 기본은 꺼짐이며 확인 간격 `helpdesk.ai.worker.poll-delay-ms`의 기본값은 1,000ms다. Provider·개인정보 Guard·출력 검증기를 명시적으로 제공해야 하며, 전역 Key나 Runtime 요약 상한을 자동 선택하지 않는다. 설정값을 켜는 것만으로 Live Provider가 만들어지지는 않는다.
 
-최종 `FAILED`는 일반 Polling 대상에서 제외한다. 크레딧·설정 오류를 같은 요청으로 반복하지 않는다. 대기 Header가 없거나 원인이 불명확하면 이번 Worker가 새로운 자동 재호출 규칙을 부여하지 않는다. 결과 불명 `RUNNING`의 새 생성·Process 종료로 사라진 객체의 복구·관리자 재개와 실제 유료 Runtime 조립은 후속 단계다. 메모리에 남은 객체의 저장 재시도는 아래와 같이 연결했다. Scheduler 오류는 메시지·Cause 없이 `AI_WORKER_TICK_FAILED`만 Log에 남긴다.
+최종 `FAILED`는 일반 Polling 대상에서 제외한다. 크레딧·설정 오류를 같은 요청으로 반복하지 않는다. 대기 Header가 없는 Rate Limit과 다른 미승인 일시 거절은 V7의 결과 코드로 복구 경로에서도 재호출을 막는다. 아래에 조건부 결과 불명 복구를 연결했으며, 관리자 재개·응답 객체의 영속 복원과 실제 유료 Runtime 조립은 후속 단계다. 메모리에 남은 객체의 저장 재시도는 아래와 같이 연결했다. Scheduler 오류는 메시지·Cause 없이 `AI_WORKER_TICK_FAILED`만 Log에 남긴다.
 
 재시도·Migration Test 11개, Worker Test 9개, 설정 Test 5개, Scheduler Test 2개, Context Test 4개가 통과했다. 같은 PostgreSQL을 유지한 Context 재시작에서 미실행 `PENDING`과 미래 대기 시각을 이어갔고, 최종 실패와 Lease가 만료된 결과 불명 `RUNNING`은 임의로 재실행하지 않았다. 이는 같은 JVM의 Spring Context 재시작이며 실제 JVM Process·DB Container 재시작은 별도 검증한다. 이번 Provider 응답은 통제된 합성값이고 새 유료 AI 호출은 0회다.
 
@@ -509,11 +510,29 @@ Windows 기동 오류를 수정한 뒤 사용자가 명시적으로 재실행할
 .\mvnw.cmd "-Dtest=AiSuggestionStorageRetryIntegrationTest,AiStorageRetryMigrationIntegrationTest,AiSuggestionWorkerConfigurationTest" test
 ```
 
+### Attempt별 결과와 조건부 RUNNING 복구
+
+[V7](./src/main/resources/db/migration/V7__record_attempt_result_classification.sql)은 예약 원장에 `result_code`를 추가한다. 새 예약은 `UNCONFIRMED`, 결과 불명 관찰은 `OUTCOME_UNKNOWN`, 알려진 실패의 미승인 자동 복구는 `AUTO_RETRY_BLOCKED`다. 기존 예약에는 결과 분류가 없으므로 보수적으로 금지 코드를 적용한다. 이 이행은 과거 Provider의 실제 거절을 증명하지 않으며, 원문·정책·횟수·기한·기존 예약 Column과 제안은 유지한다.
+
+Processor는 확인한 Provider 실패·거절과 잘못된 출력의 코드부터 Commit한다. 유효한 Rate Limit 대기·필수 Field 보완은 그 다음 별도의 승인된 PENDING 경로로 기록한다. 새 Attempt는 자기 결과 코드를 사용하므로 Job에 남은 이전 `last_failure_code`와 혼동하지 않는다. 금지 코드는 결과 불명 경로를 차단하지만 이미 승인해 저장한 대기 경로까지 취소하지 않는다.
+
+Worker는 검증 객체가 있으면 저장 재시도를 우선하고, PENDING 처리가 없을 때 만료된 결과 미확인·불명 실행을 찾는다. DB의 기존 결과를 읽은 뒤 복구 Claim에서 현재 Attempt·RUNNING·허용 코드·Lease+Backoff·원래 전체 기한·남은 전체 생성 한도·기존 제안 부재를 다시 확인한다. 조회 실패는 `RECOVERY_STATE_UNCONFIRMED`이며 추가 예약·호출을 하지 않는다. 제안 없이 완료된 ABSTAIN도 재생성하지 않는다.
+
+결과 분류와 복구 Claim은 같은 Job Row Lock을 사용한다. 복구는 짧은 `READ COMMITTED` Transaction에서 `FOR UPDATE SKIP LOCKED`로 먼저 잠그고, 뒤의 SQL 문장이 새 Snapshot으로 코드를 확인한다. 조건을 만족하면 새 Attempt·원장 INSERT를 함께 Commit하고 Provider는 Transaction 밖에서 호출한다. 예약 INSERT 실패는 Attempt 증가도 Rollback한다. 이전 Attempt는 현재 결과 코드를 바꾸지 못하며, 금지된 실행을 불명 상태로 되돌리지 않는다.
+
+[복구 Test](./src/test/java/lab/helpdesk/ai/processing/AiSuggestionRecoveryIntegrationTest.java) 18개, [V6→V7 Test](./src/test/java/lab/helpdesk/ai/job/AiAttemptResultMigrationIntegrationTest.java) 1개와 Context 추가 1개가 통과했다. 기존 Context의 불명 실행 사례도 조건부 복구로 갱신했다. 실패 주입·경쟁 Claim·기존 Commit·대기 Hint 없는 거절·원문 보존을 실제 PostgreSQL에서 확인했다. 전체 Java Clean Test 384개·JavaScript 104개·ESLint가 통과했고 새 유료 호출은 0회다.
+
+현재 Provider Port에는 원격 결과 조회가 없다. 응답을 받았더라도 코드 Commit 전에 Process가 끝나거나 DB 기록이 실패하면 원장에는 `UNCONFIRMED`가 남을 수 있다. 이를 미실행이라고 판단하거나 예약을 반환하지 않는다. 검증 객체가 Process와 함께 사라지면 기존 DB 결과 확인 뒤 위 정책 안에서만 새 생성한다. DB의 제안 한 건은 외부 실행의 정확히 한 번을 보장하지 않는다. Context Test는 같은 JVM의 재조립이며 실제 JVM Process 중단·재시작은 다음 검증이다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionRecoveryIntegrationTest,AiAttemptResultMigrationIntegrationTest,AiSuggestionWorkerContextIntegrationTest" test
+```
+
 ## 현재 Application 비범위
 
 - 외부 운영 Database 구성과 Backup·복구
 - Production용 인증·사용자 권한 검사와 운영 Credential 관리
-- 결과 불명 RUNNING의 자동 복구·Provider 결과 조회·Process 종료 후 응답 객체 복구와 운영 Application의 유료 AI 자동 처리. 선택 Worker의 통제된 Provider Test와 구분한다.
+- 원격 Provider 결과 조회·응답 객체 영속 보관·실제 JVM Process 복구 검증과 운영 Application의 유료 AI 자동 조립. 선택 Worker의 조건부 복구·같은 JVM의 Context Test와 구분한다.
 - 담당자 할당, Comment와 이력 조회
 - Ticket 전체 CRUD와 검색·정렬·Pagination
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현

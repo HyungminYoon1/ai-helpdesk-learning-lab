@@ -165,7 +165,7 @@ class AiSuggestionWorkerContextIntegrationTest {
     }
 
     @Test
-    void an_expired_running_lease_is_not_implicitly_replayed_after_context_restart() throws Exception {
+    void a_new_context_recovers_an_unknown_attempt_after_result_and_eligibility_checks() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         TicketReceiptResult unknown;
         try (ConfigurableApplicationContext first = start(false, (input, timeout, kind) -> VALID)) {
@@ -183,16 +183,50 @@ class AiSuggestionWorkerContextIntegrationTest {
             calls.incrementAndGet();
             return VALID;
         })) {
+            awaitSucceeded(unknown.jobId());
             TicketReceiptResult fresh = receive(second);
             awaitSucceeded(fresh.jobId());
-            assertThat(calls).hasValue(2);
+            assertThat(calls).hasValue(3);
             assertThat(jdbc.queryForObject("SELECT status FROM ai_suggestion_jobs WHERE id = ?", String.class, unknown.jobId()))
-                    .isEqualTo("RUNNING");
+                    .isEqualTo("SUCCEEDED");
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ai_suggestion_attempts WHERE job_id = ?", Long.class, unknown.jobId()))
-                    .isOne();
+                    .isEqualTo(2);
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_suggestions WHERE job_id = ?", Long.class, unknown.jobId()))
-                    .isZero();
+                    .isOne();
             assertOriginal(unknown);
+        }
+    }
+
+    @Test
+    void a_new_context_does_not_replay_a_known_rate_limit_without_a_wait_hint() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        TicketReceiptResult blocked;
+        try (ConfigurableApplicationContext first = start(false, (input, timeout, kind) -> VALID)) {
+            blocked = receive(first);
+            AiSuggestionJobWorker worker = manualWorker(first, (input, timeout, kind) -> {
+                calls.incrementAndGet();
+                throw new AiProviderFailureException(Kind.TEMPORARY_REJECTION, Reason.RATE_LIMIT, null);
+            });
+            assertThat(worker.runOnce().outcome()).isEqualTo(Outcome.TEMPORARY_REJECTION);
+            assertThat(jdbc.queryForObject("SELECT result_code FROM ai_suggestion_attempts WHERE job_id = ?",
+                    String.class, blocked.jobId())).isEqualTo("AUTO_RETRY_BLOCKED");
+            jdbc.update("UPDATE ai_suggestion_jobs SET lease_expires_at = clock_timestamp() - INTERVAL '1 minute' WHERE id = ?",
+                    blocked.jobId());
+        }
+        try (ConfigurableApplicationContext second = start(true, (input, timeout, kind) -> {
+            calls.incrementAndGet();
+            return VALID;
+        })) {
+            TicketReceiptResult fresh = receive(second);
+            awaitSucceeded(fresh.jobId());
+            assertThat(calls).hasValue(2); // Old rejection plus a different fresh Job, not an old-Job retry.
+            assertThat(jdbc.queryForObject("SELECT current_attempt FROM ai_suggestion_jobs WHERE id = ?",
+                    Integer.class, blocked.jobId())).isOne();
+            assertThat(jdbc.queryForObject("SELECT status FROM ai_suggestion_jobs WHERE id = ?",
+                    String.class, blocked.jobId())).isEqualTo("RUNNING");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_suggestions WHERE job_id = ?",
+                    Long.class, blocked.jobId())).isZero();
+            assertOriginal(blocked);
         }
     }
 

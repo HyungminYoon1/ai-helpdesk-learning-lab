@@ -64,7 +64,29 @@ public class JdbcAiSuggestionJobExecutionRepository implements AiSuggestionJobEx
               AND j.lease_expires_at + j.retry_backoff_ms * INTERVAL '1 millisecond' <= m.now
               AND j.processing_deadline_at > m.now
               AND j.reserved_generation_count < j.max_generation_attempts
+              AND EXISTS (
+                  SELECT 1 FROM ai_suggestion_attempts a
+                  WHERE a.job_id = j.id AND a.attempt_number = j.current_attempt
+                    AND a.result_code IN ('UNCONFIRMED', 'OUTCOME_UNKNOWN'))
+              AND NOT EXISTS (SELECT 1 FROM ticket_suggestions s WHERE s.job_id = j.id)
             RETURNING j.*
+            """;
+
+    private static final String FIND_RECOVERY_SQL = """
+            WITH moment AS MATERIALIZED (SELECT clock_timestamp() AS now)
+            SELECT j.id, j.current_attempt
+            FROM ai_suggestion_jobs j
+            JOIN ai_suggestion_attempts a
+              ON a.job_id = j.id AND a.attempt_number = j.current_attempt
+            CROSS JOIN moment m
+            WHERE j.status = 'RUNNING'
+              AND a.result_code IN ('UNCONFIRMED', 'OUTCOME_UNKNOWN')
+              AND j.lease_expires_at + j.retry_backoff_ms * INTERVAL '1 millisecond' <= m.now
+              AND j.processing_deadline_at > m.now
+              AND j.reserved_generation_count < j.max_generation_attempts
+              AND NOT EXISTS (SELECT 1 FROM ticket_suggestions s WHERE s.job_id = j.id)
+            ORDER BY j.created_at, j.id
+            LIMIT 1
             """;
 
     private static final String EXPIRE_DEADLINES_SQL = """
@@ -157,10 +179,22 @@ public class JdbcAiSuggestionJobExecutionRepository implements AiSuggestionJobEx
     }
 
     @Override
+    public Optional<AiJobRecoveryCandidate> findNextRecoveryCandidate() {
+        return jdbcTemplate.query(FIND_RECOVERY_SQL, (row, number) ->
+                new AiJobRecoveryCandidate(row.getLong("id"), row.getInt("current_attempt")))
+                .stream().findFirst();
+    }
+
+    @Override
     public Optional<AiJobClaim> claimRecovery(long jobId, int expectedAttempt) {
         requireTransaction();
         if (jobId <= 0 || expectedAttempt <= 0) {
             throw new IllegalArgumentException("invalid recovery metadata");
+        }
+        // Serialize result classification and recovery on the same Job row. The next
+        // statement takes a fresh READ COMMITTED snapshot after acquiring this lock.
+        if (!lockCurrentJob(jobId, expectedAttempt, true)) {
+            return Optional.empty();
         }
         return jdbcTemplate.query(CLAIM_RECOVERY_SQL, this::readClaim, jobId, expectedAttempt)
                 .stream().findFirst();
@@ -177,6 +211,25 @@ public class JdbcAiSuggestionJobExecutionRepository implements AiSuggestionJobEx
         if (rows != 1) {
             throw new IllegalStateException("job reservation was not recorded");
         }
+    }
+
+    @Override
+    public boolean recordAttemptResultIfCurrent(AiJobClaim claim, AiAttemptResultCode resultCode) {
+        requireTransaction();
+        Objects.requireNonNull(claim);
+        Objects.requireNonNull(resultCode);
+        if (resultCode == AiAttemptResultCode.UNCONFIRMED) {
+            throw new IllegalArgumentException("AI_ATTEMPT_RESULT_RESET_FORBIDDEN");
+        }
+        if (!lockCurrentJob(claim.jobId(), claim.attemptNumber(), false)) {
+            return false;
+        }
+        // A blocked Attempt cannot be changed into an eligible unknown result.
+        return jdbcTemplate.update("""
+                UPDATE ai_suggestion_attempts SET result_code = ?
+                WHERE job_id = ? AND attempt_number = ?
+                  AND (result_code <> 'AUTO_RETRY_BLOCKED' OR result_code = ?)
+                """, resultCode.name(), claim.jobId(), claim.attemptNumber(), resultCode.name()) == 1;
     }
 
     @Override
@@ -242,6 +295,15 @@ public class JdbcAiSuggestionJobExecutionRepository implements AiSuggestionJobEx
                 row.getObject("first_started_at", OffsetDateTime.class).toInstant(),
                 row.getObject("processing_deadline_at", OffsetDateTime.class).toInstant(),
                 row.getObject("lease_expires_at", OffsetDateTime.class).toInstant());
+    }
+
+    private boolean lockCurrentJob(long jobId, int expectedAttempt, boolean skipLocked) {
+        String sql = """
+                SELECT id FROM ai_suggestion_jobs
+                WHERE id = ? AND current_attempt = ? AND status = 'RUNNING'
+                FOR UPDATE
+                """ + (skipLocked ? " SKIP LOCKED" : "");
+        return !jdbcTemplate.queryForList(sql, Long.class, jobId, expectedAttempt).isEmpty();
     }
 
     private static void requireTransaction() {

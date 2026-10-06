@@ -41,6 +41,9 @@ public final class AiSuggestionJobWorker {
             return retryPendingStorage();
         }
         AiSuggestionProcessingResult result = processor.processNextPending();
+        if (result.outcome() == Outcome.NO_JOB) {
+            result = processor.processNextRecoverable();
+        }
         if (result.outcome() == Outcome.STORAGE_PENDING) {
             AiJobClaim claim = Objects.requireNonNull(result.claim());
             ContractValidatedOutput output = Objects.requireNonNull(result.pendingStorageOutput());
@@ -48,7 +51,7 @@ public final class AiSuggestionJobWorker {
             return result;
         }
         if (result.outcome() != Outcome.TEMPORARY_REJECTION || result.minimumRetryDelay() == null) {
-            // Unknown outcomes, missing hints, and storage retries are not new generation permission.
+            // Missing hints are durably blocked. Unknown recovery must satisfy the separate claim.
             return result;
         }
         Outcome outcome = switch (claims.scheduleRateLimitRetry(result.claim(), result.minimumRetryDelay())) {

@@ -6,9 +6,13 @@ public interface AiSuggestionJobExecutionRepository {
 
     Optional<AiJobClaim> claimNextPending();
 
+    Optional<AiJobRecoveryCandidate> findNextRecoveryCandidate();
+
     Optional<AiJobClaim> claimRecovery(long jobId, int expectedAttempt);
 
     void recordReservation(AiJobClaim claim);
+
+    boolean recordAttemptResultIfCurrent(AiJobClaim claim, AiAttemptResultCode resultCode);
 
     int expireProcessingDeadlines();
 

@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,14 +29,24 @@ public class AiSuggestionJobClaimService {
         return claim;
     }
 
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public Optional<AiJobRecoveryCandidate> findNextRecoveryCandidate() {
+        return jobs.findNextRecoveryCandidate();
+    }
+
     // 후속 Worker는 가능한 기존 결과 확인을 마친 뒤에만 이 복구 경로를 호출한다.
     // 이 메서드가 Provider 조회나 미실행 확인을 대신하는 것은 아니다.
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public Optional<AiJobClaim> claimRecoveryAfterResultCheck(long jobId, int expectedAttempt) {
         jobs.expireProcessingDeadlines();
         Optional<AiJobClaim> claim = jobs.claimRecovery(jobId, expectedAttempt);
         claim.ifPresent(jobs::recordReservation);
         return claim;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public boolean recordAttemptResultIfCurrent(AiJobClaim claim, AiAttemptResultCode resultCode) {
+        return jobs.recordAttemptResultIfCurrent(claim, resultCode);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
