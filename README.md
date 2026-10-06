@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
 > 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI — Java 449개·JavaScript 145개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장, AGENT 읽기 전용 조회와 최소 화면의 응답 분기까지의 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·조건부 복구·서로 다른 JVM Process 재시작·실제 Browser 흐름 확인. 유료 자동 Worker 연결과 요약 수동 평가는 후속 단계
+> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장, AGENT 읽기 전용 조회와 최소 화면까지의 흐름. 통제된 Provider의 조건부 복구·서로 다른 JVM Process 재시작과 실제 AI의 Browser·자동 Worker·PostgreSQL·AGENT 화면 연결 확인. 요약 수동 평가·독립 복습과 WIL은 후속 단계
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -305,7 +305,8 @@ target/surefire-reports/
 | Worker의 실제 JVM 종료·재시작 | 실제 PostgreSQL·통제된 Provider 검증 완료 | 새 Test 5개. 첫 Java Process 종료를 확인하고 다른 PID로 같은 DB를 연결해 PENDING·결과 미확인/불명·재시도 금지·미래 대기를 확인. 정책·누적 예약·원래 기한·원문 유지 |
 | AGENT 전용 AI 상태·제안 조회 | 실제 PostgreSQL·Security·MockMvc 검증 완료 | 새 Test 55개. 익명 401·USER 403, 최초 Message의 Job 조회, 다섯 상태·명시적 null·고정 실패 코드, 정합성/조회 오류의 안전한 500, 반복 조회의 불변과 Provider 미호출 |
 | 담당자 최소 AI 조회 화면 | JavaScript·정적 Resource MockMvc 검증 완료 | 조회 Client·Text 표시·Page 연결의 새 Node Test 29개와 정적 파일·익명 API 차단의 MockMvc Test 5개 통과. 실제 Browser·새 유료 Worker는 별도 |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 449개·JavaScript Test 133개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
+| Browser·자동 Worker·실제 AI·PostgreSQL | 별도 Live Experiment 완료 | 2026-10-06 실제 USER 접수 `201`·예약된 Worker·AI HTTP 1회·제안 저장·AGENT 조회 `200`. 원문·인증 작성자 보존, 화면·DB 일치와 조회 무변경 확인. Ticket OPEN·제안 PENDING_REVIEW이며 수동 내용 평가는 NOT_SCORED |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 449개·JavaScript Test 145개, ESLint 통과. 실패·오류·건너뜀 0, 회귀의 유료 AI 호출 0회. 별도 무료 Browser Experiment·실제 AI Live Experiment 각 1개와 구분 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -604,7 +605,15 @@ node .\scripts\week7-worker-browser-live.mjs --dry-run
 node .\scripts\week7-worker-browser-live.mjs --smoke
 ```
 
-`--smoke`는 통제된 Provider를 사용한다. 실제 Browser·Session·CSRF·자동 Worker·PostgreSQL·화면을 확인하지만 유료 AI 호출은 0회다. 일반 Java 회귀와 별도로 선택하는 Experiment 한 건이다. 실제 Provider 모드는 전용 PowerShell에서 실행한다.
+`--smoke`는 통제된 Provider를 사용한다. 실제 Browser·Session·CSRF·자동 Worker·PostgreSQL·화면을 확인하지만 유료 AI 호출은 0회다. 일반 Java 회귀와 별도로 선택하는 Experiment 한 건이다. 실제 Provider 모드는 Lab Repository Root의 전용 PowerShell에서 실행한다. 상대 경로는 현재 폴더를 기준으로 해석하므로 다른 폴더에서 실행하면 스크립트를 찾지 못한다.
+
+새 PowerShell Process에는 이전 창의 키가 자동으로 이어지지 않는다. 아래의 가려진 입력으로 Helpdesk 전용 키만 현재 Process에 설정한다. 기존 `OPENAI_API_KEY`는 변경하지 않고 키 값을 Console에 출력하지 않는다.
+
+```powershell
+$helpdeskKeyInput = Read-Host 'Helpdesk 전용 API 키' -AsSecureString
+$env:HELPDESK_OPENAI_API_KEY = [System.Net.NetworkCredential]::new('', $helpdeskKeyInput).Password
+Remove-Variable helpdeskKeyInput
+```
 
 ```powershell
 # 해당 날짜에 비용 상한 해제를 명시적으로 승인한 경우에만 실행한다.
@@ -616,7 +625,9 @@ node .\scripts\week7-worker-browser-live.mjs --live --confirm-helpdesk-key --con
 
 사용량 추정에는 기존의 보수적인 입력 `$0.125/M`·출력 `$0.50/M`을 유지한다. 현재 공식 Standard 입력 단가는 `$0.10/M`이며, 추정 원장을 실제 청구액으로 표현하지 않는다. [GPT-6 Luna 요금](https://developers.openai.com/api/docs/models/gpt-6-luna)
 
-새 실행기 Test 12개를 포함한 JavaScript 145개와 ESLint가 통과했다. 통제된 Provider의 실제 Browser Experiment는 접수 `201`·누락 CSRF `403`·익명 조회 `401`·USER 조회 `403`·AGENT 조회 `200`, 원문·인증 작성자 보존, 예약·제안·분류 각 1건, 화면과 DB 일치·조회 무변경을 확인했다. 실제 유료 자동 Worker 결과는 별도 Live Report를 받은 뒤 기록한다.
+새 실행기 Test 12개를 포함한 JavaScript 145개와 ESLint가 통과했다. 통제된 Provider의 실제 Browser Experiment 뒤 같은 수직 흐름의 실제 AI Live Experiment도 완료했다. 2026-10-06 사용자 실행의 `LIVE_WORKER_BROWSER_POSTGRES`·`completed: true`와 Local Report·별도 JUnit 1개 통과·AGENT Screenshot을 대조했다. 접수 `201`·누락 CSRF `403`·익명 조회 `401`·USER 조회 `403`·AGENT 조회 `200`, 원문·인증 작성자 보존, 예약·제안·분류 각 1건, 화면과 DB 일치·조회 무변경을 확인했다.
+
+실제 생성 HTTP 요청은 1회·Provider `200`, 사용량은 입력 1,169·출력 57 Token이다. 해당 호출 추정치는 `$0.000174625`이며 이전 비용 미확인과 보류 이력은 그대로 유지한다. Ticket은 `OPEN`, Job은 `SUCCEEDED`, 제안은 `PENDING_REVIEW`다. 실행기의 `manualContentReview: NOT_SCORED`는 원문 대조·수동 채점 전 상태이며, 연결 성공을 요약 정확성이나 문의 해결로 표현하지 않는다. 이번 실제 실행은 Test 전용 조립의 근거이고 일반 Application의 유료 자동 구성·Job 정책·Migration은 변경하지 않았다.
 
 ## 현재 Application 비범위
 
