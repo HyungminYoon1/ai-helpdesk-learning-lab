@@ -178,6 +178,56 @@ public final class AiSuggestionJobProcessor {
         return result(claims.failIfCurrent(claim, code) ? Outcome.FAILED : Outcome.NOT_CURRENT, claim);
     }
 
+    /** A failed read is not proof of an absent result and never authorizes a write. */
+    public AiSuggestionProcessingResult inspectStorageRetry(AiJobClaim claim) {
+        requireNoOuterTransaction();
+        Objects.requireNonNull(claim);
+        try {
+            Optional<AiSuggestionStoredResult> stored = results.findStoredResult(claim.jobId());
+            if (stored.isEmpty()) {
+                return result(Outcome.NOT_CURRENT, claim);
+            }
+            AiSuggestionStoredResult existing = stored.orElseThrow();
+            if (existing.job().currentAttempt() != claim.attemptNumber()) {
+                return result(Outcome.NOT_CURRENT, claim);
+            }
+            Outcome outcome = switch (existing.job().status()) {
+                case SUCCEEDED -> existing.suggestion().isPresent()
+                        ? Outcome.STORED : Outcome.STORAGE_STATE_UNCONFIRMED;
+                case ABSTAINED -> existing.suggestion().isEmpty()
+                        ? Outcome.ABSTAINED : Outcome.STORAGE_STATE_UNCONFIRMED;
+                case FAILED -> existing.suggestion().isEmpty()
+                        ? Outcome.FAILED : Outcome.STORAGE_STATE_UNCONFIRMED;
+                case PENDING -> Outcome.NOT_CURRENT;
+                case RUNNING -> existing.suggestion().isEmpty()
+                        ? Outcome.STORAGE_RETRY_READY : Outcome.STORAGE_STATE_UNCONFIRMED;
+            };
+            return result(outcome, claim);
+        } catch (RuntimeException exception) {
+            return result(Outcome.STORAGE_STATE_UNCONFIRMED, claim);
+        }
+    }
+
+    /** Conditional termination cannot overwrite a competing completion or a newer Attempt. */
+    public AiSuggestionProcessingResult finishStorageRetry(AiJobClaim claim, AiJobFailureCode code) {
+        requireNoOuterTransaction();
+        Objects.requireNonNull(claim);
+        if (code != AiJobFailureCode.RESULT_STORAGE_RETRY_EXHAUSTED
+                && code != AiJobFailureCode.JOB_PROCESSING_DEADLINE_EXCEEDED) {
+            throw new IllegalArgumentException("AI_STORAGE_RETRY_STOP_INVALID");
+        }
+        try {
+            if (claims.failIfCurrent(claim, code)) {
+                return result(Outcome.FAILED, claim);
+            }
+        } catch (RuntimeException exception) {
+            return result(Outcome.STORAGE_STATE_UNCONFIRMED, claim);
+        }
+        AiSuggestionProcessingResult inspected = inspectStorageRetry(claim);
+        return inspected.outcome() == Outcome.STORAGE_RETRY_READY
+                ? result(Outcome.STORAGE_STATE_UNCONFIRMED, claim) : inspected;
+    }
+
     private AiSuggestionProcessingResult result(Outcome outcome, AiJobClaim claim) {
         return new AiSuggestionProcessingResult(outcome, claim, null);
     }

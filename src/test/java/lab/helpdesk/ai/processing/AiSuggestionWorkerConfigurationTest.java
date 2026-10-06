@@ -71,4 +71,29 @@ class AiSuggestionWorkerConfigurationTest {
         assertThatThrownBy(() -> new AiSuggestionWorkerSettings(-1))
                 .isInstanceOf(IllegalArgumentException.class).hasMessage("AI_WORKER_POLL_DELAY_INVALID");
     }
+
+    @Test
+    void storage_defaults_and_overrides_are_bound_to_the_worker_settings() {
+        var defaults = new Binder(new MapConfigurationPropertySource(Map.of()))
+                .bindOrCreate("helpdesk.ai.worker", AiSuggestionWorkerSettings.class);
+        assertThat(defaults.maxStorageAttempts()).isEqualTo(3);
+        assertThat(defaults.storageRetryDelayMs()).isEqualTo(5000);
+
+        var configured = new Binder(new MapConfigurationPropertySource(Map.of(
+                "helpdesk.ai.worker.poll-delay-ms", "250",
+                "helpdesk.ai.worker.max-storage-attempts", "2",
+                "helpdesk.ai.worker.storage-retry-delay-ms", "7000")))
+                .bindOrCreate("helpdesk.ai.worker", AiSuggestionWorkerSettings.class);
+        assertThat(configured).isEqualTo(new AiSuggestionWorkerSettings(250, 2, 7000));
+    }
+
+    @Test
+    void invalid_storage_limits_are_rejected() {
+        assertThatThrownBy(() -> new AiSuggestionWorkerSettings(1000, 0, 5000))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("AI_WORKER_STORAGE_RETRY_INVALID");
+        assertThatThrownBy(() -> new AiSuggestionWorkerSettings(1000, 3, 0))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("AI_WORKER_STORAGE_RETRY_INVALID");
+        assertThatThrownBy(() -> new AiSuggestionWorkerSettings(1000, 3, -1))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("AI_WORKER_STORAGE_RETRY_INVALID");
+    }
 }

@@ -33,8 +33,8 @@ public class AiSuggestionWorkerConfiguration {
 
     @Bean
     AiSuggestionJobWorker aiSuggestionJobWorker(AiSuggestionJobProcessor processor,
-            AiSuggestionJobClaimService claims) {
-        return new AiSuggestionJobWorker(processor, claims);
+            AiSuggestionJobClaimService claims, AiSuggestionWorkerSettings settings) {
+        return new AiSuggestionJobWorker(processor, claims, settings, Clock.systemUTC());
     }
 
     @Bean

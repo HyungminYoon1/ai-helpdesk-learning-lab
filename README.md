@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 자동 Worker — Java 349개·JavaScript 104개 통과
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·저장 재시도 — Java 364개·JavaScript 104개 통과
 > 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장까지의 처리 흐름. 실제 Java AI→PostgreSQL 한 건과 통제된 Provider의 자동 처리·Context 재시작 확인. 결과 불명 자동 복구·새 Browser 검증은 후속 단계
 > 실행 기준: Java 25
 
@@ -300,7 +300,8 @@ target/surefire-reports/
 | Spring AI Provider Adapter | 실제 HTTP·통제된 응답 자동 검증 완료 | Adapter Test 44개 통과. 직렬화 Body·단일 전송·실패 분류·안전한 Log 확인. 실제 AI 모델 호출은 별도 |
 | 실제 Java AI→PostgreSQL | 선택 Live Test 완료 | 2026-10-06 실제 HTTP 1회·`200`, 원문 보존·Job `SUCCEEDED`·Suggestion 1건·Category 1건과 별도 Live Test 1개 통과. 자동 Worker·Browser·요약 수동 평가는 별도 |
 | 선택 자동 Worker·Rate Limit 대기 | 실제 PostgreSQL·통제된 Provider 검증 완료 | V5·대기 예약·자동 처리·설정·안전한 Log의 새 Test 31개 통과. 재시도 전 추가 예약 없음, 최종 FAILED 제외, 같은 JVM의 새 Context에서 정책·횟수·기한 유지 |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 349개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
+| 검증 객체의 제한된 저장 재시도 | 실제 PostgreSQL·통제된 Provider 검증 완료 | 기본 총 3회·최소 5초, 기존 결과 재조회·현재 Attempt·원래 기한 확인. 새 Test 15개, 실제 Rollback·저장 후 응답 유실 주입·조회 실패·종료 경쟁과 원문 보존 확인. 추가 AI 생성 없음 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 364개·JavaScript Test 104개, ESLint 통과. 실패·오류·건너뜀 0, 이번 회귀의 유료 AI 호출 0회 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -375,7 +376,7 @@ Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User I
 
 요약 상한은 생성자 인자로 받는다. [Unit Test](./src/test/java/lab/helpdesk/ai/validation/AiSuggestionOutputValidatorTest.java)의 200자는 초안의 실험값이며 Runtime 기본값을 확정한 것은 아니다. 양끝 공백을 제외한 Unicode Code Point 수를 검사하되 요약 문자열을 바꾸거나 잘라내지 않는다. 중복 JSON Property와 뒤에 붙은 추가 JSON도 거부하며, 오류에는 입력·Parser 원문 대신 고정 코드만 남긴다.
 
-검증기는 순수 Java 객체다. 결과 저장 Service는 이 검증기가 반환한 객체를 받으며 현재 Attempt와 상태를 별도로 확인한다. 아래 단일 Job 처리와 Provider Adapter로 연결하며 자동 Worker는 아직 등록하지 않았다. 내용이 틀린 요약도 구조를 통과할 수 있고, HTML처럼 생긴 문자열은 Text로 보존한다. Provider 거부를 `ABSTAIN`으로 변환하거나 구조 통과만으로 Tool 실행·Ticket 상태 변경을 허용하지 않는다. 첫 구현의 새 Unit Test 64개와 전체 Java 140개·JavaScript 54개가 통과했다.
+검증기는 순수 Java 객체다. 결과 저장 Service는 이 검증기가 반환한 객체를 받으며 현재 Attempt와 상태를 별도로 확인한다. 아래 단일 Job 처리와 Provider Adapter에 연결했고 Worker는 명시적으로 활성화할 때만 등록한다. 내용이 틀린 요약도 구조를 통과할 수 있고, HTML처럼 생긴 문자열은 Text로 보존한다. Provider 거부를 `ABSTAIN`으로 변환하거나 구조 통과만으로 Tool 실행·Ticket 상태 변경을 허용하지 않는다. 첫 구현의 새 Unit Test 64개와 전체 Java 140개·JavaScript 54개가 통과했다.
 
 ```powershell
 .\mvnw.cmd "-Dtest=AiSuggestionOutputValidatorTest" test
@@ -482,7 +483,7 @@ Windows 기동 오류를 수정한 뒤 사용자가 명시적으로 재실행할
 
 [설정](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionWorkerConfiguration.java)은 `postgres` Profile과 `helpdesk.ai.worker.enabled=true`에서만 활성화된다. 기본은 꺼짐이며 확인 간격 `helpdesk.ai.worker.poll-delay-ms`의 기본값은 1,000ms다. Provider·개인정보 Guard·출력 검증기를 명시적으로 제공해야 하며, 전역 Key나 Runtime 요약 상한을 자동 선택하지 않는다. 설정값을 켜는 것만으로 Live Provider가 만들어지지는 않는다.
 
-최종 `FAILED`는 일반 Polling 대상에서 제외한다. 크레딧·설정 오류를 같은 요청으로 반복하지 않는다. 대기 Header가 없거나 원인이 불명확하면 이번 Worker가 새로운 자동 재호출 규칙을 부여하지 않는다. 결과 불명 `RUNNING`·메모리의 검증 객체를 이용한 저장 재시도·관리자 재개와 실제 유료 Runtime 조립은 후속 단계다. Scheduler 오류는 메시지·Cause 없이 `AI_WORKER_TICK_FAILED`만 Log에 남긴다.
+최종 `FAILED`는 일반 Polling 대상에서 제외한다. 크레딧·설정 오류를 같은 요청으로 반복하지 않는다. 대기 Header가 없거나 원인이 불명확하면 이번 Worker가 새로운 자동 재호출 규칙을 부여하지 않는다. 결과 불명 `RUNNING`의 새 생성·Process 종료로 사라진 객체의 복구·관리자 재개와 실제 유료 Runtime 조립은 후속 단계다. 메모리에 남은 객체의 저장 재시도는 아래와 같이 연결했다. Scheduler 오류는 메시지·Cause 없이 `AI_WORKER_TICK_FAILED`만 Log에 남긴다.
 
 재시도·Migration Test 11개, Worker Test 9개, 설정 Test 5개, Scheduler Test 2개, Context Test 4개가 통과했다. 같은 PostgreSQL을 유지한 Context 재시작에서 미실행 `PENDING`과 미래 대기 시각을 이어갔고, 최종 실패와 Lease가 만료된 결과 불명 `RUNNING`은 임의로 재실행하지 않았다. 이는 같은 JVM의 Spring Context 재시작이며 실제 JVM Process·DB Container 재시작은 별도 검증한다. 이번 Provider 응답은 통제된 합성값이고 새 유료 AI 호출은 0회다.
 
@@ -490,11 +491,29 @@ Windows 기동 오류를 수정한 뒤 사용자가 명시적으로 재실행할
 .\mvnw.cmd "-Dtest=AiRateLimitRetryIntegrationTest,AiRateLimitRetryMigrationIntegrationTest,AiSuggestionJobWorkerIntegrationTest,AiSuggestionWorkerConfigurationTest,AiSuggestionWorkerSchedulerTest,AiSuggestionWorkerContextIntegrationTest" test
 ```
 
+### 검증된 응답 객체의 저장 재시도
+
+첫 결과 저장이 실패하면 Worker가 검증된 객체 한 개를 현재 Process 메모리에 보관하고, 다음 Tick에서 같은 객체의 DB 저장만 재시도한다. 기본값은 최초 저장을 포함한 총 3회·추가 저장 간 최소 5초다. `helpdesk.ai.worker.max-storage-attempts`와 `helpdesk.ai.worker.storage-retry-delay-ms`로 설정한다. 재시도 시각 전에는 저장하지 않고, 대기 동안 DB Transaction·Row Lock을 유지하거나 Thread를 Sleep시키지 않는다.
+
+저장 전에 Job·제안을 재조회한다. Commit이 완료됐다면 기존 결과를 사용하며, 조회 실패를 ‘결과 없음’으로 바꾸지 않는다. 현재 Attempt가 교체됐거나 Job이 종료됐다면 이전 객체를 반영하지 않는다. 조회 뒤의 경쟁도 있으므로 실제 결과 Transaction의 현재 Attempt·RUNNING·기한 확인은 그대로 유지한다.
+
+세 번을 소진한 뒤에도 먼저 DB 결과를 확인한다. 결과가 없는 현재 실행만 `RESULT_STORAGE_RETRY_EXHAUSTED`로 마감한다. 원래 전체 처리 기한이 먼저 끝나면 추가 저장을 중단한다. DB 장애로 종료 기록까지 확인할 수 없다면 `STORAGE_STATE_UNCONFIRMED`를 반환하며 실패가 Commit됐다고 단정하지 않는다. 메모리 객체는 기한에 해제하고, DB가 돌아오면 기존 만료 정리가 해당 Job을 종료한다.
+
+이 저장 주기는 생성 예약·보완 횟수·Attempt·기한을 변경하지 않는다. 저장 시도 횟수는 현재 Worker가 보관한 객체에 대한 횟수이며 기존 Job의 생성 정책 Snapshot을 대체하지 않는다. Process가 종료되면 객체와 저장 시도 횟수도 사라진다. 재시작 후의 결과 불명 복구나 응답 객체 영속 보관은 별도 계약이다. 객체를 보관하는 동안 같은 Worker는 새 Job을 추가로 받지 않아 메모리 Queue가 늘어나지 않는다.
+
+[저장 재시도 Test](./src/test/java/lab/helpdesk/ai/processing/AiSuggestionStorageRetryIntegrationTest.java) 12개, [V5→V6 Migration Test](./src/test/java/lab/helpdesk/ai/job/AiStorageRetryMigrationIntegrationTest.java) 1개와 설정 Test 추가 2개가 통과했다. 실제 PostgreSQL Rollback·원문 보존·기존 결과·새 Attempt·기한·ABSTAIN 완료를 확인했다. 저장 Commit 뒤의 응답 유실과 조회 실패는 Test용 주입이며 실제 네트워크 단절 실험은 아니다. 5초 경계는 통제된 Clock으로 검사했다. 전체 Java Clean Test 364개·JavaScript 104개·ESLint도 통과했으며 이 회귀의 유료 AI 호출은 0회다.
+
+[V6](./src/main/resources/db/migration/V6__allow_storage_retry_failure.sql)는 새 실패 코드만 허용한다. V1~V5와 원문·정책·예약·기존 제안은 바꾸지 않는다. 설정 생성자가 늘어나며 발생한 Binding 오류는 Canonical Constructor를 명시해 수정했고, 실제 Binder의 기본값·설정값 Test로 확인했다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionStorageRetryIntegrationTest,AiStorageRetryMigrationIntegrationTest,AiSuggestionWorkerConfigurationTest" test
+```
+
 ## 현재 Application 비범위
 
 - 외부 운영 Database 구성과 Backup·복구
 - Production용 인증·사용자 권한 검사와 운영 Credential 관리
-- 결과 불명 RUNNING의 자동 복구·Provider 결과 조회·저장 자동 재시도와 운영 Application의 유료 AI 자동 처리. 선택 Worker의 통제된 Provider Test와 구분한다.
+- 결과 불명 RUNNING의 자동 복구·Provider 결과 조회·Process 종료 후 응답 객체 복구와 운영 Application의 유료 AI 자동 처리. 선택 Worker의 통제된 Provider Test와 구분한다.
 - 담당자 할당, Comment와 이력 조회
 - Ticket 전체 CRUD와 검색·정렬·Pagination
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현
