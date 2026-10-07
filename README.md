@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI — Java 449개·JavaScript 145개 통과
-> 현재 학습 영역: AI 출력 계약·독립 AI 실험·PostgreSQL 접수·예약부터 결과 저장, AGENT 읽기 전용 조회와 최소 화면까지의 흐름. 통제된 Provider의 조건부 복구·서로 다른 JVM Process 재시작과 실제 AI의 Browser·자동 Worker·PostgreSQL·AGENT 화면 연결 확인. 요약 수동 평가·독립 복습과 WIL은 후속 단계
+> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI·인젝션 경계 통합 검증 — Java 461개·JavaScript 145개 통과
+> 현재 학습 영역: Week 7 마감 — AI 출력 계약·평가, 접수·Worker·복구·PostgreSQL·AGENT 화면 연결과 핵심 문답 확인. 2026-10-07 WIL 검토·블로그 게시·포럼 등록 완료 확인. 다음은 Week 8 배포·운영 경계 학습
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -305,8 +305,8 @@ target/surefire-reports/
 | Worker의 실제 JVM 종료·재시작 | 실제 PostgreSQL·통제된 Provider 검증 완료 | 새 Test 5개. 첫 Java Process 종료를 확인하고 다른 PID로 같은 DB를 연결해 PENDING·결과 미확인/불명·재시도 금지·미래 대기를 확인. 정책·누적 예약·원래 기한·원문 유지 |
 | AGENT 전용 AI 상태·제안 조회 | 실제 PostgreSQL·Security·MockMvc 검증 완료 | 새 Test 55개. 익명 401·USER 403, 최초 Message의 Job 조회, 다섯 상태·명시적 null·고정 실패 코드, 정합성/조회 오류의 안전한 500, 반복 조회의 불변과 Provider 미호출 |
 | 담당자 최소 AI 조회 화면 | JavaScript·정적 Resource MockMvc 검증 완료 | 조회 Client·Text 표시·Page 연결의 새 Node Test 29개와 정적 파일·익명 API 차단의 MockMvc Test 5개 통과. 실제 Browser·새 유료 Worker는 별도 |
-| Browser·자동 Worker·실제 AI·PostgreSQL | 별도 Live Experiment 완료 | 2026-10-06 실제 USER 접수 `201`·예약된 Worker·AI HTTP 1회·제안 저장·AGENT 조회 `200`. 원문·인증 작성자 보존, 화면·DB 일치와 조회 무변경 확인. Ticket OPEN·제안 PENDING_REVIEW이며 수동 내용 평가는 NOT_SCORED |
-| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-06 Java Clean Test 449개·JavaScript Test 145개, ESLint 통과. 실패·오류·건너뜀 0, 회귀의 유료 AI 호출 0회. 별도 무료 Browser Experiment·실제 AI Live Experiment 각 1개와 구분 |
+| Browser·자동 Worker·실제 AI·PostgreSQL | 별도 Live Experiment 완료 | 2026-10-06 실제 USER 접수 `201`·예약된 Worker·AI HTTP 1회·제안 저장·AGENT 조회 `200`. 원문·인증 작성자 보존, 화면·DB 일치와 조회 무변경 확인. Ticket OPEN·제안 PENDING_REVIEW. 원본 Report의 NOT_SCORED는 보존하고 후속 원문 대조 2점은 WIL에 별도 기록 |
+| Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-07 인젝션 경계 Test 12개 추가 후 Java 전체 Test 461개 통과. 같은 날 앞선 JavaScript Test 145개·ESLint 통과 근거는 유지. 실패·오류·건너뜀 0, 새 실제 AI 호출 0회. 별도 통제된 Provider의 Browser Experiment·실제 AI Live Experiment 각 1개와 구분 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -330,7 +330,7 @@ JUnit 기준선은 `cdcbee0`, 대표 Exception Message 검증은 `944aede`, Poli
 
 N01 합성 문의 한 건으로 Prompt-only와 Structured Outputs를 비교하는 [독립 스크립트 실행 안내](./scripts/week7-openai-pilot.md)를 추가했다. Spring Application과 Database를 사용하지 않고 Provider 요청·응답과 공통 출력 검증부터 확인한다. 실제 API 실행은 Helpdesk 키를 임시로 설정한 전용 PowerShell에서만 진행한다.
 
-사용자가 전용 PowerShell에서 실행한 N01의 실제 Provider 응답 두 건은 별도 WIL의 예비 비교 기록에 남겼다. Spring AI 연결·AI Migration·PostgreSQL 제안 저장 검증은 아직 없다. 기존 Java 61개의 기록과 독립 JavaScript 검증을 구분한다.
+사용자가 전용 PowerShell에서 실행한 N01의 실제 Provider 응답 두 건은 별도 WIL의 예비 비교 기록에 남겼다. 이 예비 실험 당시에는 Spring AI 연결·AI Migration·PostgreSQL 제안 저장 검증이 없었다. 기존 Java 61개의 기록과 독립 JavaScript 검증을 구분하며, 이후 연결한 결과는 아래 각 단계에 기록한다.
 
 13건 × 두 방식 × 두 반복의 본 평가를 준비하는 `scripts/week7-ai-evaluation.mjs`를 추가했다. 현재는 유료 호출 없는 `--dry-run`만 지원한다. 입력은 제목·본문만 보내도록 구성하고, 기대 분류·우선순위는 평가자용 데이터로 분리했다. Label은 검토 후보이며 요약·Injection의 내용은 자동 정답 처리하지 않는다. 새 준비 Test 14개, Pilot Test 15개와 기존 UI Test 12개가 합쳐 41개 통과했다.
 
@@ -360,7 +360,7 @@ node --test src/test/js/week7-tool-calling-spike.test.mjs
 
 `postgres` Profile의 [TicketReceiptApplicationService](./src/main/java/lab/helpdesk/ticket/application/TicketReceiptApplicationService.java)는 Ticket·최초 Message·`PENDING` Job을 하나의 `@Transactional` 호출에서 저장한다. [접수 Integration Test](./src/test/java/lab/helpdesk/ticket/application/TicketReceiptIntegrationTest.java)는 실제 JDBC 저장의 성공 횟수를 기록하고, 다음 INSERT의 DB Constraint 실패 뒤 세 Table의 최종 Row 수를 확인한다. [Migration Test](./src/test/java/lab/helpdesk/ticket/repository/TicketReceiptMigrationIntegrationTest.java)는 V1에 기존 Row를 만든 다음 V2를 적용한다. 두 Test의 15개 Case와 전체 Java 76개, 기존 JavaScript 54개가 통과했다.
 
-첫 Service 실습 이후 10/5에는 `postgres`의 `POST /api/tickets`를 접수 Service에 연결했다. 새 요청은 `title`·`body`를 받으며 앞뒤 Java `String.strip()` 공백을 제외한 본문의 상한은 2,000 Unicode Code Point다. DTO와 Domain에서 같은 길이 규칙을 적용하고, 통과한 원문은 공백까지 그대로 저장한다. V2까지의 Job 상태는 `PENDING`만 허용했고 이후 V3에서 실행권·예약, V4에서 Suggestion 저장을 추가했다. 자동 Polling은 후속 단계다.
+첫 Service 실습 이후 10/5에는 `postgres`의 `POST /api/tickets`를 접수 Service에 연결했다. 새 요청은 `title`·`body`를 받으며 앞뒤 Java `String.strip()` 공백을 제외한 본문의 상한은 2,000 Unicode Code Point다. DTO와 Domain에서 같은 길이 규칙을 적용하고, 통과한 원문은 공백까지 그대로 저장한다. V2까지의 Job 상태는 `PENDING`만 허용했고 이후 V3에서 실행권·예약, V4에서 Suggestion 저장을 추가했다. 자동 Polling은 뒤의 선택 Worker 단계에서 연결했다.
 
 Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User ID나 권한 판정 근거가 아니다. HTTP에서는 `Authentication.getName()`만 Service에 전달한다. 서로 다른 USER·AGENT로 실제 Form Login을 수행한 MockMvc Session을 재사용해 작성자를 검증하고, Browser의 다른 작성자·Role 주장이 저장 작성자를 바꾸지 않는 것을 확인했다. 인증 계정은 In-memory이고 Ticket·Message·Job은 PostgreSQL에 저장된다.
 
@@ -449,6 +449,18 @@ Model은 `gpt-6-luna`, reasoning은 `none`, 출력 상한은 600 Token, `store=f
 
 ```powershell
 .\mvnw.cmd "-Dtest=SpringAiOpenAiSuggestionProviderTest,AiSuggestionJobProcessorIntegrationTest" test
+```
+
+### 공격성 입력·응답의 Java·PostgreSQL 통합 검증
+
+[인젝션 경계 Integration Test](./src/test/java/lab/helpdesk/ai/provider/AiSuggestionInjectionBoundaryIntegrationTest.java) 12개는 실제 접수·실행권·Spring AI·SDK·HTTP·Java 검증·PostgreSQL 저장을 연결한다. 응답만 로컬 HTTP Fixture로 대체해 추가 `ticketId`·`role`·`status`·Tool 지시, 잘못된 JSON·Enum과 Provider `tool_calls`를 넣었다. 거부 뒤 제안·분류 0건, 원문·작성자·연결 정보와 원래 Ticket·다른 Ticket의 `OPEN` 상태를 확인했다.
+
+본문의 명령과 가짜 system JSON은 User 데이터로 유지되고 System 정책·Schema를 변경하지 않는다. 반면 형식에 맞는 잘못된 `HIGH`나 명령문·SQL 문자열 요약은 제안으로 저장될 수 있다. 이때도 `PENDING_REVIEW`로 남고 업무 상태나 SQL 실행으로 이어지지 않는다. 내용 사실성 자동 검사나 인젝션 탐지기를 구현한 결과와는 구분한다.
+
+신규 12개와 추가 후 전체 Java Test 461개가 실패·오류·건너뜀 없이 통과했다. 실제 AI 모델·Browser·자동 Scheduler는 사용하지 않았으며, 작성자는 접수 Service에 전달한 Snapshot의 보존을 확인했다. DB 초기화는 연결이 해당 Testcontainer임을 확인한 뒤에만 수행한다. 운영 Source·Prompt·Migration 변경은 없다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionInjectionBoundaryIntegrationTest" test
 ```
 
 ### 실제 Java AI 호출과 PostgreSQL의 선택 실행
@@ -627,7 +639,7 @@ node .\scripts\week7-worker-browser-live.mjs --live --confirm-helpdesk-key --con
 
 새 실행기 Test 12개를 포함한 JavaScript 145개와 ESLint가 통과했다. 통제된 Provider의 실제 Browser Experiment 뒤 같은 수직 흐름의 실제 AI Live Experiment도 완료했다. 2026-10-06 사용자 실행의 `LIVE_WORKER_BROWSER_POSTGRES`·`completed: true`와 Local Report·별도 JUnit 1개 통과·AGENT Screenshot을 대조했다. 접수 `201`·누락 CSRF `403`·익명 조회 `401`·USER 조회 `403`·AGENT 조회 `200`, 원문·인증 작성자 보존, 예약·제안·분류 각 1건, 화면과 DB 일치·조회 무변경을 확인했다.
 
-실제 생성 HTTP 요청은 1회·Provider `200`, 사용량은 입력 1,169·출력 57 Token이다. 해당 호출 추정치는 `$0.000174625`이며 이전 비용 미확인과 보류 이력은 그대로 유지한다. Ticket은 `OPEN`, Job은 `SUCCEEDED`, 제안은 `PENDING_REVIEW`다. 실행기의 `manualContentReview: NOT_SCORED`는 원문 대조·수동 채점 전 상태이며, 연결 성공을 요약 정확성이나 문의 해결로 표현하지 않는다. 이번 실제 실행은 Test 전용 조립의 근거이고 일반 Application의 유료 자동 구성·Job 정책·Migration은 변경하지 않았다.
+실제 생성 HTTP 요청은 1회·Provider `200`, 사용량은 입력 1,169·출력 57 Token이다. 해당 호출 추정치는 `$0.000174625`이며 이전 비용 미확인과 보류 이력은 그대로 유지한다. Ticket은 `OPEN`, Job은 `SUCCEEDED`, 제안은 `PENDING_REVIEW`다. 실행기의 `manualContentReview: NOT_SCORED`는 실행 당시 상태로 보존한다. 이후 작성자가 원문과 요약을 대조해 핵심 누락·추측이 없다고 확인한 2점 평가는 WIL에 따로 기록했다. 이 평가로 DB의 담당자 검토 상태를 변경하지 않았다. 이번 실제 실행은 Test 전용 조립의 근거이고 일반 Application의 유료 자동 구성·Job 정책·Migration은 변경하지 않았다.
 
 ## 현재 Application 비범위
 
@@ -659,6 +671,6 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 
 ## 다음 단계
 
-1. Week 6 핵심 개념을 자료 없이 다시 설명하는 복습을 이어간다.
-2. Week 7에서는 AI Native 학습을 시작하되 이미 검증한 Ticket 수직 흐름을 유지한다.
-3. Week 8 배포·HTTPS 학습에서 PostgreSQL Volume·복구 경계와 운영 Credential 정책을 별도로 다룬다.
+1. Week 7은 구현·평가·핵심 문답과 WIL 공개를 마쳤다. 초기 9/29~10/3 계획에서 이월된 과업은 10/5 회차 이후 10/6·10/7의 2일을 더 사용해 마감했다.
+2. Week 8의 세부 일정은 10/7 마감에 맞춰 다시 정하고, 기존 Ticket·AI 수직 흐름으로 Docker·Compose·CI·관측·Cloud·HTTPS를 학습한다.
+3. PostgreSQL Volume·복구 경계와 운영 Credential 정책을 확인한다. 선택한 수직 학습 범위를 줄이거나 Week 9로 자동 이월하지 않는다.
