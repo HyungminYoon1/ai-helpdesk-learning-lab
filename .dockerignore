@@ -1,0 +1,19 @@
+# Build Context에는 필요한 입력만 포함한다.
+**
+!Dockerfile
+!.dockerignore
+!pom.xml
+!mvnw
+!.mvn/
+!.mvn/wrapper/
+!.mvn/wrapper/maven-wrapper.properties
+!src/
+!src/main/
+!src/main/**
+
+# 허용한 디렉터리 안에서도 Credential 파일은 제외한다.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*credentials*
