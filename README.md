@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
 > 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI·인젝션 경계 통합 검증 — Java 461개·JavaScript 145개 통과
-> 현재 학습 영역: Week 7 마감 — AI 출력 계약·평가, 접수·Worker·복구·PostgreSQL·AGENT 화면 연결과 핵심 문답 확인. 2026-10-07 WIL 검토·블로그 게시·포럼 등록 완료 확인. 다음은 Week 8 배포·운영 경계 학습
+> 현재 학습 영역: Week 8 Docker — Image Build·Cache·JAR 구성, Compose 접수·조회·Volume 보존·App 재시작·설정 변경과 로컬 필수 값 검사 확인. 배포용 Provider·Worker 연결과 Cloud 실행은 다음 단계. Week 7은 2026-10-07 WIL 검토·블로그 게시·포럼 등록 완료 확인
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -248,6 +248,91 @@ target/surefire-reports/
 ```
 
 `out/`, `target/`, `build/` 같은 생성물 디렉터리는 Git에서 추적하지 않는다.
+
+## Week 8 로컬 Image Build
+
+[Dockerfile](./Dockerfile)은 JDK 25와 Maven Wrapper로 JAR를 만드는 `build` 단계와 Java 25 실행 환경에서 JAR를 사용하는 `runtime` 단계를 나눈다. 기반 Image는 Tag와 Digest로 지정하고, 최종 Image는 `10001:10001` 사용자로 실행하도록 구성했다. [.dockerignore](./.dockerignore)는 Maven Wrapper·POM·Main Source 등 필요한 입력만 허용하며 `.env`와 Credential 파일은 제외한다.
+
+```powershell
+docker build --progress=plain --tag helpdesk:week8-build-baseline .
+```
+
+2026-10-08 첫 Build는 68.95초, 입력을 바꾸지 않은 재Build는 1.64초였다. 두 번째 실행에서 의존성 준비·Source 복사·패키징 단계의 `CACHED`를 확인했다. 첫 실행에는 기반 Image와 의존성 다운로드도 포함되므로 시간 차이를 Cache만의 성능으로 환산하지 않는다.
+
+Git 제외 `target/`의 복사본에서는 Source 주석만 변경한 Build가 10.75초였고 의존성 준비는 `CACHED`, 패키징은 다시 실행됐다. 원래 Source를 유지하고 복사본 POM에 실험용 의존성을 추가한 Build는 59.24초였으며 두 Maven 명령을 모두 다시 실행했다. 실제 Repository의 Source와 POM은 변경하지 않았다.
+
+별도 복사본에서 Source 복사를 의존성 준비 앞에 둔 첫 Build는 57.96초였다. 같은 순서에서 Source 주석만 바꾼 재Build는 63.64초였고 의존성 준비·패키징이 모두 다시 실행됐다. 두 순서는 모두 Build에 성공했으며, 실제 Dockerfile은 Cache 재사용을 위해 의존성을 먼저 준비하는 순서를 유지한다.
+
+기준선 Image의 JAR에서 Application Class 114개·의존성 JAR 92개·Migration SQL 7개를 확인했고 Java Source와 Maven Wrapper는 없었다. JAR의 `META-INF/maven`은 Build Metadata이며 Maven 실행 프로그램이 아니다. 별도의 Network 없는 점검 Container에서는 Java 실행 환경과 JAR의 존재, Maven·`javac`의 부재를 확인했다. Helpdesk Application은 시작하지 않았다.
+
+Image Build의 `-DskipTests package`는 패키징만 수행한다. 전체 Test는 Docker Engine이 있는 별도 환경에서 실행하며, 기존 회귀 결과를 이번 Build에서 다시 실행한 것으로 표현하지 않는다. `EXPOSE 8080`은 Port 정보이며 Host 게시나 HTTP Server 기동을 수행하지 않는다.
+
+### Compose에서 App과 PostgreSQL 연결
+
+[compose.yaml](./compose.yaml)은 App과 PostgreSQL 17.6을 별도 Service로 실행한다. App은 `postgres,local-browser` Profile로 `jdbc:postgresql://db:5432/helpdesk_local`에 연결한다. DB Port는 Host에 게시하지 않고, App의 `8080`만 `127.0.0.1`의 빈 Host Port에 게시한다. 고정 `container_name`을 사용하지 않아 별도 Project로 환경을 나눌 수 있다.
+
+CORS 허용 Origin은 실행 시 `HELPDESK_LOCAL_CORS_ALLOWED_ORIGIN`으로 전달할 수 있으며, 지정하지 않으면 기존 Loopback 학습용 Origin을 사용한다. 검증 스크립트는 비교에 필요한 고정 시험용 설정을 준비하고 기존 Host 설정은 종료 시 복원한다.
+
+DB의 [초기화 SQL](./docker/postgres/001-local-app-role.sql)은 빈 데이터 디렉터리에서 `helpdesk_app` 계정을 만든다. App에는 PostgreSQL 관리자 Password를 전달하지 않는다. App 계정은 Superuser·DB 생성·Role 생성 권한이 없으며, Flyway 실행에 필요한 `public` Schema의 사용·생성 권한을 가진다. 운영 환경에서 Migration 계정과 데이터 접근 계정을 나누는 구성은 별도 과제다.
+
+`pg_isready` Healthcheck는 연결 준비를 확인하고 `service_healthy`는 그 뒤에 App을 시작한다. DB 계정 초기화는 PostgreSQL Image의 Init Script, Table 생성은 App의 Flyway, 실제 Row 저장은 접수 Service의 Transaction이 담당한다. 기존 Volume으로 다시 시작하면 초기화 SQL을 다시 실행하지 않는다. [PostgreSQL Image 초기화](https://github.com/docker-library/docs/blob/master/postgres/README.md), [Compose 시작 조건](https://docs.docker.com/compose/how-tos/startup-order/)
+
+[검증 스크립트](./scripts/Verify-Week8Compose.ps1)는 PowerShell 7에서 실행한다. 앞의 기준선 Image Build가 필요하다.
+
+```powershell
+pwsh -NoProfile -File .\scripts\Verify-Week8Compose.ps1
+```
+
+스크립트는 실행마다 새 Project와 합성 USER·AGENT를 만들고, 생성한 Password를 해당 실행의 Process Environment에만 설정한다. 기존 환경 변수는 종료 시 복원하며 `.env` 파일을 만들지 않는다. Credential을 Build Argument·Image에 넣지 않고, Cookie·Token·Password와 전체 Compose 설정을 출력하지 않는다. Runtime 환경 변수는 Container 설정에도 보관되므로 Docker 관리자에게 숨기는 Secret 저장소와 같지는 않다. 이 구성은 Loopback의 로컬 학습용이며 공개 배포용 사용자 설정이 아니다.
+
+2026-10-08 실제 Container 실행에서 Migration 7개, App의 별도 DB 계정 연결, 로그인 Session 재사용을 확인했다. 익명 조회는 `401`, 같은 USER Session의 CSRF 없는 접수는 `403`·저장 0건, CSRF Header가 있는 접수는 `201`·Ticket·Message·Job 각 1건이었다. 원문·인증 작성자와 `OPEN`·`PENDING` 상태를 DB에서 확인했고, USER 조회 `403`·AGENT 조회 `200`도 통과했다.
+
+이번 검증은 `.NET HttpClient`의 실제 HTTP 요청이다. Browser JavaScript의 응답 접근 제한이나 Browser E2E를 실행한 결과는 아니다. Worker는 명시적으로 꺼 두었고 API Key를 전달하지 않아 Job은 `PENDING`, Attempt·제안은 0건이다. 실행이 끝나면 이번 Project의 Container만 중지하고 데이터 Volume은 보존한다. 생성한 네 Password와 검사 대상으로 수집한 CSRF Token·Session ID를 Container Log와 대조했으며 일치한 값은 0개였다. Log나 비밀값 자체는 출력하지 않았다.
+
+다음 선택 실행은 같은 실행에서 생성한 DB Container만 교체하고, Volume·Row 보존과 App 재연결을 확인한다.
+
+```powershell
+pwsh -NoProfile -File .\scripts\Verify-Week8Compose.ps1 -RecreateDatabase
+```
+
+2026-10-08 이 선택 실행도 통과했다. 교체 전후 DB Container ID가 다르고 같은 Named Volume·Migration 7건·Ticket·Message·PENDING Job 각 1건이 유지됐다. App의 Container ID와 실행 시작 시각은 같았고 기존 AGENT Session으로 같은 Ticket을 다시 조회해 `200`을 받았다. DB 프로그램은 Image에서 새로 실행되고 데이터는 같은 Volume에서 읽으며, 로그인 Session은 계속 실행 중인 App JVM에 남아 있다. DB 중단 중의 실패 횟수나 무중단 동작을 측정한 결과는 아니다.
+
+반대로 DB를 유지한 채 같은 App Container를 중지·시작하고 이전 Session과 새 로그인을 비교하려면 다음을 실행한다.
+
+```powershell
+pwsh -NoProfile -File .\scripts\Verify-Week8Compose.ps1 -RestartApplication
+```
+
+2026-10-08 이 실행도 통과했다. App Container ID는 같고 실행 시작 시각은 달랐으며, DB Container와 실행 시작 시각·Volume은 그대로였다. Ticket·Message·PENDING Job 각 1건과 Migration 7건도 유지됐다. 기존 `JSESSIONID`를 보관한 같은 CookieContainer의 조회는 `401`, AGENT 재로그인 뒤 같은 Ticket 조회는 `200`이었다. 재로그인에는 새 Session ID를 사용했다. USER·AGENT 로그인과 재로그인의 CSRF Token·Session ID도 Log에서 일치한 값이 없었다.
+
+빈 Host Port를 자동 배정하므로 App 재시작 뒤 게시 Port가 바뀔 수 있다. 실행기는 `compose port app 8080`으로 새 주소를 확인해 요청하며, 이전 Port의 연결 실패와 인증 실패를 구분한다. 실제 Browser 대신 HttpClient로 확인한 Session 복원 실험이다.
+
+같은 Image에서 실행 설정을 바꾸는 비교는 다음과 같이 실행한다.
+
+```powershell
+pwsh -NoProfile -File .\scripts\Verify-Week8Compose.ps1 -RecreateApplicationWithSettings
+```
+
+CORS 허용 Origin을 Host에서 변경한 뒤 같은 App을 Stop·Start해 이전 설정이 유지됨을 확인한다. 이어 같은 Image로 App만 재생성해 새 Origin은 OPTIONS `200`·허용 Header, 기존 Origin은 `403`·허용 Header 없음으로 바뀌는지 확인한다. 실제 Container의 Image ID는 같고 App Container ID는 달라야 하며, DB Container·실행 시작 시각·Volume·Row는 유지돼야 한다. Cookie를 보내지 않는 HttpClient의 서버 응답 검사이며 Browser E2E는 아니다.
+
+2026-10-08~10-09 설정 변경 비교가 통과했다. 기존 Cookie의 Ticket 조회는 `401`, AGENT 재로그인 뒤 같은 ID 조회는 `200`이었다. 공통 준비 확인 함수 변경 뒤 `-RestartApplication -RecreateApplicationWithSettings`를 함께 실행한 비교도 통과했다. 실제 AI 호출은 하지 않았다.
+
+각 실행은 독립된 새 환경을 만든다. 이전 실행의 Volume을 삭제하거나 기존 Container를 일괄 정리하지 않는다.
+
+### 필수 값과 Worker 구성 검사
+
+[필수 설정 검증 스크립트](./scripts/Verify-Week8RequiredSettings.ps1)는 Container를 시작하지 않고 `docker compose config --quiet`만 실행한다. 합성 값은 자식 Process에만 설정하고 기본 `.env` 읽기와 외부 환경 파일 지정을 사용하지 않는다. 호출자의 환경 변수·기존 Container·Volume은 변경하지 않으며 전체 설정과 오류 원문을 출력하지 않는다.
+
+```powershell
+pwsh -NoProfile -File .\scripts\Verify-Week8RequiredSettings.ps1
+.\mvnw.cmd "-Dtest=AiSuggestionWorkerConfigurationTest" test
+```
+
+2026-10-09 정상 구성의 설정 해석이 통과했고, DB 관리자·App Password와 USER·AGENT Username·Password의 6개 변수는 각각 미설정·빈 문자열일 때 모두 거부됐다. 12개 거부 Case의 결과는 `LOCAL_COMPOSE_REQUIRED_SETTINGS`, `PASS`다. 설정 해석 성공을 DB 접속·저장 성공으로 대신하지 않는다.
+
+같은 날 기존 [Worker 설정 Test](./src/test/java/lab/helpdesk/ai/processing/AiSuggestionWorkerConfigurationTest.java) 7개를 재실행해 통과했다. 기본 비활성, `postgres`가 아닌 Profile의 Worker 미등록, Provider Bean 없는 활성 구성의 기동 실패와 설정값 Binding·경계를 확인한다. PostgreSQL·실제 AI를 사용하지 않은 Spring 설정 Test이며 전체 회귀 재실행은 아니다. Worker를 끄고 AI Key 없이 문의를 저장한 결과는 앞의 실제 Compose HTTP·DB 실험에서 확인했다. 배포용 Provider·Worker 조립은 아직 추가하지 않았다.
+
+현재 Compose는 로컬 환경 변수를 전달하며 Secret 파일 연결과 Spring의 `configtree:` 읽기는 아직 구성하지 않았다. 다음 단계에서는 Secret 제공·설정 읽기·Provider Bean 등록을 명시적으로 연결한다. Worker 활성화 값이나 파일 제공만으로 실제 AI 처리가 준비됐다고 판단하지 않는다.
 
 ## 현재 검증 상태
 
@@ -672,5 +757,5 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 ## 다음 단계
 
 1. Week 7은 구현·평가·핵심 문답과 WIL 공개를 마쳤다. 초기 9/29~10/3 계획에서 이월된 과업은 10/5 회차 이후 10/6·10/7의 2일을 더 사용해 마감했다.
-2. Week 8의 세부 일정은 10/7 마감에 맞춰 다시 정하고, 기존 Ticket·AI 수직 흐름으로 Docker·Compose·CI·관측·Cloud·HTTPS를 학습한다.
-3. PostgreSQL Volume·복구 경계와 운영 Credential 정책을 확인한다. 선택한 수직 학습 범위를 줄이거나 Week 9로 자동 이월하지 않는다.
+2. Week 8의 로컬 Image·Compose·Volume·설정 비교는 확인했다. 다음은 배포용 Provider·개인정보 처리기·출력 검증기·Worker와 Secret 주입의 연결이며, 누락·비활성·정상 구성 Test를 먼저 둔다.
+3. Process·종료·CI·IAM·관측·Cloud·HTTPS와 복구를 같은 Ticket·AI 수직 흐름에서 학습한다. 선택한 범위를 줄이거나 Week 9로 자동 이월하지 않는다.
