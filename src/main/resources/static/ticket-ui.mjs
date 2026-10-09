@@ -11,6 +11,7 @@ export function isTicket(value) {
         && Number.isSafeInteger(value.id)
         && value.id > 0
         && typeof value.title === "string"
+        && value.title.trim().length > 0
         && TICKET_STATUSES.has(value.status);
 }
 
