@@ -1,0 +1,48 @@
+name: Verify application and image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      HELPDESK_AI_PROVIDER_ENABLED: "false"
+      HELPDESK_AI_WORKER_ENABLED: "false"
+    steps:
+      - name: Check out source without retaining a credential
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Java 25
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Set up Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify Java with real PostgreSQL Testcontainers
+        run: sh ./mvnw -B -ntp verify
+      - name: Test JavaScript without live provider calls
+        run: node --test src/test/js/*.test.mjs
+      - name: Lint JavaScript
+        run: npx --yes --package eslint@10.11.0 eslint scripts/week7-*.mjs src/main/resources/static/*.mjs src/test/js/*.mjs
+      - name: Build the image only after verification succeeds
+        run: docker build --tag helpdesk-ci:${{ github.sha }} .
+
+# No API keys, AWS permissions, image push, or Cloud deployment in this workflow.
