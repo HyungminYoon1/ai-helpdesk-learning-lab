@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
 > 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI·인젝션 경계 통합 검증 — Java 461개·JavaScript 145개 통과
-> 현재 학습 영역: Week 8 Docker — Image Build·Cache·JAR 구성, Compose 접수·조회·Volume 보존·App 재시작·설정 변경과 로컬 필수 값 검사 확인. 배포용 Provider·Worker 연결과 Cloud 실행은 다음 단계. Week 7은 2026-10-07 WIL 검토·블로그 게시·포럼 등록 완료 확인
+> 현재 학습 영역: Week 8 배포 준비 — Image·Compose·설정과 합성 Secret Mount, 최소 Health·HTTP Metric·종료 Signal의 로컬 검증, Actions Workflow 작성. 개인정보 처리기·Worker의 배포 조립, 실제 CI·AWS·HTTPS 실행은 다음 단계. Week 7은 2026-10-07 WIL 검토·블로그 게시·포럼 등록 완료 확인
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -330,9 +330,100 @@ pwsh -NoProfile -File .\scripts\Verify-Week8RequiredSettings.ps1
 
 2026-10-09 정상 구성의 설정 해석이 통과했고, DB 관리자·App Password와 USER·AGENT Username·Password의 6개 변수는 각각 미설정·빈 문자열일 때 모두 거부됐다. 12개 거부 Case의 결과는 `LOCAL_COMPOSE_REQUIRED_SETTINGS`, `PASS`다. 설정 해석 성공을 DB 접속·저장 성공으로 대신하지 않는다.
 
-같은 날 기존 [Worker 설정 Test](./src/test/java/lab/helpdesk/ai/processing/AiSuggestionWorkerConfigurationTest.java) 7개를 재실행해 통과했다. 기본 비활성, `postgres`가 아닌 Profile의 Worker 미등록, Provider Bean 없는 활성 구성의 기동 실패와 설정값 Binding·경계를 확인한다. PostgreSQL·실제 AI를 사용하지 않은 Spring 설정 Test이며 전체 회귀 재실행은 아니다. Worker를 끄고 AI Key 없이 문의를 저장한 결과는 앞의 실제 Compose HTTP·DB 실험에서 확인했다. 배포용 Provider·Worker 조립은 아직 추가하지 않았다.
+같은 날 기존 [Worker 설정 Test](./src/test/java/lab/helpdesk/ai/processing/AiSuggestionWorkerConfigurationTest.java) 7개를 재실행해 통과했다. 기본 비활성, `postgres`가 아닌 Profile의 Worker 미등록, Provider Bean 없는 활성 구성의 기동 실패와 설정값 Binding·경계를 확인한다. PostgreSQL·실제 AI를 사용하지 않은 Spring 설정 Test이며 전체 회귀 재실행은 아니다. Worker를 끄고 AI Key 없이 문의를 저장한 결과는 앞의 실제 Compose HTTP·DB 실험에서 확인했다. 개인정보 처리기를 포함한 전체 배포 조립과 Secret Mount는 남아 있다.
 
-현재 Compose는 로컬 환경 변수를 전달하며 Secret 파일 연결과 Spring의 `configtree:` 읽기는 아직 구성하지 않았다. 다음 단계에서는 Secret 제공·설정 읽기·Provider Bean 등록을 명시적으로 연결한다. Worker 활성화 값이나 파일 제공만으로 실제 AI 처리가 준비됐다고 판단하지 않는다.
+기본 `compose.yaml`은 로컬 환경 변수를 전달하며, 실행용 Secret 파일 연결과 Spring의 `configtree:` 읽기는 아직 구성하지 않았다. 파일 제공·설정 읽기·Provider 등록은 아래의 별도 합성 실험에서 확인한다. Worker 활성화 값이나 파일 제공만으로 실제 AI 처리가 준비됐다고 판단하지 않는다.
+
+[설정·Bean 학습 Test](./src/test/java/lab/helpdesk/ai/processing/ConfigTreeProviderWiringTest.java)는 임시 합성 파일을 실제 Config Tree로 읽고, 설정값을 학습용 Provider에 전달해 다른 Bean에 주입한다. 값 누락·공백·Bean 미등록·기능 비활성도 비교한다. `@TestConfiguration`과 호출을 금지한 Provider를 사용하며 Main의 배포 구성을 추가하지 않는다. 실제 API Key·HTTP 요청·PostgreSQL은 사용하지 않는다.
+
+```powershell
+.\mvnw.cmd "-Dtest=ConfigTreeProviderWiringTest,AiSuggestionWorkerConfigurationTest" test
+```
+
+2026-10-09 새 학습 Test 5개와 기존 Worker 설정 Test 7개가 실패·오류·건너뜀 없이 통과했다. 작은 Context의 설정·객체 조립 결과이며 전체 회귀나 실제 Compose Secret Mount 결과는 아니다.
+
+### Provider의 명시적 등록
+
+[Provider 설정](./src/main/java/lab/helpdesk/ai/provider/AiSuggestionProviderConfiguration.java)은 `postgres` Profile에서 별도 활성화 값을 받아 기존 Adapter와 출력 검증기를 등록한다. Worker 설정만 켜서 유료 Provider가 자동으로 만들어지지 않도록 등록과 실행을 구분한다. 기존 Prompt·Model·Job 정책·Migration과 Controller·Service·Repository 경계는 바꾸지 않는다.
+
+| 설정 | 등록과 실행 조건 |
+|---|---|
+| `helpdesk.ai.provider.enabled` | 기본 비활성. `true`일 때 Provider와 출력 검증기를 등록 |
+| `helpdesk.ai.provider.key` | 활성 Provider의 필수 인증 값. 전역 `OPENAI_API_KEY` 대체 읽기 없음 |
+| `helpdesk.ai.provider.max-summary-code-points` | Prompt·검증기에 함께 전달하는 필수 양의 정수. 실행 기본값 없음 |
+| `helpdesk.ai.worker.enabled` | 기존 Worker·Scheduler의 별도 활성화 값 |
+
+Key와 상한을 읽어 Provider를 만들며 Context 종료 시 HTTP Client를 닫는다. 필수 값 누락·공백과 상한 오류에는 입력값·Parser Cause 대신 고정 코드만 남긴다. `AiInputPrivacyGuard`는 기존 계약에 따라 별도 Bean을 제공해야 하며, 누락을 빈 처리기로 대체하지 않는다. Provider를 등록해도 Worker를 켜지 않으면 자동 Job 처리는 시작되지 않는다.
+
+[등록 Test](./src/test/java/lab/helpdesk/ai/provider/AiSuggestionProviderConfigurationTest.java)는 호출자의 환경 변수·JVM 설정을 제외하고 임시 합성 파일로 Main Configuration을 실행한다. 기본 비활성·Profile·Key 누락·공백·전역 Key 대체 금지·상한 경계·개인정보 처리기 누락과 Worker 비활성을 확인한다. 정상 Provider 객체의 HTTP 시도 횟수도 0이다. `optional:configtree:`로 설정 위치가 없어도 계속하도록 한 경우와, 활성 기능의 Key가 필수인 조건을 따로 검사한다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionProviderConfigurationTest,ConfigTreeProviderWiringTest,AiSuggestionWorkerConfigurationTest,AiInputPrivacyGuardTest,AiSuggestionOutputValidatorTest,SpringAiOpenAiSuggestionProviderTest" test
+```
+
+2026-10-09 새 설정 Test 18개와 관련 기존 Test를 합쳐 170개가 실패·오류·건너뜀 없이 통과했다. Adapter의 기존 HTTP Test는 로컬 통제 응답을 사용하며 실제 AI 호출은 0회다. 개인정보 처리기 실행 구성·기본 App의 실행용 Secret·Worker·DB의 전체 배포 흐름은 이어서 연결한다. 기본 Compose의 Worker 비활성 설정은 유지한다.
+
+### 합성 파일의 Compose Secret Mount
+
+[별도 Compose](./compose.secret-probe.yaml)와 [검증 스크립트](./scripts/Verify-Week8SecretMount.ps1)는 같은 Image에 서로 다른 합성 파일을 제공하고 실제 Main의 Provider 등록 설정까지 실행한다. 기본 Compose·기존 Container·Volume은 수정하지 않는다.
+
+```powershell
+.\mvnw.cmd -B -ntp test-compile
+docker build --pull=false --tag helpdesk:week8-secret-probe .
+pwsh -NoProfile -File .\scripts\Verify-Week8SecretMount.ps1
+```
+
+[Test 전용 Main](./src/test/java/experiment/helpdesk/secret/ComposeSecretMountExperiment.java)은 실행 시 Mount한다. Spring Boot의 `PropertiesLauncher`로 JAR의 Main 클래스 대신 이 실험을 시작하므로 Web Server·DB 애플리케이션을 스캔하지 않는다. 운영 Source의 `AiSuggestionProviderConfiguration`과 비활성 Worker 구성을 가져오며, 개인정보 처리기는 합성 Fixture로 제공한다. 이 클래스의 패키지는 Application의 Component Scan 범위 밖이다.
+
+2026-10-09 다섯 Case가 통과했다.
+
+- 합성 값 A·B: 같은 Image ID, 서로 다른 파일을 실제로 읽어 Config Tree 값 일치·Provider 등록·동일 참조 주입 확인
+- 누락·공백: 활성 Provider의 필수 값 오류로 기동 거부
+- 비활성: 파일 없이 기동하며 Provider·Consumer·검증기·Worker·Scheduler 미등록
+
+Container는 `10001:10001` 사용자·읽기 전용 Root Filesystem·읽기 전용 파일 Mount로 실행했다. 네트워크는 `none`, 공개 Port는 없으며 실제 Key·AI 요청·PostgreSQL은 사용하지 않았다. 관련 Test 170개도 다시 통과했다. 실행 원문·파일 값·Digest는 출력하지 않고 결과 JSON만 `target/week8-secret-probe/`에 남긴다. 종료 후 이 실험의 Container와 임시 합성 파일은 정리한다.
+
+이 결과는 파일 제공·설정 읽기·Main 조립의 근거다. 기본 App의 개인정보 처리기·실행용 Secret·Worker·DB 연결이나 실제 Key 인증 성공을 대신하지 않는다.
+
+### 최소 Health와 HTTP Metric
+
+Actuator의 노출과 Security 규칙을 함께 제한했다.
+
+- `GET`·`HEAD /actuator/health`: 익명 허용, `status` 한 필드만 응답. Session을 새로 만들지 않는다.
+- `GET /actuator/metrics/http.server.requests`: AGENT만 허용. 익명 `401`, USER `403`.
+- 다른 관리 Endpoint·Metric 목록·환경 변수·설정·Dump·관리 기능: 접근 차단. Health 상세·구성요소·별도 Probe 그룹·Discovery·JMX도 비활성.
+
+실제 내장 HTTP Server Test에서 Health `200`, HEAD의 빈 Body, Security가 거부한 Ticket `401`과 두 Status의 HTTP Timer 집계를 확인했다. MockMvc의 Metric Fixture는 Endpoint 접근 계약을, 실제 HTTP Test는 자동 요청 집계를 검증한다. 이 Test는 `in-memory` 구성이다.
+
+HTTP 종료 유예는 `server.shutdown=graceful`, `spring.lifecycle.timeout-per-shutdown-phase=20s`이며 기본 Compose의 App 종료 유예는 45초다. HTTP 종료 유예가 모든 AI Job 완료를 보장하는 것은 아니다.
+
+### 실제 Container의 종료 방식 비교
+
+Test 전용 [종료 실험 Main](./src/test/java/experiment/helpdesk/process/ContainerLifecycleExperiment.java)은 4초짜리 합성 요청을 처리한다. Image에 포함하지 않고 실행할 때만 읽기 전용 Mount한다.
+
+```powershell
+.\mvnw.cmd -B -ntp verify
+docker build --tag helpdesk:week8-observation .
+pwsh -NoProfile -File .\scripts\Verify-Week8ProcessLifecycle.ps1
+```
+
+2026-10-09 [검증 Script](./scripts/Verify-Week8ProcessLifecycle.ps1)의 3개 Case가 통과했다.
+
+| 종료 방법 | 진행 중 요청 | Exit Code |
+|---|---|---|
+| SIGTERM, Container 대기 30초 | `200`으로 완료 | 143 |
+| SIGTERM, Container 대기 1초 | 응답 없이 연결 중단 | 137 |
+| SIGKILL | 응답 없이 연결 중단 | 137 |
+
+세 Case 모두 실제 Java PID 1과 같은 Image ID를 확인했고 `OOMKilled=false`였다. Linux OpenJDK의 SIGTERM 종료값은 종료 Hook을 마친 경우에도 143일 수 있다. 처음 0으로 둔 기대값을 수정했으며 최초 실패 Report도 보존했다. 결과는 `target/week8-process-lifecycle/`에 기록한다.
+
+실험은 Worker·Provider 비활성, DB·Key 없이 실행했다. 실험 Container는 제거하고 기존 Container·Volume은 유지했다. Process·HTTP 종료 결과이며 DB·Job 상태의 종료 비교는 다음 단계다.
+
+### Actions 검증 Workflow
+
+[Workflow](./.github/workflows/verify.yml)는 Java·실제 PostgreSQL Testcontainers·JavaScript·ESLint를 통과한 뒤 Image를 Build한다. Source 읽기 권한만 사용하고, Checkout Credential을 남기지 않으며 실제 AI와 Worker는 비활성화한다. API Key·AWS 권한·ECR Push·ECS 배포는 추가하지 않았다.
+
+같은 종류의 검사를 Local에서 실행했지만 Workflow 자체는 아직 Commit·Push·실제 Actions 실행 전이다. 실제 실패·복구·ECR 전달과 Cloud 확인은 별도로 이어간다.
 
 ## 현재 검증 상태
 
@@ -392,6 +483,10 @@ pwsh -NoProfile -File .\scripts\Verify-Week8RequiredSettings.ps1
 | 담당자 최소 AI 조회 화면 | JavaScript·정적 Resource MockMvc 검증 완료 | 조회 Client·Text 표시·Page 연결의 새 Node Test 29개와 정적 파일·익명 API 차단의 MockMvc Test 5개 통과. 실제 Browser·새 유료 Worker는 별도 |
 | Browser·자동 Worker·실제 AI·PostgreSQL | 별도 Live Experiment 완료 | 2026-10-06 실제 USER 접수 `201`·예약된 Worker·AI HTTP 1회·제안 저장·AGENT 조회 `200`. 원문·인증 작성자 보존, 화면·DB 일치와 조회 무변경 확인. Ticket OPEN·제안 PENDING_REVIEW. 원본 Report의 NOT_SCORED는 보존하고 후속 원문 대조 2점은 WIL에 별도 기록 |
 | Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-07 인젝션 경계 Test 12개 추가 후 Java 전체 Test 461개 통과. 같은 날 앞선 JavaScript Test 145개·ESLint 통과 근거는 유지. 실패·오류·건너뜀 0, 새 실제 AI 호출 0회. 별도 통제된 Provider의 Browser Experiment·실제 AI Live Experiment 각 1개와 구분 |
+| Week 8 관측 설정과 실제 HTTP | 자동 검증 완료 | 2026-10-09 새 관측 Test 20개, 기존 Session·Security와 합쳐 30개 통과. 최소 Health·AGENT 전용 Metric·관리 경로 차단과 실제 `200`·`401` 집계 |
+| Week 8 전체 회귀와 Image | Local 검증 완료 | 2026-10-09 Maven `verify` Test 551개·JavaScript 145개·ESLint 통과, `helpdesk:week8-observation` Image Build 성공. 새 실제 AI 호출 0회 |
+| Week 8 종료 Signal과 요청 완료 | 실제 Container 검증 완료 | SIGTERM 30초 대기·1초 대기·SIGKILL의 3개 Case, 진행 중 요청·Exit Code·OOM 상태 비교. DB·Job은 별도 |
+| GitHub Actions 검증 Workflow | 작성·실제 실행 전 | Java·JavaScript·정적 검사·Image Build 순서와 최소 권한. 실제 Actions·ECR·Cloud는 미수행 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -757,5 +852,5 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 ## 다음 단계
 
 1. Week 7은 구현·평가·핵심 문답과 WIL 공개를 마쳤다. 초기 9/29~10/3 계획에서 이월된 과업은 10/5 회차 이후 10/6·10/7의 2일을 더 사용해 마감했다.
-2. Week 8의 로컬 Image·Compose·Volume·설정 비교는 확인했다. 다음은 배포용 Provider·개인정보 처리기·출력 검증기·Worker와 Secret 주입의 연결이며, 누락·비활성·정상 구성 Test를 먼저 둔다.
+2. Week 8의 로컬 Image·Compose·Volume·설정, Provider 등록과 합성 Secret Mount, 최소 Health·HTTP Metric·종료 Signal은 확인했다. 기본 App의 개인정보 처리기·실행용 Secret·Worker·DB 조립을 이어가며 실제 Actions·IAM·ECR·AWS HTTPS 배포를 병행한다.
 3. Process·종료·CI·IAM·관측·Cloud·HTTPS와 복구를 같은 Ticket·AI 수직 흐름에서 학습한다. 선택한 범위를 줄이거나 Week 9로 자동 이월하지 않는다.
