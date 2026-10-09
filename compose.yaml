@@ -43,6 +43,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Give the JVM time to close before Docker escalates from SIGTERM to SIGKILL.
+    stop_grace_period: 45s
     restart: "no"
 
 volumes:

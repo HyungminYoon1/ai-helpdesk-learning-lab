@@ -28,6 +28,8 @@ public class SecurityConfiguration {
 
         RequestMatcher apiRequest =
                 PathPatternRequestMatcher.pathPattern("/api/**");
+        RequestMatcher managementRequest =
+                PathPatternRequestMatcher.pathPattern("/actuator/**");
         RequestMatcher ticketCreateRequest =
                 PathPatternRequestMatcher.pathPattern(
                         HttpMethod.POST,
@@ -44,6 +46,11 @@ public class SecurityConfiguration {
         http
                 .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
+                        .requestMatchers(HttpMethod.HEAD, "/actuator/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/actuator/metrics/http.server.requests")
+                        .hasRole("AGENT")
+                        .requestMatchers("/actuator", "/actuator/**").denyAll()
                         .requestMatchers(ticketCreateRequest)
                         .hasAnyRole("USER", "AGENT")
                         .requestMatchers(ticketReadRequest)
@@ -56,7 +63,10 @@ public class SecurityConfiguration {
                         .defaultAuthenticationEntryPointFor(
                                 new HttpStatusEntryPoint(
                                         HttpStatus.UNAUTHORIZED),
-                                apiRequest))
+                                apiRequest)
+                        .defaultAuthenticationEntryPointFor(
+                                new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
+                                managementRequest))
                 .formLogin(Customizer.withDefaults());
 
         return http.build();
