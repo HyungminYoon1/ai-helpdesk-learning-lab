@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6 회귀 유지·Week 7 HTTP 접수·Job 실행권·Spring AI Adapter·선택 Worker·복구·AGENT 조회·최소 UI·인젝션 경계 통합 검증 — Java 461개·JavaScript 145개 통과
-> 현재 학습 영역: Week 8 배포 준비 — Image·Compose·설정과 합성 Secret Mount, 최소 Health·HTTP Metric·종료 Signal의 로컬 검증, Actions Workflow 작성. 개인정보 처리기·Worker의 배포 조립, 실제 CI·AWS·HTTPS 실행은 다음 단계. Week 7은 2026-10-07 WIL 검토·블로그 게시·포럼 등록 완료 확인
+> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — Java 551개·JavaScript 146개 통과. 로컬 Container 검증과 GitHub Actions 정상·실패·복구 비교 완료
+> 현재 학습 영역: Week 8 배포 준비 — Image·Compose·설정과 합성 Secret Mount, 최소 Health·HTTP Metric·종료 Signal, 원격 CI 검증. 개인정보 처리기·Worker의 배포 조립과 IAM·ECR·AWS·HTTPS 실행은 다음 단계. Week 7은 2026-10-07 WIL 검토·블로그 게시·포럼 등록 완료 확인
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -423,7 +423,20 @@ pwsh -NoProfile -File .\scripts\Verify-Week8ProcessLifecycle.ps1
 
 [Workflow](./.github/workflows/verify.yml)는 Java·실제 PostgreSQL Testcontainers·JavaScript·ESLint를 통과한 뒤 Image를 Build한다. Source 읽기 권한만 사용하고, Checkout Credential을 남기지 않으며 실제 AI와 Worker는 비활성화한다. API Key·AWS 권한·ECR Push·ECS 배포는 추가하지 않았다.
 
-같은 종류의 검사를 Local에서 실행했지만 Workflow 자체는 아직 Commit·Push·실제 Actions 실행 전이다. 실제 실패·복구·ECR 전달과 Cloud 확인은 별도로 이어간다.
+2026-10-09 실제 Actions에서 정상 실행과 실패·복구를 비교했다. ECR 전달과 Cloud 실행은 이 Workflow에 포함하지 않는다.
+
+| 실행 | Java Test | JavaScript Test | ESLint | Image Build |
+|---|---|---|---|---|
+| [최초 실행](https://github.com/HyungminYoon1/ai-helpdesk-learning-lab/actions/runs/37930542592) | 551개 통과 | 145개 중 2개 실패 | Skipped | Skipped |
+| [정상 기준](https://github.com/HyungminYoon1/ai-helpdesk-learning-lab/actions/runs/37931481943) | 551개 통과 | 146개 통과 | 통과 | 성공 |
+| [공백 제목 검증 제거](https://github.com/HyungminYoon1/ai-helpdesk-learning-lab/actions/runs/37932210172) | 551개 통과 | 146개 중 3개 실패 | Skipped | Skipped |
+| [검증 복구](https://github.com/HyungminYoon1/ai-helpdesk-learning-lab/actions/runs/37932759484) | 551개 통과 | 146개 통과 | 통과 | 성공 |
+
+최초 실행에서는 Windows용 Maven 사전 점검의 Unit Test 두 개가 Ubuntu에서 실패했다. [사전 점검 함수](./scripts/week7-java-provider-live.mjs)의 Process 실행은 가짜 함수였지만 Shell 선택은 실제 운영체제를 확인하고 있었다. Test에서 Shell 선택 함수도 주입하도록 분리하고, 기본 실행기의 Windows 제한은 유지했다. Windows와 네트워크를 끈 Linux·Node 24 환경에서 각각 146개 Test가 통과했으며, Windows의 실제 Maven 사전 점검도 Credential 전달 없이 통과했다.
+
+실패·복구 실험은 `codex/week8-ci-failure-recovery` Branch에서 진행했다. [isTicket](./src/main/resources/static/ticket-ui.mjs)의 공백 제목 거부 조건 한 줄을 제거하자 기존 UI Test 세 개가 실패했다. Test의 기대값을 유지한 채 그 조건만 복원했고, 정상 기준 Commit `1ebd6f8`과 복구 Commit `9d083ff`의 파일 내용이 같은 것도 확인했다. 오류·복구 Commit은 main에 합치지 않았다.
+
+`Skipped`는 해당 검사가 실패했다는 뜻이 아니라 앞선 실패로 실행하지 않았다는 뜻이다. 현재 Workflow는 일반 후속 Step에 적용되는 성공 조건을 사용하므로 JavaScript Test 실패가 Image Build를 막는다. [GitHub Actions의 기본 성공 조건](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)
 
 ## 현재 검증 상태
 
@@ -484,9 +497,9 @@ pwsh -NoProfile -File .\scripts\Verify-Week8ProcessLifecycle.ps1
 | Browser·자동 Worker·실제 AI·PostgreSQL | 별도 Live Experiment 완료 | 2026-10-06 실제 USER 접수 `201`·예약된 Worker·AI HTTP 1회·제안 저장·AGENT 조회 `200`. 원문·인증 작성자 보존, 화면·DB 일치와 조회 무변경 확인. Ticket OPEN·제안 PENDING_REVIEW. 원본 Report의 NOT_SCORED는 보존하고 후속 원문 대조 2점은 WIL에 별도 기록 |
 | Week 7 최신 회귀 근거 | 자동 검증 완료 | 2026-10-07 인젝션 경계 Test 12개 추가 후 Java 전체 Test 461개 통과. 같은 날 앞선 JavaScript Test 145개·ESLint 통과 근거는 유지. 실패·오류·건너뜀 0, 새 실제 AI 호출 0회. 별도 통제된 Provider의 Browser Experiment·실제 AI Live Experiment 각 1개와 구분 |
 | Week 8 관측 설정과 실제 HTTP | 자동 검증 완료 | 2026-10-09 새 관측 Test 20개, 기존 Session·Security와 합쳐 30개 통과. 최소 Health·AGENT 전용 Metric·관리 경로 차단과 실제 `200`·`401` 집계 |
-| Week 8 전체 회귀와 Image | Local 검증 완료 | 2026-10-09 Maven `verify` Test 551개·JavaScript 145개·ESLint 통과, `helpdesk:week8-observation` Image Build 성공. 새 실제 AI 호출 0회 |
+| Week 8 전체 회귀와 Image | Local·CI 검증 완료 | 2026-10-09 Maven `verify` Test 551개·JavaScript 146개·ESLint 통과. Local `helpdesk:week8-observation`과 Actions의 Image Build 성공. 새 실제 AI 호출 0회 |
 | Week 8 종료 Signal과 요청 완료 | 실제 Container 검증 완료 | SIGTERM 30초 대기·1초 대기·SIGKILL의 3개 Case, 진행 중 요청·Exit Code·OOM 상태 비교. DB·Job은 별도 |
-| GitHub Actions 검증 Workflow | 작성·실제 실행 전 | Java·JavaScript·정적 검사·Image Build 순서와 최소 권한. 실제 Actions·ECR·Cloud는 미수행 |
+| GitHub Actions 검증 Workflow | 원격 정상·실패·복구 확인 | Java 551개·JavaScript 146개·ESLint·Image Build 통과. 격리된 Branch의 공백 제목 검증 제거로 Test 3개 실패·Image Build Skipped 확인. ECR·Cloud는 다음 단계 |
 | HTTP·REST 예상 계약 | 작성 완료 | 생성·단건 조회의 정상·실패 Given–When–Then과 Method·Status·Header·Body 기록 |
 | Spring Boot Dependency·Application 진입점 | 구현·컴파일 완료 | Spring Boot `4.1.1`, `spring-boot-starter-webmvc`, Maven Plugin과 `HelpdeskApplication` 적용 |
 | Application Context·내장 Server | 기동 확인 | Java `25.0.4`, Tomcat `11.0.24`, Port `8080`에서 `Started HelpdeskApplication` 확인 |
@@ -852,5 +865,5 @@ AI가 제안한 Code도 직접 설명하고 수정하며 검증할 수 있을 �
 ## 다음 단계
 
 1. Week 7은 구현·평가·핵심 문답과 WIL 공개를 마쳤다. 초기 9/29~10/3 계획에서 이월된 과업은 10/5 회차 이후 10/6·10/7의 2일을 더 사용해 마감했다.
-2. Week 8의 로컬 Image·Compose·Volume·설정, Provider 등록과 합성 Secret Mount, 최소 Health·HTTP Metric·종료 Signal은 확인했다. 기본 App의 개인정보 처리기·실행용 Secret·Worker·DB 조립을 이어가며 실제 Actions·IAM·ECR·AWS HTTPS 배포를 병행한다.
+2. Week 8의 로컬 Image·Compose·Volume·설정, Provider 등록과 합성 Secret Mount, 최소 Health·HTTP Metric·종료 Signal과 실제 Actions 실패·복구를 확인했다. 기본 App의 개인정보 처리기·실행용 Secret·Worker·DB 조립을 이어가며 IAM·ECR·AWS HTTPS 배포를 진행한다.
 3. Process·종료·CI·IAM·관측·Cloud·HTTPS와 복구를 같은 Ticket·AI 수직 흐름에서 학습한다. 선택한 범위를 줄이거나 Week 9로 자동 이월하지 않는다.
