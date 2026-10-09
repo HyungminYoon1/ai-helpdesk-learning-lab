@@ -75,10 +75,11 @@ export function windowsShell(hostEnvironment = process.env) {
         : join(hostEnvironment.SYSTEMROOT, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
-export function runMavenPreflight({ spawnProcess = spawnSync, hostEnvironment = process.env } = {}) {
+export function runMavenPreflight({ spawnProcess = spawnSync, resolveShell = windowsShell,
+    hostEnvironment = process.env } = {}) {
     const environment = scopedChildEnvironment({}, hostEnvironment);
     if (!environment.PATHEXT || !environment.COMSPEC) throw new Error("MAVEN_STARTUP_PRECHECK_FAILED");
-    const child = spawnProcess(windowsShell(hostEnvironment), ["-NoProfile", "-NonInteractive", "-Command",
+    const child = spawnProcess(resolveShell(hostEnvironment), ["-NoProfile", "-NonInteractive", "-Command",
         ".\\mvnw.cmd --version; exit $LASTEXITCODE"], {
         cwd: ROOT, env: environment, encoding: "utf8", timeout: 60000, maxBuffer: 1048576, windowsHide: true
     });

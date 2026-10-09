@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { livePlan, readSafeJavaEvidence, executeLiveExperiment as runLiveExperiment, RESERVATION_USD,
-    scopedChildEnvironment, runMavenPreflight } from "../../../scripts/week7-java-provider-live.mjs";
+    scopedChildEnvironment, runMavenPreflight, windowsShell } from "../../../scripts/week7-java-provider-live.mjs";
 import { withDailyLedger, reserveDailyCall } from "../../../scripts/week7-ai-daily-budget.mjs";
 
 const DAY = "2026-10-06";
@@ -207,7 +207,9 @@ test("Windows wrapper variables are forwarded without unrelated keys or Maven op
 test("Maven preflight checks real version output and sends no credentials", () => {
     const evidence = runMavenPreflight({ hostEnvironment: { PATHEXT: ".CMD", COMSPEC: "safe-interpreter",
         OPENAI_API_KEY: "PRIVATE", HELPDESK_OPENAI_API_KEY: "PRIVATE", SYSTEMROOT: "C:\\Windows" },
-    spawnProcess: (_shell, args, options) => {
+    resolveShell: () => "synthetic-windows-shell",
+    spawnProcess: (shell, args, options) => {
+        assert.equal(shell, "synthetic-windows-shell");
         assert.equal(args.at(-1), ".\\mvnw.cmd --version; exit $LASTEXITCODE");
         assert.equal("OPENAI_API_KEY" in options.env, false);
         assert.equal("HELPDESK_OPENAI_API_KEY" in options.env, false);
@@ -223,9 +225,23 @@ test("zero exit with no Maven output and startup diagnostics are not successful 
         { status: 0, stdout: "Apache Maven 3.8.8\nJava version: 25.0.4" },
         { error: new Error("PRIVATE") }]) {
         assert.throws(() => runMavenPreflight({ hostEnvironment: { PATHEXT: ".CMD", COMSPEC: "safe-interpreter" },
+            resolveShell: () => "synthetic-windows-shell",
             spawnProcess: () => child }), error => error.message === "MAVEN_STARTUP_PRECHECK_FAILED"
                 && error.cause === undefined);
     }
+});
+
+test("the default preflight keeps its Windows-only guard before starting a subprocess", () => {
+    const hostEnvironment = { PATHEXT: ".CMD", COMSPEC: "safe-interpreter", SYSTEMROOT: "C:\\Windows" };
+    if (process.platform === "win32") {
+        assert.equal(typeof windowsShell(hostEnvironment), "string");
+        return;
+    }
+    let starts = 0;
+    assert.throws(() => runMavenPreflight({ hostEnvironment,
+        spawnProcess: () => { starts += 1; return { status: 0 }; } }),
+    /WINDOWS_EXPERIMENT_RUNNER_REQUIRED/);
+    assert.equal(starts, 0);
 });
 
 test("missing Windows wrapper variables prevent even the preflight subprocess", () => {
