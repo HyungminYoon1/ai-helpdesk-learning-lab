@@ -421,9 +421,13 @@ pwsh -NoProfile -File .\scripts\Verify-Week8ProcessLifecycle.ps1
 
 ### Actions 검증 Workflow
 
-[Workflow](./.github/workflows/verify.yml)는 Java·실제 PostgreSQL Testcontainers·JavaScript·ESLint를 통과한 뒤 Image를 Build한다. Source 읽기 권한만 사용하고, Checkout Credential을 남기지 않으며 실제 AI와 Worker는 비활성화한다. API Key·AWS 권한·ECR Push·ECS 배포는 추가하지 않았다.
+[Workflow](./.github/workflows/verify.yml)는 Java·실제 PostgreSQL Testcontainers·JavaScript·ESLint를 통과한 뒤 `linux/amd64` Image를 Build한다. 일반 Push·PR은 Source 읽기 권한만 사용하고, Checkout Credential을 남기지 않으며 실제 AI와 Worker는 비활성화한다.
 
-2026-10-09 실제 Actions에서 정상 실행과 실패·복구를 비교했다. ECR 전달과 Cloud 실행은 이 Workflow에 포함하지 않는다.
+`main`에서 수동 실행할 때 `publish_image=true`를 선택하면, 별도 Publish Job이 이번 실행에서 검증·Build한 Image를 Artifact로 전달받아 ECR에 업로드한다. Image를 다시 Build하지 않고 Local Image ID·Source Commit·Platform을 확인한다. AWS OIDC 권한은 Publish Job에만 두며, 장기 AWS Key나 AI API Key를 저장하지 않는다. ECR의 Manifest Digest를 Push 결과와 대조하고, Commit·Tag·Digest를 비밀값 없는 Evidence Artifact에 남긴다. 전달용 Image Artifact는 1일, Evidence는 7일 보관한다.
+
+업로드에는 기존 `main` 전용 IAM Role과 서울의 `ai-helpdesk-learning-lab` ECR Repository를 사용한다. GitHub Repository Variables `AWS_PUBLISH_ROLE_ARN`·`AWS_REGION`·`AWS_ECR_REPOSITORY`가 필요하다. 실제 계정 번호와 ARN은 공개 문서에 기록하지 않는다. ECR은 Immutable Tag를 사용하므로 Tag에 Commit·Run ID·Run Attempt를 함께 넣는다. Upload 실행은 일반 검증과 Concurrency Group을 분리하고, 실행 중인 Upload를 후속 Push로 자동 취소하지 않는다. ECR 업로드만으로 ECS Task가 실행되거나 기존 Task가 갱신되지는 않는다.
+
+2026-10-09 실제 Actions에서 정상 실행과 실패·복구를 비교했다. 아래 실행은 ECR 업로드를 추가하기 전의 검증 근거다.
 
 | 실행 | Java Test | JavaScript Test | ESLint | Image Build |
 |---|---|---|---|---|

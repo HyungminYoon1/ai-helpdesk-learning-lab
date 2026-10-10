@@ -5,18 +5,26 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_image:
+        description: Publish the verified main image to the existing ECR repository
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: verify-${{ github.ref }}
-  cancel-in-progress: true
+  group: verify-${{ github.ref }}-${{ inputs.publish_image || false }}
+  cancel-in-progress: ${{ !inputs.publish_image }}
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      image_id: ${{ steps.build.outputs.image_id }}
     env:
       HELPDESK_AI_PROVIDER_ENABLED: "false"
       HELPDESK_AI_WORKER_ENABLED: "false"
@@ -43,6 +51,123 @@ jobs:
       - name: Lint JavaScript
         run: npx --yes --package eslint@10.11.0 eslint scripts/week7-*.mjs src/main/resources/static/*.mjs src/test/js/*.mjs
       - name: Build the image only after verification succeeds
-        run: docker build --tag helpdesk-ci:${{ github.sha }} .
+        id: build
+        shell: bash
+        run: |
+          local_image="helpdesk-ci:$GITHUB_SHA"
+          docker build --platform linux/amd64 --provenance=false \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$local_image" .
+          image_id=$(docker image inspect --format '{{.Id}}' "$local_image")
+          echo "image_id=$image_id" >> "$GITHUB_OUTPUT"
+      - name: Export the verified image for the publishing job
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_image
+        shell: bash
+        run: docker image save --output "$RUNNER_TEMP/helpdesk-image.tar" "helpdesk-ci:$GITHUB_SHA"
+      - name: Transfer the image with one-day retention
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-helpdesk-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/helpdesk-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
-# No API keys, AWS permissions, image push, or Cloud deployment in this workflow.
+  publish:
+    name: Publish verified main image to ECR
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
+    steps:
+      - name: Validate the agreed publishing target without printing account details
+        shell: bash
+        env:
+          PUBLISH_ROLE_ARN: ${{ vars.AWS_PUBLISH_ROLE_ARN }}
+        run: |
+          [[ "$AWS_REGION" == "ap-northeast-2" ]]
+          [[ "$ECR_REPOSITORY" == "ai-helpdesk-learning-lab" ]]
+          [[ "$PUBLISH_ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/helpdesk-github-ecr-push$ ]]
+          expected_account_id="${BASH_REMATCH[1]}"
+          echo "::add-mask::$expected_account_id"
+          echo "EXPECTED_ACCOUNT_ID=$expected_account_id" >> "$GITHUB_ENV"
+      - name: Download the image produced by this run's verification job
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-helpdesk-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verified-image
+      - name: Verify image identity, source commit and platform before AWS authentication
+        shell: bash
+        env:
+          VERIFIED_IMAGE_ID: ${{ needs.verify.outputs.image_id }}
+        run: |
+          docker image load --input "$RUNNER_TEMP/verified-image/helpdesk-image.tar"
+          local_image="helpdesk-ci:$GITHUB_SHA"
+          [[ "$(docker image inspect --format '{{.Id}}' "$local_image")" == "$VERIFIED_IMAGE_ID" ]]
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$local_image")" == "linux/amd64" ]]
+          [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$local_image")" == "$GITHUB_SHA" ]]
+      - name: Assume the existing main-only ECR role with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ env.EXPECTED_ACCOUNT_ID }}
+          role-session-name: helpdesk-ecr-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+          unset-current-credentials: true
+          output-credentials: false
+          translate-env-variables: false
+          retry-max-attempts: 2
+          action-timeout-s: 120
+      - name: Push once and confirm the ECR manifest digest
+        shell: bash
+        env:
+          VERIFIED_IMAGE_ID: ${{ needs.verify.outputs.image_id }}
+        run: |
+          registry="$EXPECTED_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          image_tag="git-$GITHUB_SHA-run-$GITHUB_RUN_ID-attempt-$GITHUB_RUN_ATTEMPT"
+          image_ref="$registry/$ECR_REPOSITORY:$image_tag"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$registry"
+          docker image tag "helpdesk-ci:$GITHUB_SHA" "$image_ref"
+          docker image push "$image_ref" | tee "$RUNNER_TEMP/ecr-push.txt"
+          push_digest=$(sed -nE 's/.*digest: (sha256:[a-f0-9]{64}).*/\1/p' "$RUNNER_TEMP/ecr-push.txt" | tail -n 1)
+          [[ "$push_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          registry_digest=$(aws ecr batch-get-image --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$image_tag" \
+            --query 'images[0].imageId.imageDigest' --output text)
+          [[ "$registry_digest" == "$push_digest" ]]
+          jq -n --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" --arg repository "$ECR_REPOSITORY" \
+            --arg tag "$image_tag" --arg digest "$registry_digest" \
+            --arg localImageId "$VERIFIED_IMAGE_ID" \
+            '{evidence:"ECR_IMAGE_PUBLISHED",sourceCommit:$commit,workflowRunId:$run,
+              runAttempt:$attempt,repository:$repository,tag:$tag,digest:$digest,
+              platform:"linux/amd64",localImageId:$localImageId,
+              verifiedImageReused:true,cloudRuntimeVerified:false}' \
+            > "$RUNNER_TEMP/ecr-image-evidence.json"
+          cat "$RUNNER_TEMP/ecr-image-evidence.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain nonsecret publishing evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ecr-image-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ecr-image-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove the runner's Docker registry login
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${EXPECTED_ACCOUNT_ID:-}" && -n "$AWS_REGION" ]]; then
+            docker logout "$EXPECTED_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          fi
+
+# No long-lived AWS keys or AI keys. Publishing stores an image; it does not deploy Cloud resources.
