@@ -29,6 +29,8 @@ Log Group은 사전 생성 대상으로 참조하고 자동 생성은 끈다. `s
 
 RDS의 TLS는 Browser→ALB HTTPS와 별개다. `verify-full`을 사용하려면 RDS CA 신뢰와 Hostname 검증을 위한 설정·파일도 준비해야 한다. 아직 Image에 별도의 RDS CA 파일을 제공하지 않았으며, 인증서 검증을 끄는 방법으로 연결 실패를 해결하지 않는다. [RDS PostgreSQL TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.SSL.html)
 
+로컬의 AI 비활성 접수·조회 측정에서는 `0.25 CPU·512 MiB`로 두 번 통과했다. [측정 절차](../../README.md#배포용-image의-실행-자원-측정)를 첫 연결 사양의 근거로 사용하되, 이 초안의 CPU·Memory 자리표시자는 전체 구성·비용·생성 범위 확인 뒤 채운다. 개인정보 처리기·Provider·Worker를 켠 측정과 Cloud 실행에서도 다시 확인한다.
+
 실제 참조를 채운 로컬 복사본은 Git 제외 경로 `local/deployment/`에서 관리한다. 비밀값을 입력하지 않고 참조만 사용하며, 이 공개 Template의 자리표시자를 실제 계정 ARN·내부 주소로 바꾸어 Commit하지 않는다. 전체 Task 설정·환경 변수·Credential을 출력하지 않는다.
 
 Task Definition 밖의 Service·Subnet·Security Group·Public IP·ALB·Target Group·ACM·DNS·Backup도 구성해야 한다. 수량·최소 비용·공개 범위와 생성 승인을 확인한 뒤 등록·실행한다. `desiredCount`와 교체 전략은 Service 설정에 속하며 이 JSON에 넣지 않는다.

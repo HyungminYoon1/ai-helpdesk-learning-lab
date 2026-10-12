@@ -1,0 +1,19 @@
+# Merge with compose.yaml only for a loopback synthetic resource experiment.
+# The verifier generates these credentials; this is not an ECS Secret setup.
+services:
+  app:
+    cpus: ${HELPDESK_PROBE_CPUS:?Probe CPU limit is required}
+    mem_limit: ${HELPDESK_PROBE_MEMORY_MIB:?Probe memory limit is required}m
+    memswap_limit: ${HELPDESK_PROBE_MEMORY_MIB:?Probe memory limit is required}m
+    environment:
+      SPRING_PROFILES_ACTIVE: postgres,deployment
+      HELPDESK_LOCAL_USER_USERNAME: ""
+      HELPDESK_LOCAL_USER_PASSWORD: ""
+      HELPDESK_LOCAL_AGENT_USERNAME: ""
+      HELPDESK_LOCAL_AGENT_PASSWORD: ""
+      HELPDESK_DEPLOYMENT_USER_USERNAME: ${HELPDESK_LOCAL_USER_USERNAME:?Synthetic USER username is required}
+      HELPDESK_DEPLOYMENT_USER_PASSWORD: ${HELPDESK_LOCAL_USER_PASSWORD:?Synthetic USER password is required}
+      HELPDESK_DEPLOYMENT_AGENT_USERNAME: ${HELPDESK_LOCAL_AGENT_USERNAME:?Synthetic AGENT username is required}
+      HELPDESK_DEPLOYMENT_AGENT_PASSWORD: ${HELPDESK_LOCAL_AGENT_PASSWORD:?Synthetic AGENT password is required}
+      HELPDESK_AI_PROVIDER_ENABLED: "false"
+      HELPDESK_AI_WORKER_ENABLED: "false"

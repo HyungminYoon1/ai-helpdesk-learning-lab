@@ -3,7 +3,16 @@
 param(
     [switch]$RecreateDatabase,
     [switch]$RestartApplication,
-    [switch]$RecreateApplicationWithSettings
+    [switch]$RecreateApplicationWithSettings,
+    [ValidateNotNullOrEmpty()]
+    [string]$ImageTag = 'helpdesk:week8-build-baseline',
+    [switch]$DeploymentResourceProbe,
+    [ValidateSet(512, 1024)]
+    [int]$MemoryMiB = 512,
+    [ValidateSet(0.25, 0.5)]
+    [double]$CpuLimit = 0.25,
+    [ValidateRange(1, 200)]
+    [int]$QueryCount = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,13 +23,17 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $composePath = Join-Path $repoRoot 'compose.yaml'
 $projectName = 'helpdesk-week8-' + [guid]::NewGuid().ToString('N')
 $composePrefix = @('compose', '--project-directory', $repoRoot, '-f', $composePath, '-p', $projectName)
+if ($DeploymentResourceProbe) {
+    $composePrefix += @('-f', (Join-Path $repoRoot 'compose.deployment-probe.yaml'))
+}
 $clients = [System.Collections.Generic.List[System.Net.Http.HttpClient]]::new()
 $observedSessionSecrets = [System.Collections.Generic.List[string]]::new()
 $environmentNames = @(
     'HELPDESK_DB_ADMIN_PASSWORD', 'HELPDESK_DB_APP_PASSWORD',
     'HELPDESK_LOCAL_USER_USERNAME', 'HELPDESK_LOCAL_USER_PASSWORD',
     'HELPDESK_LOCAL_AGENT_USERNAME', 'HELPDESK_LOCAL_AGENT_PASSWORD',
-    'HELPDESK_LOCAL_IMAGE', 'HELPDESK_LOCAL_CORS_ALLOWED_ORIGIN'
+    'HELPDESK_LOCAL_IMAGE', 'HELPDESK_LOCAL_CORS_ALLOWED_ORIGIN',
+    'HELPDESK_PROBE_MEMORY_MIB', 'HELPDESK_PROBE_CPUS'
 )
 $previousEnvironment = @{}
 $composeStarted = $false
@@ -210,6 +223,81 @@ SELECT (SELECT count(*) FROM tickets) = 1
     Assert-Check ((Invoke-SqlScalar -Sql $sql) -eq 't') 'STORED_ROWS_MISMATCH'
 }
 
+function Get-AppResourceSnapshot {
+    param([string]$ContainerId)
+    # 숫자 cgroup Counter만 읽는다. Env·Log·JVM Property는 가져오지 않는다.
+    $text = Invoke-DockerSafe -DockerArgs @(
+        'exec', $ContainerId, 'cat',
+        '/sys/fs/cgroup/memory.current', '/sys/fs/cgroup/memory.peak',
+        '/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory.swap.max',
+        '/sys/fs/cgroup/memory.events', '/sys/fs/cgroup/cpu.stat'
+    )
+    $lines = @($text -split "`n")
+    Assert-Check ($lines.Count -ge 10) 'CGROUP_V2_METRICS_UNAVAILABLE'
+    $numbers = @()
+    for ($index = 0; $index -lt 4; $index++) {
+        Assert-Check ($lines[$index] -match '^\d+$') 'CGROUP_LIMIT_OR_COUNTER_INVALID'
+        $numbers += [long]$lines[$index]
+    }
+    $counters = @{}
+    foreach ($line in $lines[4..($lines.Count - 1)]) {
+        Assert-Check ($line -match '^([a-z_.]+)\s+(\d+)$') 'CGROUP_COUNTER_INVALID'
+        $counters[$Matches[1]] = [long]$Matches[2]
+    }
+    foreach ($key in @('oom', 'oom_kill', 'usage_usec', 'nr_periods', 'nr_throttled', 'throttled_usec')) {
+        Assert-Check ($counters.ContainsKey($key)) 'CGROUP_COUNTER_MISSING'
+    }
+    return [pscustomobject]@{
+        CurrentBytes = $numbers[0]; PeakBytes = $numbers[1]
+        LimitBytes = $numbers[2]; SwapLimitBytes = $numbers[3]
+        Counters = $counters
+    }
+}
+
+function Invoke-ResourceProbe {
+    param([object]$Agent, [long]$TicketId)
+    $app = Get-AppExecutionIdentity
+    $limits = (Invoke-DockerSafe -DockerArgs @(
+        'inspect', '--format', '{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}} {{.HostConfig.NanoCpus}}', $app.ContainerId
+    )) -split ' '
+    $expectedMemoryBytes = [long]$MemoryMiB * 1MB
+    Assert-Check ($limits.Count -eq 3 -and [long]$limits[0] -eq $expectedMemoryBytes -and
+        [long]$limits[1] -eq $expectedMemoryBytes -and [long]$limits[2] -eq [long]($CpuLimit * 1e9)) 'RESOURCE_LIMIT_NOT_APPLIED'
+    $before = Get-AppResourceSnapshot -ContainerId $app.ContainerId
+    Assert-Check ($before.LimitBytes -eq $expectedMemoryBytes -and $before.SwapLimitBytes -eq 0) 'CGROUP_LIMIT_NOT_APPLIED'
+    $latencies = [System.Collections.Generic.List[double]]::new()
+    $loadClock = [System.Diagnostics.Stopwatch]::StartNew()
+    for ($requestIndex = 0; $requestIndex -lt $QueryCount; $requestIndex++) {
+        $requestClock = [System.Diagnostics.Stopwatch]::StartNew()
+        $query = Invoke-HttpSafe -Client $Agent.Client -Method GET -Path ("/api/tickets/" + $TicketId)
+        $requestClock.Stop()
+        Assert-Check ($query.Status -eq 200 -and ($query.Body | ConvertFrom-Json).id -eq $TicketId) 'RESOURCE_PROBE_QUERY_FAILED'
+        $latencies.Add($requestClock.Elapsed.TotalMilliseconds)
+    }
+    $loadClock.Stop()
+    $after = Get-AppResourceSnapshot -ContainerId $app.ContainerId
+    $state = Invoke-DockerSafe -DockerArgs @('inspect', '--format', '{{.State.Running}} {{.State.OOMKilled}}', $app.ContainerId)
+    Assert-Check ($state -eq 'true false' -and $after.Counters.oom -eq 0 -and $after.Counters.oom_kill -eq 0) 'APP_MEMORY_FAILURE'
+    $sorted = @($latencies | Sort-Object)
+    # Nearest-rank p95. 소수의 순차 요청이며 동시 부하나 Worker 측정은 아니다.
+    return [ordered]@{
+        cpuLimit = $CpuLimit; memoryLimitMiB = $MemoryMiB; swapEnabled = $false
+        memoryMeasurement = 'CGROUP_V2_INCLUDING_FILE_CACHE_AND_PROBE_PROCESS'
+        memoryBeforeQueriesMiB = [math]::Round($before.CurrentBytes / 1MB, 2)
+        memoryAfterQueriesMiB = [math]::Round($after.CurrentBytes / 1MB, 2)
+        memoryPeakSinceContainerStartMiB = [math]::Round($after.PeakBytes / 1MB, 2)
+        oomEvents = $after.Counters.oom; oomKills = $after.Counters.oom_kill
+        cpuThrottledPeriodsSinceStart = $after.Counters.nr_throttled
+        cpuThrottledPeriodsDuringQueries = $after.Counters.nr_throttled - $before.Counters.nr_throttled
+        cpuUsageDuringQueriesMs = [math]::Round(($after.Counters.usage_usec - $before.Counters.usage_usec) / 1000, 2)
+        queryCount = $QueryCount; queryMode = 'SEQUENTIAL_AUTHENTICATED_TICKET_READS'
+        queryStatus = 200; queryDurationMs = [math]::Round($loadClock.Elapsed.TotalMilliseconds, 2)
+        queryP95Ms = [math]::Round($sorted[[int][math]::Ceiling($QueryCount * 0.95) - 1], 2)
+        queryMaxMs = [math]::Round($sorted[-1], 2)
+        appRunningAfterQueries = $true; fullLoadTest = $false
+    }
+}
+
 try {
     foreach ($name in $environmentNames) {
         $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -219,9 +307,18 @@ try {
     }
     [Environment]::SetEnvironmentVariable('HELPDESK_LOCAL_USER_USERNAME', 'week8-user', 'Process')
     [Environment]::SetEnvironmentVariable('HELPDESK_LOCAL_AGENT_USERNAME', 'week8-agent', 'Process')
-    [Environment]::SetEnvironmentVariable('HELPDESK_LOCAL_IMAGE', 'helpdesk:week8-build-baseline', 'Process')
+    [Environment]::SetEnvironmentVariable('HELPDESK_LOCAL_IMAGE', $ImageTag, 'Process')
     [Environment]::SetEnvironmentVariable('HELPDESK_LOCAL_CORS_ALLOWED_ORIGIN', 'http://127.0.0.1:4173', 'Process')
-    $null = Invoke-DockerSafe -DockerArgs @('image', 'inspect', '--format', '{{.Id}}', 'helpdesk:week8-build-baseline')
+    if ($DeploymentResourceProbe) {
+        Assert-Check (-not ($RecreateDatabase -or $RestartApplication -or $RecreateApplicationWithSettings)) 'RESOURCE_PROBE_CANNOT_MIX_RESTART_CASES'
+        Assert-Check ($CpuLimit -ne 0.5 -or $MemoryMiB -eq 1024) 'UNSUPPORTED_FARGATE_CANDIDATE'
+        [Environment]::SetEnvironmentVariable('HELPDESK_PROBE_MEMORY_MIB', [string]$MemoryMiB, 'Process')
+        [Environment]::SetEnvironmentVariable('HELPDESK_PROBE_CPUS', $CpuLimit.ToString([System.Globalization.CultureInfo]::InvariantCulture), 'Process')
+        $report.evidence = 'LOCAL_DEPLOYMENT_IMAGE_RESOURCE_PROBE'
+        $report.activeProfiles = @('postgres', 'deployment')
+        $report.aiProviderEnabled = $false
+    }
+    $report.imageId = Invoke-DockerSafe -DockerArgs @('image', 'inspect', '--format', '{{.Id}}', $ImageTag)
     $null = Invoke-ComposeSafe -ComposeArgs @('config', '--quiet')
     $phase = 'COMPOSE_START'
     $composeStarted = $true
@@ -235,6 +332,10 @@ try {
     $anonymous = New-LocalHttpClient
     $phase = 'APP_READY'
     Wait-LocalAppReady -Client $anonymous.Client
+    if ($DeploymentResourceProbe) {
+        $app = Get-AppExecutionIdentity
+        $report.appReadyAfterContainerStartSeconds = [math]::Round(([datetime]::UtcNow - [datetime]::Parse($app.StartedAt).ToUniversalTime()).TotalSeconds, 2)
+    }
     $phase = 'MIGRATION_AND_ROLE'
     Assert-Check ((Invoke-SqlScalar 'SELECT count(*) = 7 AND bool_and(success) AND max(version::integer) = 7 FROM flyway_schema_history;') -eq 't') 'MIGRATION_NOT_APPLIED'
     Assert-Check ((Invoke-SqlScalar "SELECT NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole FROM pg_roles WHERE rolname = 'helpdesk_app';") -eq 't') 'APP_DB_ROLE_TOO_PRIVILEGED'
@@ -276,6 +377,11 @@ try {
     $report.agentQueryStatus = $agentQuery.Status
     $report.sessionCookieObserved = $true
     $report.csrfHeaderUsed = $true
+    if ($DeploymentResourceProbe) {
+        $phase = 'RESOURCE_MEASUREMENT'
+        $report.resources = Invoke-ResourceProbe -Agent $agent -TicketId $ticket.id
+        Assert-StoredRows -TicketId $ticket.id
+    }
     $report.databaseContainerRecreated = $false
     if ($RecreateDatabase) {
         $phase = 'DATABASE_RECREATE'

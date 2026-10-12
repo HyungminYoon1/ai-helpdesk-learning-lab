@@ -400,6 +400,20 @@ Provider 등록 Test 18개·Worker 설정 Test 7개·접수 HTTP Test 18개, 총
 
 [ECS 명세 초안](./deploy/ecs/README.md)은 첫 연결용 AI 비활성·배포 사용자·Secret 참조를 구분한다. 미확정 CPU·메모리·Image Digest·Role·DB·Secret·Log는 자리표시자로 남겼고 실제 값의 로컬 복사본은 `local/deployment/`를 Git 제외 대상으로 둔다. 새 구조 Test 6개를 포함한 JavaScript 전체 152개가 실패·건너뜀 없이 통과했다. 구조 Test는 AWS 등록이나 실제 설정 전달 검증이 아니다. ECR 업로드·ECS·RDS·HTTPS 실행은 아직 하지 않았다.
 
+### 배포용 Image의 실행 자원 측정
+
+기존 Compose 검증에 선택적인 `-DeploymentResourceProbe`를 추가했다. [측정용 Override](./compose.deployment-probe.yaml)는 App만 `postgres,deployment`로 바꾸고 CPU·메모리 상한을 적용한다. 실제 PostgreSQL·Migration·로그인·Session·CSRF·접수·Role 조회 검증은 기존 스크립트를 재사용한다. AI Provider·Worker는 명시적으로 끄며, 설정 교체·재시작 Case와 동시에 실행하지 않는다.
+
+```powershell
+pwsh -NoProfile -File .\scripts\Verify-Week8Compose.ps1 -DeploymentResourceProbe -ImageTag helpdesk:week8-deployment-da1d687 -CpuLimit 0.25 -MemoryMiB 512 -QueryCount 30
+```
+
+`-ImageTag`는 이미 Build한 로컬 Image를 선택하며 스크립트가 새로 Build하지 않는다. 실행마다 합성 Credential·새 Project·새 DB Volume을 사용한다. 메모리와 Memory+Swap 상한을 같은 값으로 지정해 Swap을 막고, 실제 Docker 설정과 cgroup 상한도 대조한다. 종료 후에는 해당 Project의 Container만 중지하고 Volume을 보존하며 환경 변수를 복원한다.
+
+2026-10-12 같은 Image의 독립 실행 두 번에서 `0.25 CPU·512 MiB`로 접수 `201`·AGENT 조회 `200`과 순차 조회 30회씩이 통과했다. Container 시작부터 측정 종료까지 cgroup 메모리 최고치는 `312.42 MiB`·`211.43 MiB`, OOM·OOM Kill은 모두 0회였다. 최고치는 Heap만이 아니라 파일 Cache·Native 영역과 짧게 실행한 측정 Process도 포함한 Container 값이다. AI·동시 부하·장시간 Session 사용과 실제 Fargate 실행을 포함하지 않으므로 첫 AI 비활성 연결의 사양 후보로 사용한다.
+
+새 구성·Source 보호 Test 6개를 포함해 JavaScript 전체 158개와 ESLint가 통과했다. 이 6개는 측정 도구의 안전 조건을 검사하며 성능 Test가 아니다. 실제 로컬 HTTP·DB·자원 측정 결과와 구분한다. 전체 Java 회귀는 이번 도구 변경에서 다시 실행하지 않았다.
+
 ### 합성 파일의 Compose Secret Mount
 
 [별도 Compose](./compose.secret-probe.yaml)와 [검증 스크립트](./scripts/Verify-Week8SecretMount.ps1)는 같은 Image에 서로 다른 합성 파일을 제공하고 실제 Main의 Provider 등록 설정까지 실행한다. 기본 Compose·기존 Container·Volume은 수정하지 않는다.
