@@ -4,6 +4,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import lab.helpdesk.ai.processing.AiSuggestionJobWorker;
+import lab.helpdesk.ai.processing.AiSuggestionWorkerScheduler;
+import lab.helpdesk.ai.provider.AiSuggestionProvider;
 import lab.helpdesk.ticket.application.TicketReceiptApplicationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +22,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
@@ -54,7 +58,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "helpdesk.ai.provider.enabled=false",
+        "helpdesk.ai.worker.enabled=false"
+})
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE)
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -73,6 +80,7 @@ class TicketReceiptHttpIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private ApplicationContext applicationContext;
     @MockitoSpyBean private TicketReceiptApplicationService receipts;
 
     @BeforeEach
@@ -114,6 +122,28 @@ class TicketReceiptHttpIntegrationTest {
                 JOIN ticket_messages m ON m.id = j.input_message_id WHERE m.ticket_id = ?
                 """, String.class, ticketId)).isEqualTo("PENDING");
         verify(receipts).receive("접수 문의", original, username);
+    }
+
+    @Test
+    void receipt_succeeds_with_provider_and_worker_explicitly_disabled() throws Exception {
+        assertThat(applicationContext.getBeansOfType(AiSuggestionProvider.class)).isEmpty();
+        assertThat(applicationContext.getBeansOfType(AiSuggestionJobWorker.class)).isEmpty();
+        assertThat(applicationContext.getBeansOfType(AiSuggestionWorkerScheduler.class)).isEmpty();
+
+        MvcResult result = create(sessionFor(USER_NAME), payload("AI 비활성 접수 확인"))
+                .andExpect(status().isCreated())
+                .andExpect(handler().handlerType(TicketReceiptController.class))
+                .andReturn();
+        long ticketId = objectMapper.readTree(result.getResponse().getContentAsString()).path("id").asLong();
+        assertRowCounts(1);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT j.status FROM ai_suggestion_jobs j
+                JOIN ticket_messages m ON m.id = j.input_message_id WHERE m.ticket_id = ?
+                """, String.class, ticketId)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT j.reserved_generation_count FROM ai_suggestion_jobs j
+                JOIN ticket_messages m ON m.id = j.input_message_id WHERE m.ticket_id = ?
+                """, Integer.class, ticketId)).isZero();
     }
 
     @Test

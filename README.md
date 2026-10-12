@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — Java 551개·JavaScript 146개 통과. 로컬 Container 검증과 GitHub Actions 정상·실패·복구 비교 완료
-> 현재 학습 영역: Week 8 배포 준비 — Image·Compose·설정과 합성 Secret Mount, 최소 Health·HTTP Metric·종료 Signal, 원격 CI 검증. 개인정보 처리기·Worker의 배포 조립과 IAM·ECR·AWS·HTTPS 실행은 다음 단계. Week 7은 2026-10-07 WIL 검토·블로그 게시·포럼 등록 완료 확인
+> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — 10/10 CI의 Java 551개·JavaScript 146개 통과. 10/12 설정·AI 비활성 접수 Focused Test 43개 통과
+> 현재 학습 영역: Week 8 배포 준비 — 로컬 Container·설정·관측·종료, 실제 CI 실패·복구와 OIDC 인증·ECR 업로드 완료. AI 비활성 접수는 실제 PostgreSQL에서 확인. 개인정보 처리기·Worker의 전체 배포 조립과 ECS·RDS·HTTPS·복구는 남아 있음. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -362,6 +362,16 @@ Key와 상한을 읽어 Provider를 만들며 Context 종료 시 HTTP Client를 
 ```
 
 2026-10-09 새 설정 Test 18개와 관련 기존 Test를 합쳐 170개가 실패·오류·건너뜀 없이 통과했다. Adapter의 기존 HTTP Test는 로컬 통제 응답을 사용하며 실제 AI 호출은 0회다. 개인정보 처리기 실행 구성·기본 App의 실행용 Secret·Worker·DB의 전체 배포 흐름은 이어서 연결한다. 기본 Compose의 Worker 비활성 설정은 유지한다.
+
+### AI를 끈 상태의 문의 접수 검증
+
+2026-10-12에는 [접수 HTTP Test](./src/test/java/lab/helpdesk/ticket/web/TicketReceiptHttpIntegrationTest.java)에 Provider·Worker의 명시적 비활성과 해당 Bean·Scheduler 부재를 확인하는 Case를 추가했다. 인증된 USER의 유효한 CSRF 요청은 `201`이고, 실제 PostgreSQL의 Ticket·Message·Job은 각각 1건, Job은 `PENDING`·생성 예약은 0건이었다.
+
+Provider 등록 Test 18개·Worker 설정 Test 7개·접수 HTTP Test 18개, 총 43개가 실패·오류·건너뜀 없이 통과했다. 개인정보 처리기 Bean이 없는 활성 Provider의 조립 실패도 확인했다. HTTP Test는 실제 Security·MVC·Service·JDBC·PostgreSQL을 사용하는 MockMvc이며 로그인 사용자는 Test Fixture다. Cloud 사용자 구성·Browser E2E·RDS 배포와 전체 회귀는 이번 실행 대상이 아니다. 운영 Source·Job 정책·Migration은 바꾸지 않았다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=AiSuggestionProviderConfigurationTest,AiSuggestionWorkerConfigurationTest,TicketReceiptHttpIntegrationTest" test
+```
 
 ### 합성 파일의 Compose Secret Mount
 
