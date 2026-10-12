@@ -10,6 +10,8 @@
 !src/
 !src/main/
 !src/main/**
+!docker/
+!docker/rds/
 
 # 허용한 디렉터리 안에서도 Credential 파일은 제외한다.
 **/.env
@@ -17,3 +19,6 @@
 **/*.pem
 **/*.key
 **/*credentials*
+
+# Only this reviewed public RDS CA bundle may bypass the PEM exclusion.
+!docker/rds/ap-northeast-2-bundle.pem

@@ -1,0 +1,9 @@
+{
+  "region": "ap-northeast-2",
+  "source": "https://truststore.pki.rds.amazonaws.com/ap-northeast-2/ap-northeast-2-bundle.pem",
+  "retrievedOn": "2026-10-12",
+  "sha256": "913fb5b814f17af79d4c1622584a8d0ceddf5b0d76fe353d0c7d1186cdd6b229",
+  "certificateCount": 3,
+  "kind": "PUBLIC_RDS_ROOT_CA_BUNDLE",
+  "imagePath": "/app/certs/rds-ca-bundle.pem"
+}

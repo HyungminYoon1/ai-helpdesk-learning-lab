@@ -23,11 +23,13 @@ Log Group은 사전 생성 대상으로 참조하고 자동 생성은 끈다. `s
 | Image URI와 Digest | 변경 Commit의 CI 통과·ECR 업로드·Manifest 대조 |
 | CPU·Memory | 지원하는 조합, 대표 요청·기동·Worker를 포함한 측정과 최소 비용 비교 |
 | Execution Role | 필요한 ECR·Secret·Log만 허용한 Role의 참조 |
-| JDBC URL | RDS Endpoint·DB 이름과 검증된 TLS 연결 |
+| JDBC URL의 Endpoint·DB 이름 | `verify-full`·Image CA 경로를 유지하고 실제 TLS 연결 확인 |
 | Secret 참조 | DB 계정과 배포 USER·AGENT의 참조·권한·Version |
 | Log Group | 서울의 생성 범위·최소 보존 기간과 권한 |
 
-RDS의 TLS는 Browser→ALB HTTPS와 별개다. `verify-full`을 사용하려면 RDS CA 신뢰와 Hostname 검증을 위한 설정·파일도 준비해야 한다. 아직 Image에 별도의 RDS CA 파일을 제공하지 않았으며, 인증서 검증을 끄는 방법으로 연결 실패를 해결하지 않는다. [RDS PostgreSQL TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.SSL.html)
+RDS의 TLS는 Browser→ALB HTTPS와 별개다. [서울 공개 CA 묶음](../../docker/rds/README.md)을 Runtime의 `/app/certs/rds-ca-bundle.pem`에 제공하도록 Dockerfile을 보완했다. 초안 URL은 `sslmode=verify-full`·`sslrootcert`를 명시하며 Endpoint·DB 이름만 자리표시자로 남긴다. 인증서 검증을 끄는 방법으로 연결 실패를 해결하지 않는다. [RDS PostgreSQL TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.SSL.html)
+
+로컬 재Build에서 비Root 사용자의 파일 읽기·Hash·Mode를 확인했다. 이전 ECR Image에는 이번 변경이 없으므로 실제 배포 전 새 CI Image의 검증·승인된 업로드·Digest 대조가 필요하다. 파일 준비는 실제 RDS의 인증서 사슬·Hostname·DB TLS 연결 검증과 구분한다.
 
 로컬의 AI 비활성 접수·조회 측정에서는 `0.25 CPU·512 MiB`로 두 번 통과했다. [측정 절차](../../README.md#배포용-image의-실행-자원-측정)를 첫 연결 사양의 근거로 사용하되, 이 초안의 CPU·Memory 자리표시자는 전체 구성·비용·생성 범위 확인 뒤 채운다. 개인정보 처리기·Provider·Worker를 켠 측정과 Cloud 실행에서도 다시 확인한다.
 

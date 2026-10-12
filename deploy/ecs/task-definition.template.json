@@ -35,7 +35,7 @@
         },
         {
           "name": "SPRING_DATASOURCE_URL",
-          "value": "<RDS_JDBC_URL_WITH_VERIFIED_TLS>"
+          "value": "jdbc:postgresql://<RDS_ENDPOINT>:5432/<DB_NAME>?sslmode=verify-full&sslrootcert=/app/certs/rds-ca-bundle.pem"
         },
         {
           "name": "SPRING_APPLICATION_JSON",

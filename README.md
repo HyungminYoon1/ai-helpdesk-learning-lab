@@ -414,6 +414,14 @@ pwsh -NoProfile -File .\scripts\Verify-Week8Compose.ps1 -DeploymentResourceProbe
 
 새 구성·Source 보호 Test 6개를 포함해 JavaScript 전체 158개와 ESLint가 통과했다. 이 6개는 측정 도구의 안전 조건을 검사하며 성능 Test가 아니다. 실제 로컬 HTTP·DB·자원 측정 결과와 구분한다. 전체 Java 회귀는 이번 도구 변경에서 다시 실행하지 않았다.
 
+### App에서 RDS 인증서를 검증할 준비
+
+[서울 RDS 공개 CA 묶음](./docker/rds/README.md)을 Dockerfile의 Runtime 단계에서 `/app/certs/rds-ca-bundle.pem`으로 복사한다. 파일의 공식 취득 위치·SHA-256·공개 Root CA 3개를 확인했으며 `.dockerignore`에는 이 공개 PEM 한 개만 정확히 허용했다. DB Password·Private Key는 포함하지 않는다. ECS 초안은 `sslmode=verify-full`·CA 파일 경로를 고정하고 실제 Endpoint·DB 이름을 미확정 값으로 둔다.
+
+2026-10-12 로컬 재Build에서는 Java Source·JAR 패키징의 Cache를 재사용하고 Runtime CA 복사·권한 설정을 다시 실행했다. 초기 파일 검사는 `certs` 디렉터리의 `444` 때문에 비Root 읽기가 실패했다. 디렉터리를 Root 소유 `0555`, 파일을 Root 소유 `0444`로 제공한 뒤 기본 사용자 `10001:10001`의 읽기·파일 Hash·Mode 확인이 통과했다.
+
+CA·명세 관련 Test 13개를 포함한 JavaScript 전체 165개와 ESLint가 통과했다. Network 없는 임시 검사 Container에서 파일만 읽었으며 Helpdesk·DB는 시작하지 않았다. 실제 RDS TLS 연결, ECR 업로드·ECS·ALB·HTTPS와 전체 Java 회귀는 이 확인에 포함하지 않는다. 이 공개 파일의 갱신은 Image 재Build 대상이며 비밀값 교체와는 다르다.
+
 ### 합성 파일의 Compose Secret Mount
 
 [별도 Compose](./compose.secret-probe.yaml)와 [검증 스크립트](./scripts/Verify-Week8SecretMount.ps1)는 같은 Image에 서로 다른 합성 파일을 제공하고 실제 Main의 Provider 등록 설정까지 실행한다. 기본 Compose·기존 Container·Volume은 수정하지 않는다.

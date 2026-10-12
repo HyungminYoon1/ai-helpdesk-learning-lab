@@ -17,6 +17,9 @@ RUN ./mvnw -B -ntp -DskipTests package
 FROM eclipse-temurin:25-jre-noble@sha256:d9a39a23634650173f1e2bbc176227af9728587ecf0f4b62d53e9355cd7a19ab AS runtime
 WORKDIR /app
 COPY --from=build --chown=10001:10001 /workspace/target/ai-helpdesk-learning-lab-1.0.0-SNAPSHOT.jar ./helpdesk.jar
+COPY --chown=0:0 --chmod=0444 docker/rds/ap-northeast-2-bundle.pem ./certs/rds-ca-bundle.pem
+# COPY can apply its mode to a new parent directory; allow nonroot traversal.
+RUN chmod 0555 /app/certs
 
 USER 10001:10001
 EXPOSE 8080

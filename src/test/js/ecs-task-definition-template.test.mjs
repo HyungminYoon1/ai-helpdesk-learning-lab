@@ -72,9 +72,16 @@ test("ECS draft keeps HTTPS cookie and forwarded settings in nonsecret applicati
 test("ECS draft leaves cloud-specific inputs unresolved and does not invent a task role", () => {
   assert.equal(placeholder(draft.cpu) && placeholder(draft.memory), true);
   assert.equal(placeholder(draft.executionRoleArn) && placeholder(container.image), true);
-  assert.equal(placeholder(environment.get("SPRING_DATASOURCE_URL")), true);
+  const jdbcUrl = environment.get("SPRING_DATASOURCE_URL");
+  assert.equal(typeof jdbcUrl === "string" && jdbcUrl.includes("<RDS_ENDPOINT>")
+    && jdbcUrl.includes("<DB_NAME>"), true);
   assert.equal(Object.hasOwn(draft, "taskRoleArn"), false);
   assert.equal(Object.hasOwn(container, "command") || Object.hasOwn(container, "entryPoint"), false);
+});
+
+test("ECS draft requires RDS certificate and hostname validation with the bundled CA", () => {
+  assert.equal(environment.get("SPRING_DATASOURCE_URL") ===
+    "jdbc:postgresql://<RDS_ENDPOINT>:5432/<DB_NAME>?sslmode=verify-full&sslrootcert=/app/certs/rds-ca-bundle.pem", true);
 });
 
 test("ECS draft uses a precreated Seoul log group without automatic group creation", () => {
