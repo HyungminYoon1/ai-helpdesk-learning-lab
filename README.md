@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — 10/10 CI의 Java 551개·JavaScript 146개 통과. 10/12 설정·AI 비활성 접수 Focused Test 43개 통과
+> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — 10/10 CI의 Java 551개·JavaScript 146개 통과. 10/12 배포 사용자·설정·AI 비활성 접수 Focused Test 72개 통과
 > 현재 학습 영역: Week 8 배포 준비 — 로컬 Container·설정·관측·종료, 실제 CI 실패·복구와 OIDC 인증·ECR 업로드 완료. AI 비활성 접수는 실제 PostgreSQL에서 확인. 개인정보 처리기·Worker의 전체 배포 조립과 ECS·RDS·HTTPS·복구는 남아 있음. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
 > 실행 기준: Java 25
 
@@ -372,6 +372,27 @@ Provider 등록 Test 18개·Worker 설정 Test 7개·접수 HTTP Test 18개, 총
 ```powershell
 .\mvnw.cmd -B -ntp "-Dtest=AiSuggestionProviderConfigurationTest,AiSuggestionWorkerConfigurationTest,TicketReceiptHttpIntegrationTest" test
 ```
+
+### 배포용 USER와 AGENT 구성
+
+[DeploymentSecurityConfiguration](./src/main/java/lab/helpdesk/security/DeploymentSecurityConfiguration.java)은 명시적인 `deployment` Profile에서 학습용 로그인 사용자를 만든다. `postgres`를 함께 활성화해야 하며 `local-browser`·`in-memory`와의 혼용은 기동 오류로 거부한다. 기존 Local 구성·Security Filter Chain·DB Schema는 변경하지 않는다.
+
+| Spring Property | 실행 환경 변수 이름 |
+|---|---|
+| `helpdesk.deployment.user.username` | `HELPDESK_DEPLOYMENT_USER_USERNAME` |
+| `helpdesk.deployment.user.password` | `HELPDESK_DEPLOYMENT_USER_PASSWORD` |
+| `helpdesk.deployment.agent.username` | `HELPDESK_DEPLOYMENT_AGENT_USERNAME` |
+| `helpdesk.deployment.agent.password` | `HELPDESK_DEPLOYMENT_AGENT_PASSWORD` |
+
+네 값은 실행 환경의 Secret으로 제공하고 Source·JAR·Image에 넣지 않는다. 누락·빈 문자열·공백은 고정 오류 코드로 거부하고 Local 값이나 기본 계정으로 대체하지 않는다. 대소문자만 다른 USER·AGENT 이름도 거부한다. 기존 PasswordEncoder로 Hash를 만들어 `InMemoryUserDetailsManager`에 USER와 USER·AGENT 권한을 제공한다. 사용자 저장소는 메모리이며 Ticket은 PostgreSQL에 저장한다. USER·AGENT는 Browser 로그인 계정이고 DB의 JDBC 사용자와는 별개다. Hashing이 실행 환경에 주입된 원문 Password까지 없애지는 않으므로 환경 변수·Log·Dump를 출력하지 않는다.
+
+설정 Unit Test 25개와 실제 Main의 배포 사용자 Bean·MockMvc·PostgreSQL을 연결한 Integration Test 1개가 통과했다. 후자는 별도의 Test 사용자 Bean 없이 외부 합성 설정을 사용해 로그인·Session·Role·CSRF·접수와 `PENDING`을 확인한다. 기존 Local 사용자·Provider·Worker·접수 Test까지 합친 Focused 실행은 72개 통과, 실패·오류·건너뜀 0개다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=DeploymentSecurityConfigurationTest,DeploymentSecurityHttpIntegrationTest,LocalBrowserSecurityConfigurationTest,AiSuggestionProviderConfigurationTest,AiSuggestionWorkerConfigurationTest,TicketReceiptHttpIntegrationTest" test
+```
+
+이 변경은 배포용 로그인 객체의 연결이다. 새 Java Configuration을 추가했으므로 배포 전에는 변경 Source를 검증해 새 Image를 Build·업로드해야 한다. Key·Password 값만 바꾸는 경우와는 다르다. AI 활성화, ECS Secret 전달, HTTPS·Forwarded Header·Cookie 설정, 실제 Cloud Browser 검증은 별도로 이어간다. 기존 Compose의 `postgres,local-browser`는 로컬 학습용으로 유지한다.
 
 ### 합성 파일의 Compose Secret Mount
 
