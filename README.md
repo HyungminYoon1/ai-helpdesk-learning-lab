@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — 10/10 CI의 Java 551개·JavaScript 146개 통과. 10/12 배포 사용자·설정·AI 비활성 접수 Focused Test 72개 통과
+> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — 10/10 CI의 Java 551개·JavaScript 146개 통과. 10/12 Focused Java 72개·JavaScript 전체 152개 통과, 새 로컬 Image Build·ECS 명세 초안 확인
 > 현재 학습 영역: Week 8 배포 준비 — 로컬 Container·설정·관측·종료, 실제 CI 실패·복구와 OIDC 인증·ECR 업로드 완료. AI 비활성 접수는 실제 PostgreSQL에서 확인. 개인정보 처리기·Worker의 전체 배포 조립과 ECS·RDS·HTTPS·복구는 남아 있음. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
 > 실행 기준: Java 25
 
@@ -393,6 +393,12 @@ Provider 등록 Test 18개·Worker 설정 Test 7개·접수 HTTP Test 18개, 총
 ```
 
 이 변경은 배포용 로그인 객체의 연결이다. 새 Java Configuration을 추가했으므로 배포 전에는 변경 Source를 검증해 새 Image를 Build·업로드해야 한다. Key·Password 값만 바꾸는 경우와는 다르다. AI 활성화, ECS Secret 전달, HTTPS·Forwarded Header·Cookie 설정, 실제 Cloud Browser 검증은 별도로 이어간다. 기존 Compose의 `postgres,local-browser`는 로컬 학습용으로 유지한다.
+
+### 새 Image와 ECS 실행 명세 초안
+
+2026-10-12에는 Commit `da1d687`의 깨끗한 Source로 `helpdesk:week8-deployment-da1d687`를 Build했다. 의존성 준비는 Cache를 재사용하고 Source 복사·JAR 패키징을 다시 수행했다. 최종 Image의 JAR에서 배포 사용자 Configuration을 확인했으며, 실행 Platform은 `linux/amd64`, 비Root 사용자는 기존 설정을 유지한다. Build의 `-DskipTests package`는 앞선 Focused Java Test 72개와 별개이며, 이 검사에서는 JVM을 시작하지 않았다.
+
+[ECS 명세 초안](./deploy/ecs/README.md)은 첫 연결용 AI 비활성·배포 사용자·Secret 참조를 구분한다. 미확정 CPU·메모리·Image Digest·Role·DB·Secret·Log는 자리표시자로 남겼고 실제 값의 로컬 복사본은 `local/deployment/`를 Git 제외 대상으로 둔다. 새 구조 Test 6개를 포함한 JavaScript 전체 152개가 실패·건너뜀 없이 통과했다. 구조 Test는 AWS 등록이나 실제 설정 전달 검증이 아니다. ECR 업로드·ECS·RDS·HTTPS 실행은 아직 하지 않았다.
 
 ### 합성 파일의 Compose Secret Mount
 

@@ -1,0 +1,83 @@
+{
+  "family": "helpdesk-learning",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "runtimePlatform": {
+    "operatingSystemFamily": "LINUX",
+    "cpuArchitecture": "X86_64"
+  },
+  "cpu": "<TASK_CPU_UNITS>",
+  "memory": "<TASK_MEMORY_MIB>",
+  "executionRoleArn": "<ECS_EXECUTION_ROLE_ARN>",
+  "containerDefinitions": [
+    {
+      "name": "helpdesk",
+      "image": "<VERIFIED_ECR_IMAGE_URI_WITH_MANIFEST_DIGEST>",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "SPRING_PROFILES_ACTIVE",
+          "value": "postgres,deployment"
+        },
+        {
+          "name": "HELPDESK_AI_PROVIDER_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "HELPDESK_AI_WORKER_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "SPRING_DATASOURCE_URL",
+          "value": "<RDS_JDBC_URL_WITH_VERIFIED_TLS>"
+        },
+        {
+          "name": "SPRING_APPLICATION_JSON",
+          "value": "{\"server\":{\"forward-headers-strategy\":\"native\",\"servlet\":{\"session\":{\"cookie\":{\"secure\":true,\"http-only\":true,\"same-site\":\"lax\"}}}}}"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "SPRING_DATASOURCE_USERNAME",
+          "valueFrom": "<DB_USERNAME_SECRET_REFERENCE>"
+        },
+        {
+          "name": "SPRING_DATASOURCE_PASSWORD",
+          "valueFrom": "<DB_PASSWORD_SECRET_REFERENCE>"
+        },
+        {
+          "name": "HELPDESK_DEPLOYMENT_USER_USERNAME",
+          "valueFrom": "<USER_USERNAME_SECRET_REFERENCE>"
+        },
+        {
+          "name": "HELPDESK_DEPLOYMENT_USER_PASSWORD",
+          "valueFrom": "<USER_PASSWORD_SECRET_REFERENCE>"
+        },
+        {
+          "name": "HELPDESK_DEPLOYMENT_AGENT_USERNAME",
+          "valueFrom": "<AGENT_USERNAME_SECRET_REFERENCE>"
+        },
+        {
+          "name": "HELPDESK_DEPLOYMENT_AGENT_PASSWORD",
+          "valueFrom": "<AGENT_PASSWORD_SECRET_REFERENCE>"
+        }
+      ],
+      "stopTimeout": 45,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-region": "ap-northeast-2",
+          "awslogs-group": "<PRECREATED_LOG_GROUP_NAME>",
+          "awslogs-stream-prefix": "helpdesk",
+          "awslogs-create-group": "false"
+        }
+      }
+    }
+  ]
+}
