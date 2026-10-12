@@ -1,0 +1,21 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowSameAccountEcsTasks",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "<AWS_ACCOUNT_ID>"
+        },
+        "ArnLike": {
+          "aws:SourceArn": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:*"
+        }
+      }
+    }
+  ]
+}

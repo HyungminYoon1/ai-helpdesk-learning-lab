@@ -1,0 +1,40 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcrRegistryAuthentication",
+      "Effect": "Allow",
+      "Action": ["ecr:GetAuthorizationToken"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PullVerifiedHelpdeskImage",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+      ],
+      "Resource": "arn:aws:ecr:ap-northeast-2:<AWS_ACCOUNT_ID>:repository/ai-helpdesk-learning-lab"
+    },
+    {
+      "Sid": "WriteHelpdeskLogStreams",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:ap-northeast-2:<AWS_ACCOUNT_ID>:log-group:<PRECREATED_LOG_GROUP_NAME>:log-stream:*"
+    },
+    {
+      "Sid": "ReadSixHelpdeskParameters",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameters"],
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/db/username",
+        "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/db/password",
+        "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/user/username",
+        "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/user/password",
+        "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/agent/username",
+        "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/agent/password"
+      ]
+    }
+  ]
+}

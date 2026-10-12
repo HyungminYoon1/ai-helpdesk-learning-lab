@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — 10/10 CI의 Java 551개·JavaScript 146개 통과. 10/12 Focused Java 72개·JavaScript 전체 152개 통과, 새 로컬 Image Build·ECS 명세 초안 확인
+> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — 10/13 로컬 전체 Java 578개·JavaScript 173개·ESLint 통과. 배포용 Image·RDS CA 준비, SSM·Execution Role·1년 보존 Log Group 구성
 > 현재 학습 영역: Week 8 배포 준비 — 로컬 Container·설정·관측·종료, 실제 CI 실패·복구와 OIDC 인증·ECR 업로드 완료. AI 비활성 접수는 실제 PostgreSQL에서 확인. 개인정보 처리기·Worker의 전체 배포 조립과 ECS·RDS·HTTPS·복구는 남아 있음. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
 > 실행 기준: Java 25
 
@@ -399,6 +399,18 @@ Provider 등록 Test 18개·Worker 설정 Test 7개·접수 HTTP Test 18개, 총
 2026-10-12에는 Commit `da1d687`의 깨끗한 Source로 `helpdesk:week8-deployment-da1d687`를 Build했다. 의존성 준비는 Cache를 재사용하고 Source 복사·JAR 패키징을 다시 수행했다. 최종 Image의 JAR에서 배포 사용자 Configuration을 확인했으며, 실행 Platform은 `linux/amd64`, 비Root 사용자는 기존 설정을 유지한다. Build의 `-DskipTests package`는 앞선 Focused Java Test 72개와 별개이며, 이 검사에서는 JVM을 시작하지 않았다.
 
 [ECS 명세 초안](./deploy/ecs/README.md)은 첫 연결용 AI 비활성·배포 사용자·Secret 참조를 구분한다. 미확정 CPU·메모리·Image Digest·Role·DB·Secret·Log는 자리표시자로 남겼고 실제 값의 로컬 복사본은 `local/deployment/`를 Git 제외 대상으로 둔다. 새 구조 Test 6개를 포함한 JavaScript 전체 152개가 실패·건너뜀 없이 통과했다. 구조 Test는 AWS 등록이나 실제 설정 전달 검증이 아니다. ECR 업로드·ECS·RDS·HTTPS 실행은 아직 하지 않았다.
+
+이후 Secret 보관은 서울의 Standard Parameter Store로 선택했다. 여섯 Standard SecureString을 기본 처리량·`aws/ssm`으로 보관하고 Task Definition에는 지정 ARN만 넣는다. [Execution Role 권한 초안](./deploy/ecs/execution-role-policy.template.json)은 해당 ECR Pull·지정 Log Group의 Stream 쓰기·같은 여섯 Parameter 읽기만 허용한다. 여섯 Parameter는 직접 등록하고 목록에서 이름·Tier·Type을 확인했다. 값은 읽거나 공개 문서·Image에 넣지 않았다. IAM Role 생성은 완료했고 ECS 전달은 남아 있다.
+
+명세·권한 초안의 구조 Test 13개와 JavaScript 전체 171개·ESLint가 통과했다. 명세와 권한의 여섯 ARN 일치·수정/삭제 권한 부재 등을 검사했으며 실제 IAM 평가·Parameter 전달·Cloud 실행은 별도 검증 대상이다.
+
+이후 [Trust Policy 초안](./deploy/ecs/execution-role-trust.template.json)과 관련 Test 두 개를 추가했다. 같은 Account·서울의 ECS Tasks만 Role을 사용할 수 있도록 준비했으며 JavaScript 전체 173개와 ESLint가 통과했다. 생성 직전 승인을 받아 실제 `helpdesk-ecs-execution` Role과 `helpdesk-execution-minimum` 인라인 정책을 생성했다. 저장된 두 정책의 JSON이 승인한 초안과 일치하고 연결 정책이 이 인라인 정책 한 개뿐임을 확인했다. 기존 Role은 변경하지 않았으며 실제 ECS의 Role 사용·Parameter 읽기는 후속 실행에서 검증한다.
+
+Log 보존은 초기 7일안 대신 요청한 1년으로 변경했다. 서울에 `/ecs/helpdesk-learning`을 Standard 클래스·365일 보존으로 생성하고 목록의 이름·클래스·12개월 보존 표시를 확인했다. 별도 KMS Key는 추가하지 않았다. Task의 실제 Log 전달은 아직 실행하지 않았으며, 누적 저장량은 실습 중단 뒤에도 비용 검토에 포함한다.
+
+10/13에는 배포 준비 변경 전체를 로컬에서 검증했다. `mvnw verify`의 Java 578개와 JavaScript 173개가 실패·오류·건너뜀 없이 통과했고 ESLint도 성공했다. PostgreSQL Testcontainers를 사용했으며 외부 AI는 호출하지 않았다. 이 결과를 기준으로 Commit·Push 후 CI를 확인하고 검증 Image 한 개를 ECR에 추가한다. 기존 Image는 유지하고 App·RDS·ALB 실행은 별도 승인 대상으로 둔다.
+
+장기 휴지기에는 App만 끄지 않고 최종 Snapshot의 별도 복원 검증 뒤 승인한 ALB·DB Instance를 정리하고 필요한 산출물만 보관한다. [실습 종료와 재개 안내](./deploy/ecs/README.md#실습-종료와-재개)에 쓰기 중단·현재 Job 보존·새 Endpoint·DNS·재로그인과 AI 비활성 재개를 정리했다. 자동 삭제·Cloud 리소스 생성·DNS 변경은 추가하지 않았다.
 
 ### 배포용 Image의 실행 자원 측정
 

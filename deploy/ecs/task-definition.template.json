@@ -45,27 +45,27 @@
       "secrets": [
         {
           "name": "SPRING_DATASOURCE_USERNAME",
-          "valueFrom": "<DB_USERNAME_SECRET_REFERENCE>"
+          "valueFrom": "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/db/username"
         },
         {
           "name": "SPRING_DATASOURCE_PASSWORD",
-          "valueFrom": "<DB_PASSWORD_SECRET_REFERENCE>"
+          "valueFrom": "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/db/password"
         },
         {
           "name": "HELPDESK_DEPLOYMENT_USER_USERNAME",
-          "valueFrom": "<USER_USERNAME_SECRET_REFERENCE>"
+          "valueFrom": "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/user/username"
         },
         {
           "name": "HELPDESK_DEPLOYMENT_USER_PASSWORD",
-          "valueFrom": "<USER_PASSWORD_SECRET_REFERENCE>"
+          "valueFrom": "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/user/password"
         },
         {
           "name": "HELPDESK_DEPLOYMENT_AGENT_USERNAME",
-          "valueFrom": "<AGENT_USERNAME_SECRET_REFERENCE>"
+          "valueFrom": "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/agent/username"
         },
         {
           "name": "HELPDESK_DEPLOYMENT_AGENT_PASSWORD",
-          "valueFrom": "<AGENT_PASSWORD_SECRET_REFERENCE>"
+          "valueFrom": "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/agent/password"
         }
       ],
       "stopTimeout": 45,

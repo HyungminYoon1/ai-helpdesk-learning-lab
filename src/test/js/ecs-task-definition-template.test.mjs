@@ -39,18 +39,22 @@ test("ECS draft explicitly uses deployment users and disables paid AI processing
     || container.secrets?.some(({ name }) => name === "HELPDESK_AI_PROVIDER_KEY"), false);
 });
 
-test("ECS draft places all six credential inputs in secret references rather than environment", () => {
-  const expectedNames = new Set([
-    "SPRING_DATASOURCE_USERNAME", "SPRING_DATASOURCE_PASSWORD",
-    "HELPDESK_DEPLOYMENT_USER_USERNAME", "HELPDESK_DEPLOYMENT_USER_PASSWORD",
-    "HELPDESK_DEPLOYMENT_AGENT_USERNAME", "HELPDESK_DEPLOYMENT_AGENT_PASSWORD",
+test("ECS draft maps all six credential inputs to the agreed SSM parameters", () => {
+  const expectedParameters = new Map([
+    ["SPRING_DATASOURCE_USERNAME", "db/username"],
+    ["SPRING_DATASOURCE_PASSWORD", "db/password"],
+    ["HELPDESK_DEPLOYMENT_USER_USERNAME", "user/username"],
+    ["HELPDESK_DEPLOYMENT_USER_PASSWORD", "user/password"],
+    ["HELPDESK_DEPLOYMENT_AGENT_USERNAME", "agent/username"],
+    ["HELPDESK_DEPLOYMENT_AGENT_PASSWORD", "agent/password"],
   ]);
   const secrets = container.secrets ?? [];
-  assert.equal(secrets.length === expectedNames.size
-    && new Set(secrets.map(({ name }) => name)).size === expectedNames.size, true);
+  assert.equal(secrets.length === expectedParameters.size
+    && new Set(secrets.map(({ name }) => name)).size === expectedParameters.size, true);
   assert.equal(secrets.every(({ name, valueFrom }) =>
-    expectedNames.has(name) && placeholder(valueFrom)), true);
-  assert.equal([...environment.keys()].some((name) => expectedNames.has(name)
+    expectedParameters.has(name)
+    && valueFrom === `arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/${expectedParameters.get(name)}`), true);
+  assert.equal([...environment.keys()].some((name) => expectedParameters.has(name)
     || /PASSWORD|USERNAME|TOKEN|SECRET|API_KEY/.test(name)), false);
 });
 
