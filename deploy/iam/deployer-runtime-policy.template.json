@@ -1,0 +1,296 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRuntimeMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListClusters",
+        "ecs:ListServices",
+        "ecs:ListTasks",
+        "ecs:ListTaskDefinitions",
+        "ecs:DescribeTaskDefinition",
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBSubnetGroups",
+        "rds:DescribeDBParameterGroups",
+        "rds:DescribeDBEngineVersions",
+        "rds:DescribeOrderableDBInstanceOptions",
+        "rds:DescribeOptionGroups",
+        "outposts:ListOutposts",
+        "ssm:DescribeParameters"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DescribeOnlyHelpdeskRuntime",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeClusters",
+        "ecs:DescribeServices",
+        "ecs:DescribeTasks",
+        "ecs:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:cluster/helpdesk-learning",
+        "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:service/helpdesk-learning/helpdesk-learning",
+        "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task/helpdesk-learning/*",
+        "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task-definition/helpdesk-learning:*"
+      ]
+    },
+    {
+      "Sid": "CreateTaggedCluster",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateCluster"
+      ],
+      "Resource": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:cluster/helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning"
+        }
+      }
+    },
+    {
+      "Sid": "RegisterFirstConnectionTask",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RegisterTaskDefinition"
+      ],
+      "Resource": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task-definition/helpdesk-learning:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "NumericEquals": {
+          "ecs:task-cpu": "256",
+          "ecs:task-memory": "512"
+        },
+        "StringEqualsIfExists": {
+          "ecs:privileged": "false"
+        },
+        "ForAllValues:StringEquals": {
+          "ecs:compute-compatibility": [
+            "FARGATE"
+          ]
+        },
+        "Null": {
+          "ecs:compute-compatibility": "false"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedService",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateService"
+      ],
+      "Resource": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:service/helpdesk-learning/helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:cluster/helpdesk-learning"
+        },
+        "ArnLike": {
+          "ecs:task-definition": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task-definition/helpdesk-learning:*"
+        },
+        "NumericEqualsIfExists": {
+          "ecs:task-cpu": "256",
+          "ecs:task-memory": "512"
+        },
+        "StringEqualsIfExists": {
+          "ecs:enable-execute-command": "false",
+          "ecs:enable-ebs-volumes": "false",
+          "ecs:enable-service-connect": "false",
+          "ecs:enable-vpc-lattice": "false"
+        }
+      }
+    },
+    {
+      "Sid": "UpdateOnlyHelpdeskService",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:UpdateService"
+      ],
+      "Resource": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:service/helpdesk-learning/helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:cluster/helpdesk-learning"
+        },
+        "ArnLikeIfExists": {
+          "ecs:task-definition": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task-definition/helpdesk-learning:*"
+        },
+        "NumericEqualsIfExists": {
+          "ecs:task-cpu": "256",
+          "ecs:task-memory": "512"
+        },
+        "StringEqualsIfExists": {
+          "ecs:enable-execute-command": "false",
+          "ecs:enable-ebs-volumes": "false",
+          "ecs:enable-service-connect": "false",
+          "ecs:enable-vpc-lattice": "false"
+        }
+      }
+    },
+    {
+      "Sid": "RunOnlyFirstConnectionTask",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RunTask"
+      ],
+      "Resource": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task-definition/helpdesk-learning:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:cluster/helpdesk-learning"
+        },
+        "NumericEquals": {
+          "ecs:task-cpu": "256",
+          "ecs:task-memory": "512"
+        },
+        "StringEqualsIfExists": {
+          "ecs:enable-execute-command": "false",
+          "ecs:enable-ebs-volumes": "false"
+        }
+      }
+    },
+    {
+      "Sid": "StopOnlyHelpdeskTasks",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:StopTask"
+      ],
+      "Resource": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task/helpdesk-learning/*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:cluster/helpdesk-learning"
+        }
+      }
+    },
+    {
+      "Sid": "TagEcsOnlyAtCreation",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:cluster/helpdesk-learning",
+        "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:service/helpdesk-learning/helpdesk-learning",
+        "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task-definition/helpdesk-learning:*",
+        "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task/helpdesk-learning/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning",
+          "ecs:CreateAction": [
+            "CreateCluster",
+            "CreateService",
+            "RegisterTaskDefinition",
+            "RunTask"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "CreateReadSubnet",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBSubnetGroup",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:subgrp:helpdesk-learning"
+    },
+    {
+      "Sid": "CreatePrivateDb",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning",
+          "rds:DatabaseEngine": "postgres",
+          "rds:DatabaseClass": "db.t4g.micro"
+        },
+        "NumericEquals": {
+          "rds:StorageSize": "20"
+        },
+        "Bool": {
+          "rds:PubliclyAccessible": "false",
+          "rds:MultiAz": "false",
+          "rds:StorageEncrypted": "true"
+        },
+        "BoolIfExists": {
+          "rds:ManageMasterUserPassword": "false"
+        }
+      }
+    },
+    {
+      "Sid": "UseTaggedSubnet",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:subgrp:helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning",
+          "rds:subgrp-tag/Project": "helpdesk-learning"
+        }
+      }
+    },
+    {
+      "Sid": "UseDefaultGroups",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance"
+      ],
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:pg:default.postgres17",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:og:default:postgres-17"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning"
+        }
+      }
+    },
+    {
+      "Sid": "TagNamedDb",
+      "Effect": "Allow",
+      "Action": [
+        "rds:AddTagsToResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:subgrp:helpdesk-learning"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning"
+        }
+      }
+    },
+    {
+      "Sid": "StartStopDb",
+      "Effect": "Allow",
+      "Action": [
+        "rds:StartDBInstance",
+        "rds:StopDBInstance"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        }
+      }
+    }
+  ]
+}

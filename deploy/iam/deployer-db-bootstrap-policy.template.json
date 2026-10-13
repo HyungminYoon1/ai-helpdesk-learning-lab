@@ -1,0 +1,204 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RequireMfaForBootstrapDirectCalls",
+      "Effect": "Deny",
+      "Action": [
+        "cloudshell:*",
+        "ec2:CreateNetworkInterface",
+        "ec2:CreateNetworkInterfacePermission",
+        "ec2:DeleteNetworkInterface",
+        "ec2:DeleteSecurityGroup"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "BoolIfExists": {
+          "aws:MultiFactorAuthPresent": "false",
+          "aws:ViaAWSService": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DenyBootstrapCredentialForwardingAndFileUrls",
+      "Effect": "Deny",
+      "Action": [
+        "cloudshell:PutCredentials",
+        "cloudshell:GetFileUploadUrls",
+        "cloudshell:GetFileDownloadUrls"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadBootstrapEnvironmentAndDhcpMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "cloudshell:DescribeEnvironments",
+        "ec2:DescribeDhcpOptions"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        }
+      }
+    },
+    {
+      "Sid": "CreateOnlyPrivateBootstrapEnvironment",
+      "Effect": "Allow",
+      "Action": [
+        "cloudshell:CreateEnvironment"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "ForAllValues:StringEquals": {
+          "cloudshell:VpcIds": ["<LEARNING_VPC_ID>"],
+          "cloudshell:SubnetIds": ["<BOOTSTRAP_SUBNET_ID>"],
+          "cloudshell:SecurityGroupIds": ["<BOOTSTRAP_SECURITY_GROUP_ID>"]
+        },
+        "Null": {
+          "cloudshell:VpcIds": "false",
+          "cloudshell:SubnetIds": "false",
+          "cloudshell:SecurityGroupIds": "false"
+        }
+      }
+    },
+    {
+      "Sid": "UseOnlyConfirmedBootstrapEnvironment",
+      "Effect": "Allow",
+      "Action": [
+        "cloudshell:GetEnvironmentStatus",
+        "cloudshell:StartEnvironment",
+        "cloudshell:CreateSession",
+        "cloudshell:StopEnvironment",
+        "cloudshell:DeleteEnvironment"
+      ],
+      "Resource": "arn:aws:cloudshell:ap-northeast-2:<AWS_ACCOUNT_ID>:environment/<BOOTSTRAP_ENVIRONMENT_ID>",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        }
+      }
+    },
+    {
+      "Sid": "CreateInterfaceUsingOnlyBootstrapSubnetAndGroup",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateNetworkInterface"
+      ],
+      "Resource": [
+        "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:subnet/<BOOTSTRAP_SUBNET_ID>",
+        "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:security-group/<BOOTSTRAP_SECURITY_GROUP_ID>"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "ArnEquals": {
+          "ec2:Vpc": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:vpc/<LEARNING_VPC_ID>"
+        }
+      }
+    },
+    {
+      "Sid": "CreateOnlyCloudShellTaggedInterface",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateNetworkInterface"
+      ],
+      "Resource": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:network-interface/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:RequestTag/ManagedByCloudShell": ""
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["ManagedByCloudShell"]
+        },
+        "Null": {
+          "aws:RequestTag/ManagedByCloudShell": "false",
+          "aws:TagKeys": "false"
+        }
+      }
+    },
+    {
+      "Sid": "TagBootstrapInterfaceOnlyAtCreation",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags"
+      ],
+      "Resource": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:network-interface/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "ec2:CreateAction": "CreateNetworkInterface",
+          "aws:RequestTag/ManagedByCloudShell": ""
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["ManagedByCloudShell"]
+        },
+        "Null": {
+          "aws:RequestTag/ManagedByCloudShell": "false",
+          "aws:TagKeys": "false"
+        }
+      }
+    },
+    {
+      "Sid": "GrantAttachOnlyForBootstrapInterface",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateNetworkInterfacePermission"
+      ],
+      "Resource": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:network-interface/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/ManagedByCloudShell": "",
+          "ec2:Permission": "INSTANCE-ATTACH"
+        },
+        "ArnEquals": {
+          "ec2:Vpc": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:vpc/<LEARNING_VPC_ID>",
+          "ec2:Subnet": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:subnet/<BOOTSTRAP_SUBNET_ID>"
+        }
+      }
+    },
+    {
+      "Sid": "CleanUpOnlyBootstrapInterface",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DeleteNetworkInterface"
+      ],
+      "Resource": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:network-interface/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/ManagedByCloudShell": ""
+        },
+        "ArnEquals": {
+          "ec2:Vpc": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:vpc/<LEARNING_VPC_ID>",
+          "ec2:Subnet": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:subnet/<BOOTSTRAP_SUBNET_ID>"
+        }
+      }
+    },
+    {
+      "Sid": "CleanUpOnlyNamedBootstrapGroup",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DeleteSecurityGroup"
+      ],
+      "Resource": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:security-group/<BOOTSTRAP_SECURITY_GROUP_ID>",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning",
+          "aws:ResourceTag/Purpose": "db-bootstrap"
+        },
+        "ArnEquals": {
+          "ec2:Vpc": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:vpc/<LEARNING_VPC_ID>"
+        }
+      }
+    }
+  ]
+}

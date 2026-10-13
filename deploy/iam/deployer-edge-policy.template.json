@@ -1,0 +1,191 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadEdgeAndLogMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeLoadBalancerAttributes",
+        "elasticloadbalancing:DescribeListeners",
+        "elasticloadbalancing:DescribeRules",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:DescribeTargetGroupAttributes",
+        "elasticloadbalancing:DescribeTargetHealth",
+        "elasticloadbalancing:DescribeTags",
+        "elasticloadbalancing:DescribeSSLPolicies",
+        "acm:ListCertificates",
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateTaggedLearningAlb",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:CreateLoadBalancer"
+      ],
+      "Resource": "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:loadbalancer/app/helpdesk-learning/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning",
+          "elasticloadbalancing:Scheme": "internet-facing"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedLearningTargetGroup",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:CreateTargetGroup"
+      ],
+      "Resource": "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:targetgroup/helpdesk-learning/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning"
+        }
+      }
+    },
+    {
+      "Sid": "CreateOnlyLearningListeners",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:CreateListener"
+      ],
+      "Resource": "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:loadbalancer/app/helpdesk-learning/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "ForAllValues:StringEquals": {
+          "elasticloadbalancing:ListenerProtocol": [
+            "HTTP",
+            "HTTPS"
+          ]
+        },
+        "Null": {
+          "elasticloadbalancing:ListenerProtocol": "false"
+        }
+      }
+    },
+    {
+      "Sid": "ConfigureOnlyLearningTargets",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:RegisterTargets",
+        "elasticloadbalancing:ModifyTargetGroup"
+      ],
+      "Resource": "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:targetgroup/helpdesk-learning/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        }
+      }
+    },
+    {
+      "Sid": "ModifyOnlyLearningListeners",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:ModifyListener"
+      ],
+      "Resource": "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:listener/app/helpdesk-learning/*/*",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "elasticloadbalancing:ListenerProtocol": [
+            "HTTP",
+            "HTTPS"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "TagAlbOnlyAtCreation",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:AddTags"
+      ],
+      "Resource": [
+        "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:loadbalancer/app/helpdesk-learning/*",
+        "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:targetgroup/helpdesk-learning/*",
+        "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:listener/app/helpdesk-learning/*/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning",
+          "elasticloadbalancing:CreateAction": [
+            "CreateLoadBalancer",
+            "CreateTargetGroup",
+            "CreateListener"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "RequestOnlyLearningPublicCertificate",
+      "Effect": "Allow",
+      "Action": [
+        "acm:RequestCertificate"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "helpdesk-learning",
+          "acm:ValidationMethod": "DNS",
+          "acm:Export": "DISABLED",
+          "acm:KeyAlgorithm": "RSA_2048"
+        },
+        "ForAllValues:StringEquals": {
+          "acm:DomainNames": [
+            "helpdesk.hmyoon.com"
+          ]
+        },
+        "Null": {
+          "acm:CertificateAuthority": "true",
+          "acm:DomainNames": "false"
+        }
+      }
+    },
+    {
+      "Sid": "ReadOnlyTaggedLearningCertificate",
+      "Effect": "Allow",
+      "Action": [
+        "acm:DescribeCertificate",
+        "acm:GetCertificate",
+        "acm:ListTagsForCertificate"
+      ],
+      "Resource": "arn:aws:acm:ap-northeast-2:<AWS_ACCOUNT_ID>:certificate/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        }
+      }
+    },
+    {
+      "Sid": "ReadHelpdeskImageMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeRepositories",
+        "ecr:DescribeImages",
+        "ecr:ListImages"
+      ],
+      "Resource": "arn:aws:ecr:ap-northeast-2:<AWS_ACCOUNT_ID>:repository/ai-helpdesk-learning-lab"
+    },
+    {
+      "Sid": "ReadOnlyHelpdeskLogGroup",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogStreams",
+        "logs:FilterLogEvents"
+      ],
+      "Resource": "arn:aws:logs:ap-northeast-2:<AWS_ACCOUNT_ID>:log-group:/ecs/helpdesk-learning:*"
+    },
+    {
+      "Sid": "ReadOnlyHelpdeskLogStreams",
+      "Effect": "Allow",
+      "Action": [
+        "logs:GetLogEvents"
+      ],
+      "Resource": "arn:aws:logs:ap-northeast-2:<AWS_ACCOUNT_ID>:log-group:/ecs/helpdesk-learning:log-stream:*"
+    }
+  ]
+}
