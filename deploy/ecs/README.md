@@ -10,6 +10,8 @@
 
 Execution Role은 ECR Pull·Secret 전달·Log 전송에 사용한다. 현재 App은 JDBC와 외부 AI의 HTTP API를 사용하므로 이 초안에는 Task Role을 추가하지 않았다. Java가 AWS API를 직접 호출하는 기능을 추가하거나 ECS Exec 등을 선택한다면 필요한 Task Role 권한도 별도로 검토한다.
 
+사람의 Console 배포 신원은 [별도 IAM 사용자·권한 초안](../iam/README.md)에서 관리한다. 사람에게 실행 Role의 Secret 읽기 권한을 그대로 연결하거나 GitHub 업로드 Role을 Console용으로 재사용하지 않는다.
+
 `secrets`의 여섯 항목은 서울의 Standard Parameter Store `SecureString`을 참조한다. Standard Throughput과 AWS 관리 Key `aws/ssm`을 선택했으며 Advanced·Higher Throughput·별도 Customer-managed Key는 추가하지 않는다. 값은 Image에 넣지 않고 ECS Agent가 Execution Role로 읽어 새 Container의 환경 변수로 전달한다. 여섯 Parameter는 Console에서 직접 등록했고 이름·Standard Tier·SecureString Type을 확인했다. 실제 값과 저장 후 Key 메타데이터는 읽지 않았다. Execution Role은 생성했으며 실제 ECS 전달은 아직 검증하지 않았다. [ECS Parameter Store 전달](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/secrets-envvar-ssm-paramstore.html)
 
 ## Parameter와 Execution Role
@@ -62,7 +64,7 @@ Log Group은 사전 생성한 대상으로 참조하고 자동 생성은 끈다.
 
 RDS의 TLS는 Browser→ALB HTTPS와 별개다. [서울 공개 CA 묶음](../../docker/rds/README.md)을 Runtime의 `/app/certs/rds-ca-bundle.pem`에 제공하도록 Dockerfile을 보완했다. 초안 URL은 `sslmode=verify-full`·`sslrootcert`를 명시하며 Endpoint·DB 이름만 자리표시자로 남긴다. 인증서 검증을 끄는 방법으로 연결 실패를 해결하지 않는다. [RDS PostgreSQL TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.SSL.html)
 
-로컬 재Build에서 비Root 사용자의 파일 읽기·Hash·Mode를 확인했다. 이전 ECR Image에는 이번 변경이 없으므로 실제 배포 전 새 CI Image의 검증·승인된 업로드·Digest 대조가 필요하다. 파일 준비는 실제 RDS의 인증서 사슬·Hostname·DB TLS 연결 검증과 구분한다.
+로컬 재Build에서 비Root 사용자의 파일 읽기·Hash·Mode를 확인했다. 이 변경을 포함한 Source `2e2cc40`의 CI 검증과 새 Image의 ECR 업로드는 확인했고 이전 Image도 유지했다. 실제 배포에는 해당 검증 Image의 Manifest Digest를 명시한다. 파일 준비·Image 전달과 실제 RDS의 인증서 사슬·Hostname·DB TLS 연결 검증은 구분한다.
 
 로컬의 AI 비활성 접수·조회 측정에서는 `0.25 CPU·512 MiB`로 두 번 통과했다. [측정 절차](../../README.md#배포용-image의-실행-자원-측정)를 첫 연결 사양의 근거로 사용하되, 이 초안의 CPU·Memory 자리표시자는 전체 구성·비용·생성 범위 확인 뒤 채운다. 개인정보 처리기·Provider·Worker를 켠 측정과 Cloud 실행에서도 다시 확인한다.
 
