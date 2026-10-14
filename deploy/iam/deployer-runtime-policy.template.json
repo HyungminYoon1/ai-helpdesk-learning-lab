@@ -2,7 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ReadRuntimeMetadata",
+      "Sid": "ReadMeta",
       "Effect": "Allow",
       "Action": [
         "ecs:ListClusters",
@@ -17,12 +17,15 @@
         "rds:DescribeOrderableDBInstanceOptions",
         "rds:DescribeOptionGroups",
         "outposts:ListOutposts",
-        "ssm:DescribeParameters"
+        "ssm:DescribeParameters",
+        "rds:DescribeDBClusters",
+        "ds:DescribeDirectories",
+        "kms:ListAliases"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "DescribeOnlyHelpdeskRuntime",
+      "Sid": "DescribeRuntime",
       "Effect": "Allow",
       "Action": [
         "ecs:DescribeClusters",
@@ -51,7 +54,7 @@
       }
     },
     {
-      "Sid": "RegisterFirstConnectionTask",
+      "Sid": "RegisterTask",
       "Effect": "Allow",
       "Action": [
         "ecs:RegisterTaskDefinition"
@@ -108,7 +111,7 @@
       }
     },
     {
-      "Sid": "UpdateOnlyHelpdeskService",
+      "Sid": "UpdateService",
       "Effect": "Allow",
       "Action": [
         "ecs:UpdateService"
@@ -137,7 +140,7 @@
       }
     },
     {
-      "Sid": "RunOnlyFirstConnectionTask",
+      "Sid": "RunTask",
       "Effect": "Allow",
       "Action": [
         "ecs:RunTask"
@@ -161,7 +164,7 @@
       }
     },
     {
-      "Sid": "StopOnlyHelpdeskTasks",
+      "Sid": "StopTasks",
       "Effect": "Allow",
       "Action": [
         "ecs:StopTask"

@@ -63,7 +63,7 @@ test("regional deployment is restricted to Seoul without blocking global IAM enr
 test("Outposts access is one metadata list action behind the MFA and Seoul denials", () => {
   assert.deepEqual(allowed.flatMap((entry) => entry.Action)
     .filter((action) => action.startsWith("outposts:")), ["outposts:ListOutposts"]);
-  const reader = statement("ReadRuntimeMetadata");
+  const reader = statement("ReadMeta");
   assert.equal(reader.Resource, "*");
   assert.equal(reader.Action.includes("outposts:ListOutposts"), true);
   for (const sid of ["RequireMfaExceptSelfEnrollment", "RestrictRegionalOperationsToSeoul"]) {
@@ -83,6 +83,32 @@ test("only the existing execution role can be passed to the ECS tasks service", 
   assert.deepEqual(rule.Action, ["iam:PassRole"]);
   assert.equal(rule.Resource === "arn:aws:iam::<AWS_ACCOUNT_ID>:role/helpdesk-ecs-execution", true);
   assert.deepEqual(rule.Condition, { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } });
+});
+
+test("RDS Console metadata reads contain only the approved lookup actions", () => {
+  const reader = statement("ReadMeta");
+  assert.equal(reader.Effect, "Allow");
+  assert.equal(reader.Resource, "*");
+  assert.deepEqual(reader.Action, [
+    "ecs:ListClusters", "ecs:ListServices", "ecs:ListTasks", "ecs:ListTaskDefinitions",
+    "ecs:DescribeTaskDefinition", "rds:DescribeDBInstances", "rds:DescribeDBSubnetGroups",
+    "rds:DescribeDBParameterGroups", "rds:DescribeDBEngineVersions",
+    "rds:DescribeOrderableDBInstanceOptions", "rds:DescribeOptionGroups",
+    "outposts:ListOutposts", "ssm:DescribeParameters", "rds:DescribeDBClusters",
+    "ds:DescribeDirectories", "kms:ListAliases",
+  ]);
+});
+
+test("Directory and KMS lookups do not grant content changes or bypass MFA and Region", () => {
+  assert.deepEqual(allowed.flatMap((entry) => entry.Action)
+    .filter((action) => action.startsWith("ds:") || action.startsWith("kms:")),
+    ["ds:DescribeDirectories", "kms:ListAliases"]);
+  for (const sid of ["RequireMfaExceptSelfEnrollment", "RestrictRegionalOperationsToSeoul"]) {
+    const denial = statement(sid);
+    assert.equal(denial.Effect, "Deny");
+    assert.equal(denial.NotAction.some((action) =>
+      ["rds:", "ds:", "kms:"].some((prefix) => action.startsWith(prefix))), false);
+  }
 });
 
 test("only the three deployment service-linked roles can be created", () => {
@@ -112,15 +138,15 @@ test("network and ECS tags can be written only as part of the listed creation ac
 });
 
 test("first task registration and run keep the measured size and named family", () => {
-  for (const sid of ["RegisterFirstConnectionTask", "RunOnlyFirstConnectionTask"]) {
+  for (const sid of ["RegisterTask", "RunTask"]) {
     const rule = statement(sid);
     assert.equal(rule.Resource === "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:task-definition/helpdesk-learning:*", true);
     assert.deepEqual(rule.Condition.NumericEquals, { "ecs:task-cpu": "256", "ecs:task-memory": "512" });
   }
-  const registration = statement("RegisterFirstConnectionTask");
+  const registration = statement("RegisterTask");
   assert.deepEqual(registration.Condition["ForAllValues:StringEquals"]["ecs:compute-compatibility"], ["FARGATE"]);
   assert.equal(registration.Condition.Null["ecs:compute-compatibility"] === "false", true);
-  assert.equal(statement("RunOnlyFirstConnectionTask").Condition.ArnEquals["ecs:cluster"]
+  assert.equal(statement("RunTask").Condition.ArnEquals["ecs:cluster"]
     === "arn:aws:ecs:ap-northeast-2:<AWS_ACCOUNT_ID>:cluster/helpdesk-learning", true);
 });
 
@@ -178,7 +204,7 @@ test("RDS tag inspection is limited to the named subnet group and tag writes kee
 });
 
 test("ECS feature condition keys use their documented String operator, not Bool", () => {
-  for (const sid of ["CreateTaggedService", "UpdateOnlyHelpdeskService", "RunOnlyFirstConnectionTask"]) {
+  for (const sid of ["CreateTaggedService", "UpdateService", "RunTask"]) {
     const condition = statement(sid).Condition;
     assert.equal(Object.hasOwn(condition, "BoolIfExists"), false);
     assert.equal(condition.StringEqualsIfExists["ecs:enable-execute-command"] === "false"

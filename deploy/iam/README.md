@@ -1,6 +1,6 @@
 # 학습용 배포 사용자 권한
 
-> 상태: 사용자·정책 연결과 비Root 로그인 완료. 2026-10-14 Runtime Version 3 적용, DB Subnet Group 생성·태그 등록·조회 확인. DB 생성 요청은 IAM 거부, 원인 조건 대조와 연결 검증은 대기.
+> 상태: 사용자·정책 연결과 비Root 로그인 완료. 2026-10-14 Runtime Version 4 적용, DB Subnet Group 생성·태그 등록·조회 확인. CloudTrail에서 세 추가 조회 거부를 확인해 한정 허용했고, 비Root 생성 화면·생성 조건·연결 검증은 대기.
 
 `helpdesk-deployer`는 사람이 Console에서 배포할 때 사용하는 IAM 사용자다. ECS Agent의 `helpdesk-ecs-execution`, GitHub Image 업로드의 `helpdesk-github-ecr-push`, Helpdesk의 USER·AGENT 로그인 계정과 구분한다. 기존 Role의 정책은 바꾸지 않는다.
 
@@ -55,6 +55,16 @@ Root 로그아웃과 배포 사용자 재로그인 뒤 전체 생성 화면을 �
 Action이 정책에 없는 경우와 Resource·Condition이 맞지 않는 경우를 구분해야 한다. 화면의 이름·사양은 확인했지만 실제 생성 요청의 `StorageEncrypted`·`PubliclyAccessible`·Project 태그는 미확인이다. 태그 누락 등 특정 조건을 원인으로 확정하지 않고, 비밀값 없는 요청 필드와 저장된 정책을 대조한다. [AWS 조건 평가](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-logic-multiple-context-keys-or-values.html)
 
 직접 페이로드 조회를 위한 화면 제어는 현재 URL 식별 문제로 중단됐다. 전체 요청 Body·HAR·Credential은 기록하지 않았고 추가 권한 변경·생성 재시도도 하지 않았다. 10/13 학습 회차를 마감해 원인 확인·RDS·TLS·DB 연결을 10/14에 이어간다. 생성 요청의 거부와 DB 생성·연결 성공을 구분하며, 재개 때 실제 리소스와 서비스 연결 Role 상태도 확인한다.
+
+### CloudTrail로 확인한 추가 조회 거부
+
+10/14 회차에는 CloudTrail에서 `rds:DescribeDBClusters`, `ds:DescribeDirectories`, `kms:ListAliases`의 Allow 부재를 확인했다. 앞 회차의 `CreateDBInstance`는 서울·MFA 인증이 확인됐지만 `requestParameters`가 `null`이었다. 그 기록만으로 실제 요청의 Project 태그·암호화·Public Access 설정을 판단하거나 특정 조건을 거부 원인으로 확정할 수는 없다.
+
+현 정책 유지·서비스 전체 조회·확인된 세 조회 추가를 비교해 마지막 안의 적용을 승인받았다. 기존 Runtime 메타데이터 문장의 `Resource: "*"`에 세 Action만 추가했고, Foundation의 직접 호출 MFA·서울 제한과 기존 DB 생성 조건을 유지했다. 서울의 다른 프로젝트 클러스터·디렉터리·키 별칭 메타데이터도 조회 가능하지만 Secret 값 조회·KMS 복호화·디렉터리 변경은 추가하지 않는다. 디렉터리 조회는 Helpdesk 인증 방식의 변경이 아니다. [AWS Directory Service 권한 정의](https://docs.aws.amazon.com/service-authorization/latest/reference/list_ds.html), [AWS KMS 별칭 조회 권한](https://docs.aws.amazon.com/kms/latest/developerguide/alias-access.html)
+
+권한 크기를 맞추기 위해 `Sid` 여섯 개만 짧게 바꿨다. 기존 Action·Resource·Condition을 대조했으며, 적용본은 15개 문장·공백 제외 6,130자다. 변경 전 저장 JSON은 Version 3 Template과 일치했다. 승인한 기본 Version 4로 저장한 뒤에도 전체 정책 내용을 수정안과 대조했고, Version 1~3 보존과 지정 사용자 한 명의 연결을 확인했다. AWS 편집기의 보안·오류·경고·추천은 모두 0, 관련 구조 Test 34개·JavaScript 전체 207개·ESLint는 통과했다.
+
+영향 파일은 Runtime Template·정책 구조 Test·이 안내다. Foundation·Edge·Bootstrap·기존 Role·운영 Java·JAR·Image는 바꾸지 않았다. 적용 후 Root에서 로그아웃했으며, 다음은 배포 사용자로 생성 화면을 확인하고 실제 생성 설정을 대조하는 것이다. 세 조회 권한을 추가한 것을 이전 DB 생성 거부까지 해결한 것으로 표현하지 않는다.
 
 ## Secret과 배포 권한
 
