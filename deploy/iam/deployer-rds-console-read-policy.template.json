@@ -1,0 +1,39 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRdsConsoleMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeCertificates",
+        "rds:DescribeDBSecurityGroups",
+        "rds:DescribeDBClusterParameterGroups"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ReadLearningDbTags",
+      "Effect": "Allow",
+      "Action": [
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    }
+  ]
+}

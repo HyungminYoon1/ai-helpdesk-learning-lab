@@ -27,6 +27,49 @@ RDS 관리자 Credential을 App Task에 전달하지 않는다. 관리자 접속
 
 TLS에는 RDS Endpoint와 공개 CA를 사용해 `verify-full`을 유지한다. 관리자·App Password를 SQL 파일·명령 인자·Shell History·Log에 적지 않고 인증·Password 설정은 본인이 비표시 입력으로 수행한다. Parameter Store의 값과 DB의 실제 Password가 일치해야 한다. Credential을 읽거나 출력해서 일치 여부를 확인하지 않는다.
 
+### 접속과 계정 준비 순서
+
+1. 기존 환경의 `psql --version`을 확인한다. Private 환경에 인터넷 경로를 열어 도구를 설치하지 않는다.
+2. 저장소에서 확인한 서울 공개 CA를 임시 디렉터리에 전달하고 Manifest의 SHA-256과 대조한다. 이 PEM은 공개 인증서이며 Password·Private Key가 아니다. 파일 전송 URL 권한이나 AWS Credential 전달을 허용하지 않고, 공개 인증서만 터미널에 붙여 넣는다.
+3. 인증서 사슬·RDS Endpoint의 이름을 검증하는 TLS Handshake와 DB Password 인증을 따로 확인한다. 다음의 자리표시자는 실제 Endpoint와 공개 CA 경로로만 바꾼다.
+
+```sh
+openssl s_client -starttls postgres -connect '<RDS_ENDPOINT>:5432' \
+  -servername '<RDS_ENDPOINT>' -CAfile '<PUBLIC_CA_PATH>' \
+  -verify_hostname '<RDS_ENDPOINT>' -verify_return_error -brief < /dev/null
+
+PSQL_HISTORY=/dev/null psql -X -W --set=ON_ERROR_STOP=on \
+  "host=<RDS_ENDPOINT> port=5432 dbname=helpdesk user=postgres sslmode=verify-full sslrootcert=<PUBLIC_CA_PATH> connect_timeout=10"
+```
+
+`-W`의 Password 입력은 본인이 수행한다. Password 환경 변수·명령 인자·연결 URI의 Password 필드는 사용하지 않는다. `-X`는 별도 psql 시작 설정을 읽지 않으며, 이번 Session의 명령 기록 파일은 사용하지 않는다. TLS Handshake의 `Verification: OK`가 DB 로그인 성공을 의미하지는 않는다.
+
+관리자로 접속한 뒤 지정 DB·Schema의 기존 Table·App 계정 존재를 확인한다. 다른 계정이나 기존 Table이 있다면 아래 초기화문을 그대로 재실행하거나 Password를 덮어쓰지 않는다. 빈 학습 DB와 계정 부재를 확인하고 권한 범위를 승인받은 뒤 한 Transaction으로 준비한다.
+
+```sql
+BEGIN;
+CREATE ROLE helpdesk_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+    NOREPLICATION NOBYPASSRLS;
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT CONNECT ON DATABASE helpdesk TO helpdesk_app;
+GRANT USAGE, CREATE ON SCHEMA public TO helpdesk_app;
+COMMIT;
+```
+
+비밀번호는 SQL에 넣지 않고 `\password helpdesk_app`의 입력·확인·제출을 본인이 수행한다. Parameter Store의 DB 사용자명은 이 계정과 일치해야 하며, App Password도 같은 값으로 준비한다. `\password`는 원문 Password를 명령 기록이나 서버 Log에 남기지 않도록 처리한다. [PostgreSQL psql](https://www.postgresql.org/docs/17/app-psql.html)
+
+`public`을 유지하는 이유는 기존 Migration과 JDBC SQL에 Schema 지정이 없고 로컬 구성도 같은 Schema를 사용하기 때문이다. 새 Schema·별도 Migration Credential을 도입하는 안 대신 현재 구성을 유지해 JAR·Image·JDBC 설정을 바꾸지 않는다. Schema 사용·생성 권한과 App이 생성한 객체의 소유권으로 현재 Migration을 실행할 수 있게 하되, 관리 Role의 멤버십과 Superuser 권한은 주지 않는다. 운영에서 DDL과 DML 신원을 분리하는 후속 검토는 그대로 남긴다. [PostgreSQL Schema 권한](https://www.postgresql.org/docs/17/ddl-schemas.html)
+
+App 계정으로 `verify-full` 재접속한 뒤에는 `pg_stat_ssl`의 현재 연결, `pg_roles`의 권한 Flag와 멤버십, DB `CONNECT`·Schema `USAGE/CREATE`를 확인한다. Password·Hash Column은 조회하지 않는다. 임시 Table의 생성·Identity INSERT·SELECT를 같은 Transaction에서 확인하고 Rollback해 Table·Row가 남지 않는지 검사한다. 이 권한 점검은 ECS App 기동·Flyway Migration·실제 Ticket 저장을 대신하지 않는다.
+
+## 2026-10-14 확인 결과
+
+기존 환경에서 공개 CA의 Hash와 TLS 1.3·서버 이름 검증을 확인했고, 관리자/App 계정으로 각각 `verify-full` 인증에 성공했다. 대상 DB의 빈 Schema·App 계정 부재를 확인하고 승인한 계정·권한을 준비했다. App 계정의 관리 권한과 Role 멤버십은 없었으며 DB 접속·Schema 사용/생성은 허용됐다. 임시 Table 생성·Identity INSERT 1건·조회 1건을 같은 Transaction에서 확인한 뒤 Rollback해 Table·Row가 남지 않는 것도 확인했다.
+
+잘못된 서버 이름은 TLS 검사에서 거부됐고, Password를 제공하지 않은 비TLS 접속도 서버에서 `no encryption`으로 거부됐다. SQL의 `SHOW rds.force_ssl`은 설정 이름을 지원하지 않는다는 오류를 반환했으므로 직접 읽은 설정값으로 기록하지 않았다. 서버의 실제 접속 거부와 Client의 `verify-full`은 각각 확인한다.
+
+Password 설정·확인 입력은 본인이 수행했으며, Parameter 값을 읽어 비교하지 않았다. 관리자와 App의 psql 접속은 종료했다. 이후 ECS에서는 지정 DB 암호 Parameter를 맞춘 같은 Image의 새 Task로 JDBC·Flyway·Spring 기동을 확인했다. 첫 실패와 복구는 [ECS 실행 안내](../ecs/README.md#첫-cloud-실행-결과)에 기록한다. Ticket의 실제 Cloud 접수·SQL Row 대조와 관리 통로 정리 여부는 별도 확인한다.
+
 ## 정리 순서
 
 DB 초기 설정과 App의 실제 연결 확인이 끝난 뒤 적용한다. RDS 생성·접속·데이터 정리는 별도 승인 범위다.

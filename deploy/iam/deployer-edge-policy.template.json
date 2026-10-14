@@ -20,6 +20,39 @@
       "Resource": "*"
     },
     {
+      "Sid": "ReadSeoulCertificateSearch",
+      "Effect": "Allow",
+      "Action": [
+        "acm:SearchCertificates"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ReadOnlyLearningVpcSecurityGroups",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:GetSecurityGroupsForVpc"
+      ],
+      "Resource": "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:vpc/<LEARNING_VPC_ID>",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
       "Sid": "CreateTaggedLearningAlb",
       "Effect": "Allow",
       "Action": [
@@ -142,6 +175,34 @@
         "Null": {
           "acm:CertificateAuthority": "true",
           "acm:DomainNames": "false"
+        }
+      }
+    },
+    {
+      "Sid": "TagOnlyLearningCertificateProject",
+      "Effect": "Allow",
+      "Action": [
+        "acm:AddTagsToCertificate"
+      ],
+      "Resource": "arn:aws:acm:ap-northeast-2:<AWS_ACCOUNT_ID>:certificate/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "StringEqualsIfExists": {
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Project"
+          ]
+        },
+        "Null": {
+          "aws:TagKeys": "false"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
         }
       }
     },

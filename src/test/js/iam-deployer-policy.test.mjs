@@ -13,14 +13,15 @@ const readPolicy = (name) => {
   }
 };
 
-const policies = ["foundation", "runtime", "edge"].map(readPolicy);
+const policies = ["foundation", "runtime", "edge", "rds-console-read"].map(readPolicy);
 const statements = policies.flatMap((policy) => policy.Statement);
 const statement = (sid) => statements.find((entry) => entry.Sid === sid);
 const allowed = statements.filter((entry) => entry.Effect === "Allow");
 
 test("each deployer policy is valid JSON and fits the managed policy size limit", () => {
   assert.equal(policies.every((policy) => policy.Version === "2012-10-17"
-    && JSON.stringify(policy).replaceAll("<AWS_ACCOUNT_ID>", "000000000000").length <= 6144), true);
+    && JSON.stringify(policy).replaceAll("<AWS_ACCOUNT_ID>", "000000000000")
+      .replaceAll("<LEARNING_VPC_ID>", "vpc-00000000000000000").length <= 6144), true);
   assert.equal(new Set(statements.map((entry) => entry.Sid)).size === statements.length, true);
   assert.equal(statements.every((entry) => !Object.hasOwn(entry, "Principal")
     && !Object.hasOwn(entry, "NotResource")), true);
@@ -97,6 +98,38 @@ test("RDS Console metadata reads contain only the approved lookup actions", () =
     "outposts:ListOutposts", "ssm:DescribeParameters", "rds:DescribeDBClusters",
     "ds:DescribeDirectories", "kms:ListAliases",
   ]);
+});
+
+test("the RDS Console metadata statement keeps its three reads with MFA in Seoul", () => {
+  const policy = readPolicy("rds-console-read");
+  assert.equal(policy.Statement.length, 2);
+  assert.deepEqual(policy.Statement[0], {
+    Sid: "ReadRdsConsoleMetadata",
+    Effect: "Allow",
+    Action: [
+      "rds:DescribeCertificates",
+      "rds:DescribeDBSecurityGroups",
+      "rds:DescribeDBClusterParameterGroups",
+    ],
+    Resource: "*",
+    Condition: {
+      StringEquals: { "aws:RequestedRegion": "ap-northeast-2" },
+      Bool: { "aws:MultiFactorAuthPresent": "true" },
+    },
+  });
+});
+
+test("the DB tag read grants only ListTagsForResource on the named DB with MFA in Seoul", () => {
+  assert.deepEqual(readPolicy("rds-console-read").Statement[1], {
+    Sid: "ReadLearningDbTags",
+    Effect: "Allow",
+    Action: ["rds:ListTagsForResource"],
+    Resource: "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+    Condition: {
+      StringEquals: { "aws:RequestedRegion": "ap-northeast-2" },
+      Bool: { "aws:MultiFactorAuthPresent": "true" },
+    },
+  });
 });
 
 test("Directory and KMS lookups do not grant content changes or bypass MFA and Region", () => {
@@ -190,11 +223,13 @@ test("every subnet group use permission requires the persisted Project tag", () 
   });
 });
 
-test("RDS tag inspection is limited to the named subnet group and tag writes keep Project", () => {
+test("RDS tag inspection is limited to the named DB and subnet group and tag writes keep Project", () => {
   const readers = allowed.filter((entry) => entry.Action.includes("rds:ListTagsForResource"));
-  assert.equal(readers.length, 1);
-  assert.equal(readers[0].Resource,
-    "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:subgrp:helpdesk-learning");
+  assert.equal(readers.length, 2);
+  assert.deepEqual(readers.map((reader) => reader.Resource).sort(), [
+    "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+    "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:subgrp:helpdesk-learning",
+  ]);
   const writer = statement("TagNamedDb");
   assert.deepEqual(writer.Resource, [
     "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
@@ -219,6 +254,65 @@ test("certificate request is limited to the learning domain and non-exportable p
     && rule.Condition.StringEquals["acm:ValidationMethod"] === "DNS"
     && rule.Condition.Null["acm:CertificateAuthority"] === "true"
     && rule.Condition.Null["acm:DomainNames"] === "false", true);
+});
+
+test("ACM search adds only one metadata action with explicit MFA and Seoul conditions", () => {
+  const edge = readPolicy("edge");
+  const searchRules = edge.Statement.filter((entry) => entry.Action.includes("acm:SearchCertificates"));
+  assert.equal(searchRules.length, 1);
+  assert.deepEqual(searchRules[0], {
+    Sid: "ReadSeoulCertificateSearch",
+    Effect: "Allow",
+    Action: ["acm:SearchCertificates"],
+    Resource: "*",
+    Condition: {
+      StringEquals: { "aws:RequestedRegion": "ap-northeast-2" },
+      Bool: { "aws:MultiFactorAuthPresent": "true" },
+    },
+  });
+  assert.equal(edge.Statement.flatMap((entry) => entry.Action)
+    .some((action) => action.startsWith("acm-pca:")), false);
+});
+
+test("ACM tagging allows only the learning Project with MFA in Seoul and no time limit", () => {
+  const edge = readPolicy("edge");
+  const tagRules = edge.Statement.filter((entry) => entry.Action.includes("acm:AddTagsToCertificate"));
+  assert.equal(tagRules.length, 1);
+  assert.deepEqual(tagRules[0], {
+    Sid: "TagOnlyLearningCertificateProject",
+    Effect: "Allow",
+    Action: ["acm:AddTagsToCertificate"],
+    Resource: "arn:aws:acm:ap-northeast-2:<AWS_ACCOUNT_ID>:certificate/*",
+    Condition: {
+      StringEquals: {
+        "aws:RequestedRegion": "ap-northeast-2",
+        "aws:RequestTag/Project": "helpdesk-learning",
+      },
+      StringEqualsIfExists: { "aws:ResourceTag/Project": "helpdesk-learning" },
+      "ForAllValues:StringEquals": { "aws:TagKeys": ["Project"] },
+      Null: { "aws:TagKeys": "false" },
+      Bool: { "aws:MultiFactorAuthPresent": "true" },
+    },
+  });
+});
+
+test("ALB security group lookup reads only the selected learning VPC with MFA in Seoul", () => {
+  const edge = readPolicy("edge");
+  const readers = edge.Statement.filter((entry) =>
+    entry.Action.some((action) => action.startsWith("ec2:")));
+  assert.deepEqual(readers, [{
+    Sid: "ReadOnlyLearningVpcSecurityGroups",
+    Effect: "Allow",
+    Action: ["ec2:GetSecurityGroupsForVpc"],
+    Resource: "arn:aws:ec2:ap-northeast-2:<AWS_ACCOUNT_ID>:vpc/<LEARNING_VPC_ID>",
+    Condition: {
+      StringEquals: {
+        "aws:RequestedRegion": "ap-northeast-2",
+        "aws:ResourceTag/Project": "helpdesk-learning",
+      },
+      Bool: { "aws:MultiFactorAuthPresent": "true" },
+    },
+  }]);
 });
 
 test("deployer reads only the named ECR repository and Helpdesk log data", () => {
