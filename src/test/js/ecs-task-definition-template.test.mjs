@@ -92,6 +92,7 @@ test("ECS draft uses a precreated Seoul log group without automatic group creati
   const logs = container.logConfiguration;
   assert.equal(logs?.logDriver === "awslogs", true);
   assert.equal(logs?.options?.["awslogs-region"] === "ap-northeast-2", true);
-  assert.equal(logs?.options?.["awslogs-create-group"] === "false", true);
+  // Omitting the option defaults to false; the ECS Console rejects an explicit false.
+  assert.equal(Object.hasOwn(logs?.options ?? {}, "awslogs-create-group"), false);
   assert.equal(placeholder(logs?.options?.["awslogs-group"]), true);
 });

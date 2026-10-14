@@ -75,7 +75,8 @@ test("execution role writes streams in one precreated log group without creating
   assert.equal(logs.Action.length === 2
     && logs.Action.includes("logs:CreateLogStream") && logs.Action.includes("logs:PutLogEvents"), true);
   assert.equal(logs.Resource === "arn:aws:logs:ap-northeast-2:<AWS_ACCOUNT_ID>:log-group:<PRECREATED_LOG_GROUP_NAME>:log-stream:*", true);
-  assert.equal(task.containerDefinitions[0].logConfiguration.options["awslogs-create-group"] === "false", true);
+  assert.equal(Object.hasOwn(task.containerDefinitions[0].logConfiguration.options,
+    "awslogs-create-group"), false);
 });
 
 test("execution role adds no secret mutation, broad decryption, AI or task-code permissions", () => {

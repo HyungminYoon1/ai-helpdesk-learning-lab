@@ -1,6 +1,6 @@
-# ECS 실행 명세 초안
+# ECS 실행 명세와 첫 Cloud 기동
 
-> 상태: Draft — 자리표시자가 남아 있으며 AWS에 등록·실행하지 않음
+> 상태: 공개 Template에는 자리표시자를 유지. 첫 DB 인증 실패를 지정 암호 Parameter 수정으로 해결했고 JDBC·Flyway·Spring 기동을 확인했다. 10/15에는 같은 Image·명세의 Task를 ALB·DNS·HTTPS에 연결해 Target Healthy·Health 200/UP·로그인 페이지 200·익명 API 401을 확인했다. 실제 로그인·접수·DB Row 대조는 남아 있다.
 
 [task-definition.template.json](./task-definition.template.json)은 첫 Cloud 연결에서 사용할 Helpdesk 실행 명세다. PostgreSQL과 배포용 USER·AGENT를 연결하되 Provider·Worker는 명시적으로 끈다. 먼저 서버·DB·로그인·HTTPS를 확인한 뒤 전체 AI 조립과 실행을 별도로 이어간다.
 
@@ -12,7 +12,7 @@ Execution Role은 ECR Pull·Secret 전달·Log 전송에 사용한다. 현재 Ap
 
 사람의 Console 배포 신원은 [별도 IAM 사용자·권한 초안](../iam/README.md)에서 관리한다. 사람에게 실행 Role의 Secret 읽기 권한을 그대로 연결하거나 GitHub 업로드 Role을 Console용으로 재사용하지 않는다.
 
-`secrets`의 여섯 항목은 서울의 Standard Parameter Store `SecureString`을 참조한다. Standard Throughput과 AWS 관리 Key `aws/ssm`을 선택했으며 Advanced·Higher Throughput·별도 Customer-managed Key는 추가하지 않는다. 값은 Image에 넣지 않고 ECS Agent가 Execution Role로 읽어 새 Container의 환경 변수로 전달한다. 여섯 Parameter는 Console에서 직접 등록했고 이름·Standard Tier·SecureString Type을 확인했다. 실제 값과 저장 후 Key 메타데이터는 읽지 않았다. Execution Role은 생성했으며 실제 ECS 전달은 아직 검증하지 않았다. [ECS Parameter Store 전달](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/secrets-envvar-ssm-paramstore.html)
+`secrets`의 여섯 항목은 서울의 Standard Parameter Store `SecureString`을 참조한다. Standard Throughput과 AWS 관리 Key `aws/ssm`을 선택했으며 Advanced·Higher Throughput·별도 Customer-managed Key는 추가하지 않는다. 값은 Image에 넣지 않고 ECS Agent가 Execution Role로 읽어 새 Container의 환경 변수로 전달한다. 여섯 Parameter는 Console에서 직접 등록했고 이름·Standard Tier·SecureString Type을 확인했다. 실제 값은 읽거나 기록하지 않았다. 첫 Task에서 Image Pull·환경 변수 Secret 전달 뒤 JVM 시작·CloudWatch Log 전송을 확인했지만, PostgreSQL은 전달된 App DB Credential을 거부했다. Parameter 접근 성공과 DB Password의 유효성은 별도 확인이다. [ECS Parameter Store 전달](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/secrets-envvar-ssm-paramstore.html)
 
 ## Parameter와 Execution Role
 
@@ -49,7 +49,27 @@ NAT Gateway·상시 유료 Endpoint·고정 Elastic IP는 첫 구성에 추가�
 
 `SPRING_APPLICATION_JSON`에는 비밀값 없이 Forwarded Header 처리와 Secure·HttpOnly·SameSite Cookie 설정을 적었다. App의 Inbound는 ALB Group에서만 허용하고 Proxy 신뢰 범위를 확인해야 한다. 이 설정의 실제 해석과 HTTPS Browser 동작은 후속 실행에서 검증한다. [Spring Boot JSON 설정](https://docs.spring.io/spring-boot/reference/features/external-config.html#features.external-config.application-json)
 
-Log Group은 사전 생성한 대상으로 참조하고 자동 생성은 끈다. 보존 기간은 Log Group 설정이며 변경을 위해 JAR·Image나 Role 권한을 바꾸지는 않는다. 실제 Task의 Log 전달은 후속 실행에서 확인한다. `stopTimeout=45`는 기존 로컬 종료 대기에 맞춘 초기 값이며 전체 Job 종료 성공을 보장하지 않는다. Role·Secret·Log·종료 옵션의 필드 의미는 [AWS Fargate Parameter 안내](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html)에서 확인한다.
+Log Group은 사전 생성한 대상으로 참조하고 자동 생성은 끈다. `awslogs-create-group`은 명시적인 `"false"` 대신 생략한다. 생략 시 기본값이 false이며, 실제 ECS Console은 명시적인 false를 거부했다. Execution Role에 `logs:CreateLogGroup` 권한을 추가하지 않고 기존 Group의 Stream 전송만 사용한다. 보존 기간은 Log Group 설정이며 변경을 위해 JAR·Image나 Role 권한을 바꾸지는 않는다. 첫 Task의 실제 Log 전달은 확인했다. `stopTimeout=45`는 기존 로컬 종료 대기에 맞춘 초기 값이며 전체 Job 종료 성공을 보장하지 않는다. [AWS LogConfiguration](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_LogConfiguration.html), [AWS Fargate Parameter 안내](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html)
+
+## 첫 Cloud 실행 결과
+
+2026-10-14에 학습용 Cluster와 `helpdesk-learning:1`을 등록했다. 실제 명세는 `0.25 vCPU·512 MiB`, 검증 Image의 Manifest Digest, 기존 Execution Role·여섯 Parameter·Private RDS를 참조한다. Provider·Worker는 비활성이고 Task Role·ECS Exec·Service 자동 재실행은 추가하지 않았다. 단독 Task 한 개를 Public Subnet에서 실행하되 App의 Inbound는 ALB Group만 허용했다.
+
+첫 Task는 검증한 Image를 받아 JVM을 시작했지만, Flyway의 DB 연결에서 `28P01`과 `password authentication failed for user "helpdesk_app"`이 발생했다. Spring 기동이 실패했고 필수 Container 종료 뒤 Task는 `STOPPED`가 됐다. Cluster의 Running·Pending은 모두 0이었다. 이 실행에서 Migration 적용·API 접수·Browser 흐름은 확인하지 못했다.
+
+이미 psql 접속에 성공한 App 암호를 기준으로 `/helpdesk/learning/db/password` 한 개만 사용자가 직접 재등록하고, 같은 Image·명세로 새 Task 한 개를 재검증하도록 승인받았다. DB 계정·권한·TLS와 다른 Parameter는 바꾸지 않는다. 자세한 결과는 WIL 저장소의 `week8/lab-reports/2026-10-14-ecs-first-cloud-startup.md`에 정리한다.
+
+추가 Task에서는 Hikari Connection Pool 시작, 실제 RDS에 Flyway Migration 7개 적용과 `Started HelpdeskApplication`을 확인했다. Spring 기동은 77.91초였으며, 업무 API·Health·Browser E2E·AI 처리는 이번 실행에 포함하지 않았다. 확인 뒤 승인한 Task를 중지했고 실제 `STOPPED`와 Cluster의 Running·Pending·Service 0개를 확인했다. 암호 전달 수정으로 복구했으며 Image 재Build·Task Definition 개정·IAM 변경은 하지 않았다. RDS와 Image·Log 보관 비용은 별개로 남는다.
+
+## ALB·DNS·HTTPS 연결 결과
+
+2026-10-15에는 같은 Image·`helpdesk-learning:1`의 단독 Task 한 개를 다시 실행했다. Public-a Subnet·App Group 한 개·공인 IPv4를 사용하고 Provider·Worker·ECS Exec·Service 자동 재실행은 계속 껐다. 실제 `RUNNING`을 확인한 뒤 Private IP의 8080을 학습용 IP Target Group에 등록했고 대상 상태가 Healthy로 바뀌었다.
+
+ALB는 Public Subnet 두 개·전용 ALB Group·HTTPS 443 Listener·기본 ACM 인증서를 사용한다. Cloudflare의 서비스 CNAME은 ALB 주소를 가리키는 DNS-only이며 검증 CNAME은 그대로 유지했다. App 8080은 ALB Group에서만 접근하고 RDS는 비공개로 유지한다. HTTP 80과 별도 Proxy·유료 부가 기능은 추가하지 않았다.
+
+브라우저에서 `https://helpdesk.hmyoon.com/actuator/health`의 `{"status":"UP"}`와 로그인 페이지를 확인했다. 별도의 익명 HTTP 점검에서는 Health 200·로그인 200·Ticket 조회 401, 세 응답의 Location Header 부재를 확인했다. 보호된 API의 내장 브라우저 주소창 이동은 Client 제한으로 완료하지 못했으므로 401의 Status 근거는 HTTP 점검으로 구분한다. Password·Cookie·CSRF 값은 출력하지 않았다.
+
+현재 Task·ALB·RDS는 실행 중이다. 실제 로그인·Session·Role·CSRF·접수와 SQL Row 대조, 전체 AI·재배포·복원 검증은 남아 있다. 상세는 WIL 저장소의 `week8/lab-reports/2026-10-15-cloud-https-baseline.md`에 정리한다. Task가 교체되면 Private IP도 다시 확인해 Target 등록을 갱신해야 하며, 이번 실행을 ECS Service의 자동 교체 검증으로 부르지 않는다.
 
 ## 등록 전에 채울 값과 확인할 조건
 
@@ -81,3 +101,5 @@ node --test src/test/js/ecs-task-definition-template.test.mjs src/test/js/ecs-ex
 이 Test는 JSON 문법·필드 조합, 비밀값 대신 Parameter 참조, 명세와 Permission Policy의 여섯 ARN 일치, Profile·AI 비활성·Cookie 초안과 미확정 값의 유지 여부를 검사한다. AWS API를 호출하지 않으며 AWS의 전체 Schema 검증·IAM 평가·실제 Secret 접근·Spring 설정 Binding·Cloud 실행을 대신하지 않는다. 기존 CI의 JavaScript Test 대상에 포함된다.
 
 Trust Policy의 ECS 주체·같은 Account와 서울 조건 Test 두 개를 추가한 뒤 JavaScript 전체 173개와 ESLint가 통과했다. 이는 로컬 Template 검사이며 실제 Role 생성·사용 근거는 아니다.
+
+실제 Console의 Log 옵션 거부에 맞춰 Template과 두 Test의 Assertion을 생략 형태로 수정한 뒤 ECS Focused Test 15개·JavaScript 전체 209개·ESLint가 통과했다. 기존 Image의 JAR 코드는 바꾸지 않았다.
