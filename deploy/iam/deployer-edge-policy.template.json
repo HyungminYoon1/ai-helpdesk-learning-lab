@@ -2,6 +2,39 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "DeregisterOnlyLearningTargets",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:DeregisterTargets"
+      ],
+      "Resource": "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:targetgroup/helpdesk-learning/<LEARNING_TARGET_GROUP_ID>",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ReadSeoulMetricData",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricData"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
       "Sid": "ReadEdgeAndLogMetadata",
       "Effect": "Allow",
       "Action": [

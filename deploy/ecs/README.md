@@ -1,6 +1,6 @@
 # ECS 실행 명세와 첫 Cloud 기동
 
-> 상태: 공개 Template에는 자리표시자를 유지. 첫 DB 인증 실패를 지정 암호 Parameter 수정으로 해결했고 JDBC·Flyway·Spring 기동을 확인했다. 10/15에는 같은 Image·명세의 Task를 ALB·DNS·HTTPS에 연결해 Target Healthy·Health 200/UP·로그인 페이지 200·익명 API 401을 확인했다. 실제 로그인·접수·DB Row 대조는 남아 있다.
+> 상태: 같은 검증 Image·명세에서 Private RDS·Migration 7개·HTTPS 접수/SQL Row·Cookie/CSRF·HTTP 301·Cloud Log/ALB Metric을 확인했다. 10/16 Target 0개·App 실행 0개·RDS 일시중지를 확인했다. 새 Task·기존 문의/재로그인·전체 AI·복구 검증은 미완료다. 공개 Template·AI 기본 비활성은 유지한다.
 
 [task-definition.template.json](./task-definition.template.json)은 첫 Cloud 연결에서 사용할 Helpdesk 실행 명세다. PostgreSQL과 배포용 USER·AGENT를 연결하되 Provider·Worker는 명시적으로 끈다. 먼저 서버·DB·로그인·HTTPS를 확인한 뒤 전체 AI 조립과 실행을 별도로 이어간다.
 
@@ -69,7 +69,21 @@ ALB는 Public Subnet 두 개·전용 ALB Group·HTTPS 443 Listener·기본 ACM �
 
 브라우저에서 `https://helpdesk.hmyoon.com/actuator/health`의 `{"status":"UP"}`와 로그인 페이지를 확인했다. 별도의 익명 HTTP 점검에서는 Health 200·로그인 200·Ticket 조회 401, 세 응답의 Location Header 부재를 확인했다. 보호된 API의 내장 브라우저 주소창 이동은 Client 제한으로 완료하지 못했으므로 401의 Status 근거는 HTTP 점검으로 구분한다. Password·Cookie·CSRF 값은 출력하지 않았다.
 
-현재 Task·ALB·RDS는 실행 중이다. 실제 로그인·Session·Role·CSRF·접수와 SQL Row 대조, 전체 AI·재배포·복원 검증은 남아 있다. 상세는 WIL 저장소의 `week8/lab-reports/2026-10-15-cloud-https-baseline.md`에 정리한다. Task가 교체되면 Private IP도 다시 확인해 Target 등록을 갱신해야 하며, 이번 실행을 ECS Service의 자동 교체 검증으로 부르지 않는다.
+이 첫 HTTPS 연결 직후에는 실제 로그인·Session·Role·CSRF·접수와 SQL Row 대조가 남아 있었다. 이후 10/15 회차에는 실제 로그인 Session·Cookie 속성·CSRF 접수 403/201과 Ticket·Message·PENDING Job Row, HTTP 301·Cloud Log/ALB 그래프를 확인했다. Provider·Worker는 비활성이며 현재 Source의 V8·새 개인정보 구현은 이 Cloud Image에 적용하지 않았다.
+
+같은 Image·명세의 단독 Task 교체는 별도로 승인받았다. 기존 Task의 실행 Digest·0.25 vCPU/512 MiB·AI 비활성과 정상 Target 한 개를 확인하고, 지정 Target Group의 등록 해제 Action 한 개를 Edge V6에 적용했다. Version 1은 JSON 보관·원본 대조 후 삭제했고 Version 2~5는 보존했다. 배포 사용자에게 다른 리소스 삭제나 Secret 조회 권한을 추가하지 않았다.
+
+권한 준비 직후의 마감 때는 실제 Target 등록 해제·Draining·Task 중지/교체를 하지 않았다. 이후 별도의 비용 중지 요청에 따라 아래 절의 Target 해제·App 종료·RDS 중지를 진행했다. 새 Task·교체 후 조회는 아직 실행하지 않았다. 이미 인증되지 않았던 Browser 상태를 교체로 인한 Session 소실의 근거로 사용하지 않는다.
+
+상세는 WIL 저장소의 `week8/lab-reports/2026-10-16-cloud-task-replacement.md`와 `week8/study-notes/2026-10-15-study-questions.md`에 기록한다. Task 교체 시 새 Private IP를 확인해 Target 등록을 갱신하며 ECS Service 자동 교체와 구분한다. 전체 AI·이전 Image 복귀·별도 Snapshot 복원도 미완료다.
+
+### 학습 리소스 일시중지와 재개
+
+10/16의 별도 요청으로 지정 Target 한 개를 등록 해제했다. 기존 300초 드레이닝 종료와 Target 0개를 확인한 뒤, 기존 단독 App Task의 마지막 상태 STOPPED·종료 코드 143을 확인했다. 그 뒤 지정 RDS 한 개에 일시중지를 요청했으며 추가 Snapshot 생성은 선택하지 않았다. 새 Task·Service·Image는 실행하지 않았고 DB Row·Schema·DNS·Secret·IAM은 변경하지 않았다.
+
+최종 확인에서 ECS의 실행/보류 Task 0개·활성/드레이닝 Service 0개, RDS ‘일시적으로 중지됨’·연결 0개를 확인했다. ALB는 일시정지 기능이 없어 삭제하지 않았다. ALB·공인 IPv4와 RDS 저장/백업·Image·Log의 비용은 별도로 남는다. RDS 확인창은 10/23 00:57 KST 자동 재시작을 안내했다. 자동 중지·삭제 작업은 만들지 않았다. 상세는 WIL의 `week8/lab-reports/2026-10-16-learning-resource-pause.md`에 기록한다.
+
+재개는 RDS 시작/사용 가능 확인 → 같은 검증 Image·명세의 새 Task → 새 Private IP:8080 Target 등록/Healthy → HTTPS·재로그인·기존 문의 조회 순서다. 중지된 Fargate Task를 재시작하는 것은 아니다. 현재 비용 중지를 교체 후 문의 보존·Session 비교나 이전 Image Rollback 완료로 기록하지 않는다.
 
 ## 등록 전에 채울 값과 확인할 조건
 

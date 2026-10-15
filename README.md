@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8 배포 준비 — 10/13 로컬 전체 Java 578개·JavaScript 173개·ESLint 통과. 배포용 Image·RDS CA 준비, SSM·Execution Role·1년 보존 Log Group 구성
-> 현재 학습 영역: Week 8 배포 준비 — 로컬 Container·설정·관측·종료, 실제 CI 실패·복구와 OIDC 인증·ECR 업로드 완료. AI 비활성 접수는 실제 PostgreSQL에서 확인. 개인정보 처리기·Worker의 전체 배포 조립과 ECS·RDS·HTTPS·복구는 남아 있음. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
+> 상태: Week 6·7 회귀 유지, Week 8 진행 — 10/16 로컬 전체 Java 704개·JavaScript 234개·Python 정책 Test 10개·ESLint 통과. Cloud는 기존 검증 Image를 유지하며 새 Source를 배포한 결과와 구분
+> 현재 학습 영역: Week 8 배포 — AI 비활성 ECS·RDS·HTTPS 접수/SQL Row·HTTP 301·Cloud Log/ALB Metric 확인. 10/16 Target 0개·App 실행 0개·RDS 일시중지 확인. ALB·보관 비용은 남음. 새 Task·재로그인·전체 AI·Rollback·복원 검증은 미완료. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
@@ -362,6 +362,67 @@ Key와 상한을 읽어 Provider를 만들며 Context 종료 시 HTTP Client를 
 ```
 
 2026-10-09 새 설정 Test 18개와 관련 기존 Test를 합쳐 170개가 실패·오류·건너뜀 없이 통과했다. Adapter의 기존 HTTP Test는 로컬 통제 응답을 사용하며 실제 AI 호출은 0회다. 개인정보 처리기 실행 구성·기본 App의 실행용 Secret·Worker·DB의 전체 배포 흐름은 이어서 연결한다. 기본 Compose의 Worker 비활성 설정은 유지한다.
+
+### 개인정보 검사 결과의 JSON 검증
+
+[AiPrivacyScanResultValidator](./src/main/java/lab/helpdesk/ai/input/AiPrivacyScanResultValidator.java)는 로컬 검사기의 응답 계약 `{ "completed": true, "spans": [...] }`을 검증하고 기존 `AiInputSpanMasker`로 전송용 복사본을 만든다. 각 항목은 `field`·`start`·`end`·`type`만 허용한다. `field`는 `title`/`body`, 위치는 원문 기준 Code Point의 정수, 종류는 기존 `SensitiveType`이다.
+
+완료된 빈 목록은 허용하지만 개인정보 부재를 보장하지 않는다. 미완료 응답·필드 누락/추가/중복·타입 강제 변환·범위 위반·겹침은 고정 오류 `PRIVACY_SCAN_INVALID_RESULT`로 전체 거부한다. `completed: false`만 보고 Timeout을 추정하지 않는다. 실제 Timeout 판정은 검사 실행부의 역할이다. Parser Cause·원문·응답 전체를 예외에 남기지 않는다.
+
+생성자는 응답 UTF-8 Byte와 위치 항목 수의 양의 상한을 필수로 받는다. 입력 JSON의 중첩 깊이도 계약 구조에 맞춰 제한한다. 응답을 읽는 도중의 제한은 향후 검사 실행부에서 별도로 적용해야 하며, Unit Test의 상한은 배포 기본값이 아니다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=AiPrivacyScanResultValidatorTest,AiInputSpanMaskerTest,AiInputPrivacyGuardTest" test
+```
+
+새 검증기 Test 84개와 기존 위치 치환·Guard Test를 합쳐 163개가 실패·오류·건너뜀 없이 통과했다. 이는 JSON·위치 검증과 치환의 Unit Test이며, 실제 AI 호출·DB 실패 기록·Cloud 배포의 실행 근거가 아니다. 후속 Processor 연결은 아래 절에서 별도로 다룬다.
+
+### 개인정보 검사 실패의 저장과 조회
+
+개인정보 검사 실패는 외부 Provider의 Timeout이나 응답 거부와 구분한다. `PRIVACY_SCAN_TIMEOUT`·`PRIVACY_SCAN_INVALID_RESULT`를 Java Enum·Flyway V8의 DB 허용값·AGENT 조회 응답·UI 허용값에 함께 반영했다. V1~V7은 수정하지 않는다.
+
+`AiSuggestionJobClaimService.failPrivacyScanIfCurrent()`는 검사기를 실행하는 메서드가 아니다. 호출부에서 확인한 검사 실패를 저장하는 경계다. 현재 Attempt를 확인하고 같은 짧은 Transaction에서 예약의 `result_code=AUTO_RETRY_BLOCKED`와 Job의 `FAILED`·고정 실패 코드를 기록한다. 일반 `failIfCurrent()`로 두 코드를 기록해도 같은 처리를 거친다. 실패 기록 중 DB 오류가 나면 둘 다 Rollback하며, 먼저 Commit한 Ticket·Message와 기존 예약 횟수는 유지한다. 이전 Attempt나 완료된 Job을 덮어쓰지 않는다.
+
+[실제 PostgreSQL Test](./src/test/java/lab/helpdesk/ai/job/AiPrivacyScanFailureIntegrationTest.java)는 실패 저장·원문/예약 보존·읽기 전용 조회·반복 Worker Tick·늦은 Attempt 거부·실패 기록의 Rollback을 확인한다. [Migration Test](./src/test/java/lab/helpdesk/ai/job/AiPrivacyScanFailureMigrationIntegrationTest.java)는 V7의 여섯 Table을 유지한 V8 적용과 두 코드의 허용·알 수 없는 코드의 거부를 확인한다. 관련 조회 Test를 포함한 Focused Java 65개와 UI Test 29개가 통과했다. UI Test는 DOM·응답 Test Double이며 실제 Browser 실행은 아니다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=AiPrivacyScanFailureIntegrationTest,AiPrivacyScanFailureMigrationIntegrationTest,AiSuggestionQueryHttpIntegrationTest,AiSuggestionQueryServiceTest" test
+node --test src/test/js/ai-suggestion-ui.test.mjs
+```
+
+이후 전체 Java Clean Test 589개·JavaScript 전체 232개와 변경 UI·Test의 ESLint가 통과했다. 실패·오류·건너뜀은 0이다.
+
+이는 먼저 확인한 검사 실패의 저장·조회 경계다. 후속 Processor 연결은 다음 절에 기록한다. Provider·Worker의 기본 비활성을 유지하며 RDS Migration·새 Image 배포·유료 AI 호출은 실행하지 않았다. 새 실패 코드가 저장된 DB를 예전 Image로 읽으면 허용값이 맞지 않을 수 있으므로, Rollback 대상은 이 코드들을 이해하는 검증된 Image로 준비해야 한다.
+
+### 검사·마스킹과 Processor의 실패 처리 연결
+
+[AiScannedInputPreparer](./src/main/java/lab/helpdesk/ai/input/AiScannedInputPreparer.java)는 로컬 검사기 Port [AiPrivacyScanner](./src/main/java/lab/helpdesk/ai/input/AiPrivacyScanner.java), JSON·범위 검증기와 기존 Guard를 조립한다. 원문을 검사한 뒤 같은 원문 좌표로 치환하고, 알려진 문자열을 추가로 가린 전송용 복사본만 반환한다. 검사 시간 상한은 명시적으로 전달하며 Job의 남은 시간보다 길게 주지 않는다. 반환 후 단조 시간 검사로 늦은 응답도 거부한다. 끝나지 않는 호출의 강제 중단·응답 읽기 상한·자원 회수는 실제 검사 Adapter에서 구현해야 한다.
+
+[Processor](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionJobProcessor.java)는 typed Timeout·Invalid Result를 `failPrivacyScanIfCurrent()`로 전달한다. 실패 기록의 Commit 오류에는 원인·원문 없이 `AI_PRIVACY_FAILURE_RECORD_FAILED`를 던지며 `FAILED` 결과를 반환하지 않는다. 스캔 성공 뒤에는 Provider의 남은 시간과 현재 Attempt·Lease를 다시 확인한다. 검사 대기 중 Transaction이나 Job Lock을 유지하지 않는다.
+
+자동 Worker는 이제 `AiScannedInputPreparer` Bean이 필수다. 기존 `AiInputPrivacyGuard`만으로 조립되지 않으며, Main에는 빈 결과 검사기나 시간·크기 상한의 임의 기본값을 추가하지 않았다. 실제 탐지 모델·로컬 실행 Adapter와 Main Bean 구성은 아직 남아 있다. 기존 회귀·합성 Experiment는 Test 영역의 `AiPrivacyScanFixtures`를 명시적으로 사용하며, 이를 탐지 정확도의 근거로 취급하지 않는다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=AiScannedInputPreparerTest,AiPrivacyScanPipelineIntegrationTest,AiSuggestionWorkerConfigurationTest,AiPrivacyScanResultValidatorTest,AiPrivacyScanFailureIntegrationTest" test
+```
+
+[Pipeline Integration Test](./src/test/java/lab/helpdesk/ai/provider/AiPrivacyScanPipelineIntegrationTest.java)는 실제 PostgreSQL·Processor·Spring AI·로컬 HTTP 서버를 연결하고 검사기 응답은 통제한다. 전송된 실제 요청의 마스킹과 복구 사실 보존, 검사 실패의 Provider 호출·HTTP 전송 0회, 원문·예약 보존, 실패 기록 Rollback, 검사 중 실행권 변경·시간 만료를 확인한다. 외부 AI나 실제 탐지 모델을 사용한 실험은 아니다.
+
+전처리기 Unit Test 12개·Pipeline Integration Test 15개·Worker 설정 Test 8개가 통과했다. 이어 `mvnw.cmd -B -ntp clean test`로 전체 Java 701개와 JavaScript 전체 232개를 재실행해 실패·오류·건너뜀 0건을 확인했다. 실제 JVM Process 재시작을 포함한 기존 회귀도 유지했다. 이 검증에서는 AWS 설정·실행 Image·RDS를 변경하지 않았다.
+
+### PERSON 종류와 실제 한국어 NER 평가
+
+입력 전처리의 `SensitiveType.PERSON`·`[PERSON_REDACTED]`를 추가했다. AI 응답의 업무 Category를 늘린 것이 아니다. 통제한 이름 위치를 사용한 Test에서 영향 인원·업무 마감·요청 내용을 보존하며 전송용 복사본만 치환하는 것을 확인했다. 관련 Guard·치환·JSON·전처리기 Java Test 총 178개가 통과했다. 앞 절의 전체 Java 701개는 이 추가 전의 실행이며, 추가 후 전체 회귀를 다시 실행한 결과로 해석하지 않는다.
+
+[분리된 모델 실험](./experiments/privacy-ner/README.md)은 spaCy `ko_core_news_sm` 3.8.0과 제한적인 이메일·휴대전화 규칙을 실제 CPU에서 실행했다. App·DB·외부 AI와 연결하지 않고 네트워크를 차단한 Container에서 고정 합성 문의 12건을 평가했다. 정책·연결 Unit Test 10개는 모두 통과했지만, 실제 탐지 결과는 7건만 정확한 범위·종류·업무 사실 보존을 모두 만족했다. 이름 누락, 일반 문구의 PERSON 오탐, 비표준 이메일 누락이 있어 이 후보를 배포용 검사기로 채택하지 않는다.
+
+Python 코드는 모델 평가용이며 Java 서버를 대체하지 않는다. Main의 실제 `AiPrivacyScanner` Adapter·Bean, Job별 강제 Timeout·응답 읽기 제한·자원 회수는 아직 구현할 대상이다. 실험 성공 종료나 JSON 검증 통과가 탐지 정확도·Provider 전송·DB 보존·Cloud 검증을 대신하지 않는다. Provider·Worker의 기본 비활성과 기존 배포 Image는 유지한다.
+
+후속 정책은 불필요한 실명을 외부 전송에서 가리되 한 문의 안의 인물 관계를 보존하는 것이다. 이름/일반명사의 문맥 판단이 불분명하면 일반명사로 해석하지만, `이메일`·`이매일` 같은 단어를 무조건 제외하는 목록으로 구현하지 않는다. 명확한 이름 문맥과 일반 문구를 구분하고, 이 정책으로 이메일 주소·전화번호·비밀번호의 보호나 검사 실패 시 전송 중단을 생략하지 않는다.
+
+이 관계 보존·문맥 판정은 아직 미구현이다. 기존 4필드 범위 계약과 단일 `[PERSON_REDACTED]`가 관계를 표현한다고 가정하지 않는다. 정책을 정리하면서 Main·Scanner JSON·고정 모델 평가 Dataset·배포 Image를 변경하지 않았으며, 앞선 Test·모델 평가를 새 정책의 실행 근거로 소급하지 않는다.
+
+10/16 Commit 전에는 PERSON 추가와 접속 도구·IAM Test를 포함한 현재 Source 전체를 다시 검증했다. `mvnw.cmd -B -ntp clean test`는 Java 704개·실패/오류/건너뜀 0건·8분 52초에 성공했다. JavaScript 234개·실패/취소/건너뜀 0건, Python 정책 Unit Test 10개와 ESLint 10.11.0도 통과했다. Python Unit Test는 통제한 NER 출력이며 실제 모델 정확도의 새 평가가 아니다. 실제 AI·Browser E2E·Image Build/Push·원격 CI를 재실행하거나 RDS에 V8을 적용하지 않았다.
 
 ### AI를 끈 상태의 문의 접수 검증
 
@@ -766,7 +827,7 @@ Windows 기동 오류를 수정한 뒤 사용자가 명시적으로 재실행할
 
 [V5 Migration](./src/main/resources/db/migration/V5__add_rate_limit_retry_kind.sql)은 `TEMPORARY_RETRY`와 `PROVIDER_RATE_LIMITED`를 허용한다. 기존 원문·정책 Snapshot·예약·제안과 V1~V4는 유지한다. `next_attempt_at`은 DB 시각에 `max(Backoff, Retry-After)`를 더해 저장한다. 재시도는 전체 생성 횟수만 사용하고 출력 보완 횟수는 늘리지 않는다. 최소 대기가 전체 기한을 넘으면 더 일찍 호출하지 않고 기한 종료 때 Job을 실패로 마감한다.
 
-[설정](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionWorkerConfiguration.java)은 `postgres` Profile과 `helpdesk.ai.worker.enabled=true`에서만 활성화된다. 기본은 꺼짐이며 확인 간격 `helpdesk.ai.worker.poll-delay-ms`의 기본값은 1,000ms다. Provider·개인정보 Guard·출력 검증기를 명시적으로 제공해야 하며, 전역 Key나 Runtime 요약 상한을 자동 선택하지 않는다. 설정값을 켜는 것만으로 Live Provider가 만들어지지는 않는다.
+[설정](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionWorkerConfiguration.java)은 `postgres` Profile과 `helpdesk.ai.worker.enabled=true`에서만 활성화된다. 기본은 꺼짐이며 확인 간격 `helpdesk.ai.worker.poll-delay-ms`의 기본값은 1,000ms다. Provider·검사 전처리기 `AiScannedInputPreparer`·출력 검증기를 명시적으로 제공해야 하며, 전역 Key나 Runtime 요약 상한을 자동 선택하지 않는다. 기존 Guard만 있을 때는 빈 검사기로 대체하지 않는다. 설정값을 켜는 것만으로 Live Provider가 만들어지지는 않는다.
 
 최종 `FAILED`는 일반 Polling 대상에서 제외한다. 크레딧·설정 오류를 같은 요청으로 반복하지 않는다. 대기 Header가 없는 Rate Limit과 다른 미승인 일시 거절은 V7의 결과 코드로 복구 경로에서도 재호출을 막는다. 아래에 조건부 결과 불명 복구를 연결했으며, 관리자 재개·응답 객체의 영속 복원과 실제 유료 Runtime 조립은 후속 단계다. 메모리에 남은 객체의 저장 재시도는 아래와 같이 연결했다. Scheduler 오류는 메시지·Cause 없이 `AI_WORKER_TICK_FAILED`만 Log에 남긴다.
 

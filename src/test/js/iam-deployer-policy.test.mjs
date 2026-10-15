@@ -21,16 +21,37 @@ const allowed = statements.filter((entry) => entry.Effect === "Allow");
 test("each deployer policy is valid JSON and fits the managed policy size limit", () => {
   assert.equal(policies.every((policy) => policy.Version === "2012-10-17"
     && JSON.stringify(policy).replaceAll("<AWS_ACCOUNT_ID>", "000000000000")
-      .replaceAll("<LEARNING_VPC_ID>", "vpc-00000000000000000").length <= 6144), true);
+      .replaceAll("<LEARNING_VPC_ID>", "vpc-00000000000000000")
+      .replaceAll("<LEARNING_TARGET_GROUP_ID>", "0000000000000000").length <= 6144), true);
   assert.equal(new Set(statements.map((entry) => entry.Sid)).size === statements.length, true);
   assert.equal(statements.every((entry) => !Object.hasOwn(entry, "Principal")
     && !Object.hasOwn(entry, "NotResource")), true);
 });
 
-test("deployer allow actions contain no service-wide wildcard or destructive resource action", () => {
+test("deployer allow actions exclude resource deletion and wildcard actions with only scoped target deregistration", () => {
   assert.equal(allowed.every((entry) => Array.isArray(entry.Action)
     && entry.Action.every((action) => !action.includes("*")
-      && !/:Delete|:Deregister|:Terminate|:Remove/.test(action))), true);
+      && (!/:Delete|:Deregister|:Terminate|:Remove/.test(action)
+        || action === "elasticloadbalancing:DeregisterTargets"))), true);
+});
+
+test("target deregistration permits only the selected group with explicit MFA Seoul and Project conditions", () => {
+  const rules = allowed.filter((entry) => entry.Action.includes("elasticloadbalancing:DeregisterTargets"));
+  assert.deepEqual(rules, [{
+    Sid: "DeregisterOnlyLearningTargets",
+    Effect: "Allow",
+    Action: ["elasticloadbalancing:DeregisterTargets"],
+    Resource: "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:targetgroup/helpdesk-learning/<LEARNING_TARGET_GROUP_ID>",
+    Condition: {
+      StringEquals: {
+        "aws:RequestedRegion": "ap-northeast-2",
+        "aws:ResourceTag/Project": "helpdesk-learning",
+      },
+      Bool: { "aws:MultiFactorAuthPresent": "true" },
+    },
+  }]);
+  assert.deepEqual(readPolicy("edge").Statement.find((entry) =>
+    entry.Sid === "DeregisterOnlyLearningTargets"), rules[0]);
 });
 
 test("MFA is required for direct deployment calls, with only self enrollment exceptions", () => {
@@ -322,6 +343,28 @@ test("deployer reads only the named ECR repository and Helpdesk log data", () =>
     "arn:aws:logs:ap-northeast-2:<AWS_ACCOUNT_ID>:log-group:/ecs/helpdesk-learning:*", true);
   assert.equal(statement("ReadOnlyHelpdeskLogStreams").Resource ===
     "arn:aws:logs:ap-northeast-2:<AWS_ACCOUNT_ID>:log-group:/ecs/helpdesk-learning:log-stream:*", true);
+});
+
+test("CloudWatch access adds only GetMetricData with explicit MFA and Seoul conditions", () => {
+  const edge = readPolicy("edge");
+  const metricReaders = edge.Statement.filter((entry) =>
+    entry.Action.some((action) => action.startsWith("cloudwatch:")));
+  assert.deepEqual(metricReaders, [{
+    Sid: "ReadSeoulMetricData",
+    Effect: "Allow",
+    Action: ["cloudwatch:GetMetricData"],
+    Resource: "*",
+    Condition: {
+      StringEquals: { "aws:RequestedRegion": "ap-northeast-2" },
+      Bool: { "aws:MultiFactorAuthPresent": "true" },
+    },
+  }]);
+  assert.deepEqual(allowed.flatMap((entry) => entry.Action)
+    .filter((action) => action.startsWith("cloudwatch:")), ["cloudwatch:GetMetricData"]);
+  assert.equal(readPolicy("foundation").Statement.some((entry) =>
+    Array.isArray(entry.Action) && entry.Action.some((action) => action.startsWith("cloudwatch:"))), false);
+  assert.equal(readPolicy("runtime").Statement.some((entry) =>
+    entry.Action.some((action) => action.startsWith("cloudwatch:"))), false);
 });
 
 test("ALB listener protocols use a set qualifier and require a value at creation", () => {

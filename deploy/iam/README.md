@@ -1,6 +1,6 @@
 # 학습용 배포 사용자 권한
 
-> 상태: Runtime Version 4와 생성 조건 유지. 조회 보조 정책 Version 2·Private TLS·App DB 계정과 Migration 7개를 확인했다. Edge Version 4의 학습 VPC 조회 적용 뒤 ALB·새 App Task·Cloudflare 서비스 DNS를 연결했다. Target Healthy·HTTPS Health 200/UP·로그인 페이지 200·익명 API 401 확인. 실제 로그인·Session·Role·CSRF·접수/DB Row 검증은 남아 있다.
+> 상태: Runtime Version 4·조회 보조 정책 Version 2와 기존 생성 조건 유지. Edge 기본 Version 6에 지정 Target Group 한 개의 등록 해제만 추가했다. 기존 Version 1은 JSON 보관·대조 뒤 승인받아 삭제했고 Version 2~5와 기존 16개 문장은 보존했다. Metric 그래프·Private TLS·Migration 7개·HTTPS 접수와 DB Row는 확인했다. Task 교체·재로그인 검증은 진행 중이며 전체 AI·이전 Image 복귀·DB 복원은 별도 진행한다.
 
 `helpdesk-deployer`는 사람이 Console에서 배포할 때 사용하는 IAM 사용자다. ECS Agent의 `helpdesk-ecs-execution`, GitHub Image 업로드의 `helpdesk-github-ecr-push`, Helpdesk의 USER·AGENT 로그인 계정과 구분한다. 기존 Role의 정책은 바꾸지 않는다.
 
@@ -12,12 +12,12 @@
 |---|---|---|
 | `helpdesk-deployer-foundation` | [Foundation](./deployer-foundation-policy.template.json) | MFA·서울 제한, 학습 Network, 지정 Execution Role 전달, 필요한 서비스 연결 Role 생성 |
 | `helpdesk-deployer-runtime` | [Runtime](./deployer-runtime-policy.template.json) | 학습 Cluster·Service·Task, 첫 Private PostgreSQL과 DB Subnet Group |
-| `helpdesk-deployer-edge` | [Edge](./deployer-edge-policy.template.json) | 학습 ALB·Target Group·Listener·ACM, 학습 VPC 한 개의 보안 그룹 조회, 지정 ECR와 Log 조회 |
+| `helpdesk-deployer-edge` | [Edge](./deployer-edge-policy.template.json) | 학습 ALB·Target Group·Listener·ACM, 학습 VPC 한 개의 보안 그룹 조회, 지정 ECR·Log와 MFA·서울 조건의 Metric 조회 |
 | `helpdesk-deployer-rds-console-read` | [RDS Console 조회](./deployer-rds-console-read-policy.template.json) | MFA·서울 조건의 세 메타데이터 조회와 지정 DB 한 개의 태그 조회 |
 
 IAM 사용자 인라인 정책 대신 Network·실행·접속 설정을 세 Customer-managed Policy로 나눈다. [Private DB 관리 통로](./db-bootstrap.md)와 RDS Console 조회는 각각 보조 정책으로 분리한다. Managed Policy 하나의 공백 제외 6,144자 한도와 권한의 경계를 함께 유지하며, 서비스 전체 관리형 정책은 연결하지 않는다. 현재 지정 사용자에는 이 다섯 정책이 직접 연결되어 있다.
 
-공개 Template의 Account ID는 자리표시자다. Edge의 `<LEARNING_VPC_ID>`도 확인한 학습 VPC 한 개의 ID로 채운다. 실제 계정의 적용본은 Git 제외 경로에서만 관리하며 Password·MFA Seed·Token·환경 변수 값은 포함하지 않는다. 이 JSON은 AWS 리소스를 생성하거나 정책을 자동 연결하는 스크립트가 아니다.
+공개 Template의 Account ID는 자리표시자다. Edge의 `<LEARNING_VPC_ID>`와 `<LEARNING_TARGET_GROUP_ID>`는 각각 확인한 학습 VPC 한 개의 ID와 지정 Target Group ARN 끝의 ID로 채운다. 이름이 같다는 이유로 다른 Group의 ID나 와일드카드를 넣지 않는다. 실제 계정의 적용본은 Git 제외 경로에서만 관리하며 Password·MFA Seed·Token·환경 변수 값은 포함하지 않는다. 이 JSON은 AWS 리소스를 생성하거나 정책을 자동 연결하는 스크립트가 아니다.
 
 ## 허용 범위
 
@@ -130,6 +130,30 @@ ALB 생성 단계는 `ec2:GetSecurityGroupsForVpc` 권한 부족으로 거부됐
 비Root MFA 로그인 뒤 02:05 KST에 ALB와 HTTPS 443 Listener가 생성됐다. Wizard의 추가 `AddListenerCertificates`는 거부됐고 자동 삭제도 실패했지만, 실제 ALB·Listener는 남아 있었다. 상세에서 기본 ACM 인증서·Target Group 전달 규칙을 확인했고, ALB의 활성 상태와 실제 도메인의 HTTPS 응답으로 연결을 검증했다. 기본 인증서가 이미 연결되어 있어 추가 인증서 권한·삭제 권한을 넓히거나 같은 ALB를 다시 만들지 않았다.
 
 기존 명세의 App Task 한 개를 실행해 Private IP의 8080을 Target Group에 등록했고 Healthy를 확인했다. Cloudflare에는 기존 검증 CNAME을 유지한 채 서비스 CNAME 한 개를 DNS-only로 추가했다. HTTPS Health는 200/UP, 로그인 페이지는 200, 익명 Ticket 조회는 401이었다. 실제 로그인·Session·Role·CSRF·접수와 Database Row 대조는 다음 검증이다. App·ALB·RDS는 실행 중이며 과금도 계속된다. 종료·삭제는 별도 승인 범위를 확인한다.
+
+## ALB 그래프의 Metric 조회
+
+ECS 기동 Log는 읽을 수 있었지만 ALB Monitoring에서는 `cloudwatch:GetMetricData`의 Allow 부재가 표시됐다. 조회 주체인 `helpdesk-deployer`의 권한 문제이며, Execution Role·Task Role이나 App의 가동 상태와 구분했다.
+
+현 상태 유지·넓은 CloudWatch 조회 정책 연결·확인된 Action 한 개 추가를 비교하고, 사용자가 승인한 마지막 안을 적용했다. Edge에 `ReadSeoulMetricData` 문장 한 개를 추가해 `cloudwatch:GetMetricData`만 허용하며 MFA `true`·서울 `ap-northeast-2`를 명시한다. 기존 Foundation의 제한과 다른 정책은 바꾸지 않았다. Metric 목록 조회·Alarm 생성·Log 추가 권한·Secret 접근도 넣지 않았다.
+
+일반 Metric 조회를 특정 ALB ARN 하나로 제한할 수 있다고 가정하지 않는다. `Resource: "*"`이므로 같은 계정·서울의 다른 프로젝트 Metric도 조회할 수 있다는 범위를 명시해 승인받았다. 실제 확인은 지정 학습 ALB의 기존 그래프만 사용했다. [AWS Metric 조회 권한 범위](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch-dashboard-sharing.html)
+
+2026-10-15 23:18 KST에 새 기본 Version 5로 저장하고 Version 1~4를 보존했다. 변경 전 전체 JSON은 Repository의 기존 15개 문장과 일치했다. 저장 후 전체 JSON도 승인한 수정안과 정확히 일치하며 기존 15개 문장은 그대로다. 적용본은 16개 문장·공백 제외 5,379자이고 편집기의 보안·오류·경고·추천은 모두 0이었다. 영향 파일은 Edge Template·`iam-deployer-policy.test.mjs`·이 안내다. 정책 Test 28개·JavaScript 전체 233개·ESLint 10.11.0이 통과했다. Java·Image·원격 CI를 새로 검증한 결과는 아니다.
+
+Root에서 로그아웃하고 배포 사용자가 MFA로 재로그인한 뒤, 23:21~23:23 KST에 서울 ALB Monitoring을 재확인했다. 기존 3시간 범위의 요청·대상 응답시간·Target 4xx 그래프에 데이터가 표시됐고 조회 권한 오류는 사라졌다. 요청 확대 화면은 1분 간격·합계였다. ELB 4xx·5xx는 해당 범위에 데이터 없음으로 표시됐으며 이를 정확한 0건으로 바꾸어 기록하지 않았다. Target 4xx만으로 각 요청의 URI·Status·사용자를 식별하지도 않는다. 후속 검토는 실제 요청 조건과 App 지표·Log의 연결이며, 이번 권한 적용으로 App·RDS·ALB·DNS·Secret·Image를 변경하지 않았다.
+
+## 단독 Task 교체를 위한 Target 등록 해제
+
+현재 단독 Task의 IP는 ECS Service가 아닌 사람이 Target Group에 등록했다. App 종료 전에 ALB의 새 요청 유입을 멈추고 기존 연결을 정리하려면 `elasticloadbalancing:DeregisterTargets`가 필요하지만 기존 Edge에는 없었다. 등록 해제는 Target Group·Task·DB를 삭제하는 작업이 아니며 Task를 종료하는 `ecs:StopTask`와도 별개다. [AWS Target 등록·해제 순서](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/target-group-register-targets.html)
+
+현 권한 유지·포괄적인 ELB 권한·지정 Group만 등록 해제하는 안을 비교해 마지막 안을 승인받았다. 새 `DeregisterOnlyLearningTargets` 문장에는 Action 한 개, 현재 Group의 정확한 ARN 하나와 MFA `true`·서울·`Project=helpdesk-learning` 조건만 넣는다. 이전 16개 문장과 다른 정책·Role은 바꾸지 않았다. 다른 Group 등록 해제·리소스 삭제·Secret 조회를 배포 사용자에게 추가하지 않는다.
+
+Edge는 이미 Version 1~5를 보관해 AWS의 5개 한도에 도달했다. 사용자가 승인한 Version 1만 `local/deployment/iam-backups/helpdesk-deployer-edge-v1-2026-10-15.json`에 보관했다. Git 제외 여부·JSON 해석과 AWS 원본 12개 문장의 내용 일치를 확인한 뒤 Version 1을 삭제했다. AWS에서 같은 Version 번호의 삭제를 취소할 수는 없지만, 보관한 정책 내용으로 새 Version을 등록할 수 있다. Version 2~5는 유지했다. [IAM 정책 버전 한도](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_managed-versioning.html)
+
+10/15 회차를 이어 실제 10/16 자정 이후 기본 Version 6을 적용했다. 저장된 전체 JSON은 승인안과 정확히 일치하고 기존 16개 문장은 그대로다. 총 17개 문장·공백 제외 5,766자이며 AWS 편집기의 보안·오류·경고·추천은 모두 0이었다. 정책 Test 29개·JavaScript 전체 234개·ESLint 10.11.0이 통과했다. 구조 Test의 포괄적 Deregister 금지는 이 정확한 문장 한 개만 예외로 검사하며 다른 삭제·등록 해제 Action은 계속 거부한다.
+
+영향 파일은 Edge Template·정책 Test·이 안내와 WIL의 교체 보고서다. Root는 로그아웃했고 작성자가 배포 사용자 로그인·MFA 완료를 알렸다. 권한 준비 직후의 마감 때는 실제 등록 해제·Draining·Task 중지/교체를 실행하지 않았다. 이후 10/16의 별도 비용 중지 요청에 따라 기존 배포 사용자로 Target 해제·App 종료·RDS 중지를 진행했으며, 추가 IAM 변경은 없었다. 새 Task·기존 Ticket 재조회·Session 비교는 아직 미실행이다. 권한 적용이나 비용 중지를 Task 교체·이전 Image Rollback의 완료로 기록하지 않으며, 완료한 V1 보관/삭제·V6 적용도 반복하지 않는다. Schema·DNS·Secret은 유지한다.
 
 ## Secret과 배포 권한
 
