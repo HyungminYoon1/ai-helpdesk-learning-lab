@@ -1,0 +1,71 @@
+[
+  {
+    "id": "P01", "title": "로그인 문의",
+    "body": "홍길동입니다. 직원 20명이 오늘 18시까지 로그인해야 합니다.",
+    "expected": [{"field": "body", "text": "홍길동", "type": "PERSON"}],
+    "preserve": ["직원 20명", "오늘 18시", "로그인해야 합니다."]
+  },
+  {
+    "id": "P02", "title": "복구 문의",
+    "body": "제 이름은 김철수 입니다. 새 링크로 로그인에 성공했습니다.",
+    "expected": [{"field": "body", "text": "김철수", "type": "PERSON"}],
+    "preserve": ["새 링크로 로그인에 성공했습니다."]
+  },
+  {
+    "id": "P03", "title": "연락 문의",
+    "body": "담당자는 김영희입니다. 이메일은 support@example.invalid 입니다.",
+    "expected": [{"field": "body", "text": "김영희", "type": "PERSON"}, {"field": "body", "text": "support@example.invalid", "type": "EMAIL"}],
+    "preserve": ["이메일은"]
+  },
+  {
+    "id": "P04", "title": "연락 요청",
+    "body": "연락처는 010-0000-0000 입니다. 내일 오전까지 확인 부탁드립니다.",
+    "expected": [{"field": "body", "text": "010-0000-0000", "type": "PHONE"}],
+    "preserve": ["내일 오전까지 확인 부탁드립니다."]
+  },
+  {
+    "id": "P05", "title": "메일 안내",
+    "body": "안내 메일은 hello@example.invalid 로 보내주세요. 급하지 않습니다.",
+    "expected": [{"field": "body", "text": "hello@example.invalid", "type": "EMAIL"}],
+    "preserve": ["급하지 않습니다."]
+  },
+  {
+    "id": "P06", "title": "업무 마감",
+    "body": "사용자 20명이 오늘 18시까지 로그인해야 합니다.",
+    "expected": [], "preserve": ["사용자 20명", "오늘 18시", "로그인해야 합니다."]
+  },
+  {
+    "id": "P07", "title": "복구 후 문의",
+    "body": "새 링크로 로그인에 성공했습니다. 만료 이유가 궁금합니다.",
+    "expected": [], "preserve": ["새 링크로 로그인에 성공했습니다.", "만료 이유가 궁금합니다."]
+  },
+  {
+    "id": "P08", "title": "문자 위치",
+    "body": "😀 홍길동 님에게 연락해주세요. 이메일은 mail@example.invalid 입니다.",
+    "expected": [{"field": "body", "text": "홍길동", "type": "PERSON"}, {"field": "body", "text": "mail@example.invalid", "type": "EMAIL"}],
+    "preserve": ["😀", "연락해주세요."]
+  },
+  {
+    "id": "P09", "title": "김영희 문의",
+    "body": "로그인 링크가 만료되었습니다. 내일 오전까지 답변을 부탁드립니다.",
+    "expected": [{"field": "title", "text": "김영희", "type": "PERSON"}],
+    "preserve": ["내일 오전까지 답변을 부탁드립니다."]
+  },
+  {
+    "id": "P10", "title": "지사 문의",
+    "body": "서울 지사 직원 20명이 오늘 18시까지 로그인해야 합니다.",
+    "expected": [], "preserve": ["서울 지사", "직원 20명", "오늘 18시"]
+  },
+  {
+    "id": "P11", "title": "계정 오류",
+    "body": "홍길동 님과 김영희 님의 계정에서 오류가 발생했습니다.",
+    "expected": [{"field": "body", "text": "홍길동", "type": "PERSON"}, {"field": "body", "text": "김영희", "type": "PERSON"}],
+    "preserve": ["계정에서 오류가 발생했습니다."]
+  },
+  {
+    "id": "P12", "title": "비표준 이메일",
+    "body": "이메일은 help [at] example.invalid 입니다. 급하지 않습니다.",
+    "expected": [{"field": "body", "text": "help [at] example.invalid", "type": "EMAIL"}],
+    "preserve": ["급하지 않습니다."]
+  }
+]
