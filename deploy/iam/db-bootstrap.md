@@ -62,6 +62,51 @@ COMMIT;
 
 App 계정으로 `verify-full` 재접속한 뒤에는 `pg_stat_ssl`의 현재 연결, `pg_roles`의 권한 Flag와 멤버십, DB `CONNECT`·Schema `USAGE/CREATE`를 확인한다. Password·Hash Column은 조회하지 않는다. 임시 Table의 생성·Identity INSERT·SELECT를 같은 Transaction에서 확인하고 Rollback해 Table·Row가 남지 않는지 검사한다. 이 권한 점검은 ECS App 기동·Flyway Migration·실제 Ticket 저장을 대신하지 않는다.
 
+## 읽기 전용 재접속 명령
+
+CloudShell **VPC 환경은 세션이 끝나면 홈 디렉터리까지 삭제**한다. `/tmp`의 CA를 홈으로 옮기는 것만으로는 해결되지 않는다. 일반 CloudShell의 영구 저장 공간과 구분한다. 세션이 유지되는 동안 `\q`로 psql만 종료하면 CloudShell까지 종료되는 것은 아니지만, 재접속 절차는 이전 CA 파일이나 Shell 변수의 잔존을 전제로 하지 않는다. [AWS의 VPC 환경 제약](https://docs.aws.amazon.com/cloudshell/latest/userguide/using-cshell-in-vpc.html)
+
+[PowerShell 실행기](../../scripts/New-CloudShellRdsConnectCommand.ps1)는 [Node 생성기](../../scripts/cloudshell-rds-connect.mjs)를 사용해 공개 CA를 내장한 Bash 명령을 만든다. 이 JavaScript는 로컬 접속 도구이며 Helpdesk의 Java·Spring 업무 로직이나 AI Worker가 아니다. 새 유료 서비스·인터넷 경로·AWS 권한·DB 계정을 추가하지 않는다.
+
+### 로컬 PowerShell에서 준비
+
+PowerShell 7·Node.js 22 이상을 사용한다. **Lab 저장소 Root**에서 실행하며 `<RDS_ENDPOINT>`만 현재 서울 RDS의 Endpoint로 바꾼다. 실제 Endpoint·계정 ARN을 이 공개 문서에 기록하지 않는다.
+
+```powershell
+.\scripts\New-CloudShellRdsConnectCommand.ps1 -Endpoint '<RDS_ENDPOINT>' -CopyToClipboard
+```
+
+`CLOUDSHELL_CONNECT_COMMAND_COPIED`가 나오면 **기존 서울 CloudShell VPC 환경**의 `~ $`에 붙여 넣고 실행한다. 새 환경·NAT Gateway·EC2를 만들지 않는다. `helpdesk=>`에 붙여 넣는 SQL이 아니다. 클립보드가 동작하지 않으면 같은 명령에서 `-CopyToClipboard`만 빼고 출력된 전체 Bash 명령을 직접 복사한다.
+
+Database는 `helpdesk`, Username은 `helpdesk_app`이 기본값이다. 다른 승인된 대상이 필요한 경우에만 `-Database`·`-Username`으로 명시한다. 생성기는 서울 RDS DNS 이름과 단순한 소문자 DB 식별자만 허용하며 URI·Password·임의 Shell 명령은 받지 않는다.
+
+### CloudShell에서 실행되는 순서
+
+1. `psql`·복원 도구의 존재를 확인한다. 없으면 설치·권한 확대 없이 중단한다.
+2. 새 임시 디렉터리에 저장소의 공개 CA를 복구한다. 외부 다운로드나 이전 파일 검색은 하지 않는다.
+3. [CA Manifest](../../docker/rds/bundle-manifest.json)의 SHA-256과 비교하고 파일을 읽기 전용으로 만든다. 불일치하면 접속 전에 중단한다. 생성 시에도 Manifest·공개 Root CA의 형식·유효 기간을 확인한다.
+4. `CLOUDSHELL_RDS_CA_VERIFIED` 뒤 `psql -X -W`로 접속한다. `sslmode=verify-full`·명시적인 CA 파일·접속 제한 시간을 유지한다.
+5. `Password:`에서 **App DB 암호**를 본인이 입력한다. `/helpdesk/learning/db/password`와 맞췄던 PostgreSQL 계정의 암호이며, Browser의 USER·AGENT·IAM·마스터 암호가 아니다. 암호 값은 스크립트·명령 인자·클립보드·문서에 넣지 않는다.
+6. `helpdesk=>`에서 필요한 조회 SQL을 실행한다. `\q`로 종료하면 이번 실행이 만든 공개 CA 파일과 빈 임시 디렉터리만 정리한다. 기존 파일·DB Row·다른 환경은 삭제하지 않는다.
+
+생성한 명령은 CA 생성·검증·접속을 한 번에 실행한다. CloudShell의 임시 저장 특성 자체를 바꾸거나 자동 로그인하는 기능은 아니다. **새 세션에서도 로컬 명령 생성 → 붙여 넣기 → Password 입력**으로 재접속한다. CA 갱신은 기존 Manifest·Test 검토 절차를 따르며 실행 중 자동으로 신뢰 대상을 바꾸지 않는다.
+
+### 비밀값과 읽기 전용 범위
+
+- PowerShell 실행기는 경로·임시 디렉터리 관련 값만 Node 자식 Process에 전달하고 프로젝트 Credential은 전달하지 않는다. Node 생성기는 `.env`·Parameter Store·환경 변수의 Secret을 읽거나 Network에 접속하지 않는다.
+- CloudShell 명령은 상속된 `PGPASSWORD`·Service 설정·`PGHOSTADDR`를 사용하지 않고, 저장된 Password 파일 대신 새 임시 디렉터리의 존재하지 않는 경로를 지정한다. Password는 본인이 Prompt에 직접 입력한다.
+- `PSQL_HISTORY=/dev/null`, `-X`, `ON_ERROR_STOP=on`, Pager 비활성과 UTF-8을 사용한다. 기본 Transaction은 읽기 전용이며 Statement 5초·Lock 대기 2초 제한을 둔다.
+- 이는 **이 접속의 기본 실행 설정**이다. App DB 계정 자체를 읽기 전용 Role로 바꾸거나 관리자가 수동으로 설정을 변경하는 것까지 막는 권한 경계는 아니다. 기존 Flyway·App 권한은 변경하지 않는다.
+- 인증서 복구 성공과 TLS·DB 인증 성공은 구분한다. 인증 실패·연결 실패는 자동 재시도하지 않는다. `RDS_CA_HASH_MISMATCH`이면 TLS 검증을 낮추지 말고 저장소의 CA·Manifest와 복사 과정을 점검한다.
+
+### 로컬 검증
+
+```powershell
+node --test src/test/js/cloudshell-rds-connect.test.mjs src/test/js/rds-public-ca-bundle.test.mjs src/test/js/db-bootstrap-policy.test.mjs
+```
+
+생성기 Test는 공개 CA의 무손실 복구·입력 거부·읽기 전용 접속 옵션과 Bash 실행을 확인한다. Bash 실행의 `psql`은 Test Double이므로 실제 RDS 접속 근거가 아니다. 실제 CloudShell에서의 접속·TLS·Password 인증·SQL Row 조회는 따로 확인한다. Test는 실제 클립보드를 변경하거나 AWS·Database·유료 AI를 호출하지 않는다.
+
 ## 2026-10-14 확인 결과
 
 기존 환경에서 공개 CA의 Hash와 TLS 1.3·서버 이름 검증을 확인했고, 관리자/App 계정으로 각각 `verify-full` 인증에 성공했다. 대상 DB의 빈 Schema·App 계정 부재를 확인하고 승인한 계정·권한을 준비했다. App 계정의 관리 권한과 Role 멤버십은 없었으며 DB 접속·Schema 사용/생성은 허용됐다. 임시 Table 생성·Identity INSERT 1건·조회 1건을 같은 Transaction에서 확인한 뒤 Rollback해 Table·Row가 남지 않는 것도 확인했다.

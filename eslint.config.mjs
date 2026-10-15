@@ -9,7 +9,7 @@ const rules = {
 
 export default [
     {
-        files: ["scripts/week7-*.mjs"],
+        files: ["scripts/week7-*.mjs", "scripts/cloudshell-rds-connect.mjs"],
         languageOptions: {
             globals: {
                 AbortSignal: "readonly",
