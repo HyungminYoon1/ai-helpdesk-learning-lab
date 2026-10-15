@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.provider;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -232,7 +234,7 @@ class AiSuggestionInjectionBoundaryIntegrationTest {
     }
 
     private AiSuggestionJobProcessor processor() {
-        return new AiSuggestionJobProcessor(claims, inputs, PRIVACY, adapter,
+        return new AiSuggestionJobProcessor(claims, inputs, completedEmptyScan(PRIVACY), adapter,
                 new AiSuggestionOutputValidator(200), results, Clock.systemUTC());
     }
 

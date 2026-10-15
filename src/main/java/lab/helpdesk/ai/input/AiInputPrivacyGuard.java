@@ -110,6 +110,7 @@ public final class AiInputPrivacyGuard {
     }
 
     public enum SensitiveType {
+        PERSON("[PERSON_REDACTED]"),
         EMAIL("[EMAIL_REDACTED]"),
         PHONE("[PHONE_REDACTED]"),
         INSTAGRAM_HANDLE("[INSTAGRAM_HANDLE_REDACTED]"),

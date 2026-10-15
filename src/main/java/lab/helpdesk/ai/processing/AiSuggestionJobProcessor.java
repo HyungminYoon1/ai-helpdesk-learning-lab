@@ -6,6 +6,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 import lab.helpdesk.ai.input.AiInputPrivacyGuard;
+import lab.helpdesk.ai.input.AiPrivacyScanner.ScanTimeoutException;
+import lab.helpdesk.ai.input.AiPrivacyScanResultValidator.InvalidScanResultException;
+import lab.helpdesk.ai.input.AiScannedInputPreparer;
 import lab.helpdesk.ai.input.AiSuggestionInputRepository;
 import lab.helpdesk.ai.input.StoredAiSuggestionInput;
 import lab.helpdesk.ai.job.AiAttemptResultCode;
@@ -33,14 +36,14 @@ public final class AiSuggestionJobProcessor {
 
     private final AiSuggestionJobClaimService claims;
     private final AiSuggestionInputRepository inputs;
-    private final AiInputPrivacyGuard privacy;
+    private final AiScannedInputPreparer privacy;
     private final AiSuggestionProvider provider;
     private final AiSuggestionOutputValidator validator;
     private final AiSuggestionResultService results;
     private final Clock clock;
 
     public AiSuggestionJobProcessor(AiSuggestionJobClaimService claims,
-            AiSuggestionInputRepository inputs, AiInputPrivacyGuard privacy,
+            AiSuggestionInputRepository inputs, AiScannedInputPreparer privacy,
             AiSuggestionProvider provider, AiSuggestionOutputValidator validator,
             AiSuggestionResultService results, Clock clock) {
         this.claims = Objects.requireNonNull(claims);
@@ -113,12 +116,24 @@ public final class AiSuggestionJobProcessor {
             return result(Outcome.NOT_CURRENT, claim);
         }
 
+        Duration remaining = Duration.between(clock.instant(), claim.processingDeadlineAt());
+        if (remaining.isNegative() || remaining.isZero()) {
+            return fail(claim, AiJobFailureCode.JOB_PROCESSING_DEADLINE_EXCEEDED);
+        }
         AiInputPrivacyGuard.PreparedInput prepared;
         try {
-            prepared = privacy.prepare(stored.orElseThrow().title(), stored.orElseThrow().body());
-        } catch (IllegalArgumentException exception) {
+            prepared = privacy.prepare(stored.orElseThrow().title(), stored.orElseThrow().body(), remaining);
+        } catch (ScanTimeoutException exception) {
+            return failPrivacy(claim, AiJobFailureCode.PRIVACY_SCAN_TIMEOUT);
+        } catch (InvalidScanResultException exception) {
+            return failPrivacy(claim, AiJobFailureCode.PRIVACY_SCAN_INVALID_RESULT);
+        } catch (RuntimeException exception) {
+            // Unexpected adapter/configuration failures are not invented scan
+            // results or timeouts. Never retain the adapter's message or cause.
             return fail(claim, AiJobFailureCode.ADAPTER_CONFIGURATION_ERROR);
         }
+        // Scanning took time. Recalculate the Provider budget and recheck current
+        // ownership below; neither a scan nor a reservation authorizes a late send.
         Duration timeout = Duration.between(clock.instant(), claim.processingDeadlineAt());
         timeout = timeout.compareTo(Duration.ofMillis(claim.policy().requestTimeoutMs())) < 0
                 ? timeout : Duration.ofMillis(claim.policy().requestTimeoutMs());
@@ -223,6 +238,16 @@ public final class AiSuggestionJobProcessor {
 
     private AiSuggestionProcessingResult fail(AiJobClaim claim, AiJobFailureCode code) {
         return result(claims.failIfCurrent(claim, code) ? Outcome.FAILED : Outcome.NOT_CURRENT, claim);
+    }
+
+    private AiSuggestionProcessingResult failPrivacy(AiJobClaim claim, AiJobFailureCode code) {
+        try {
+            return result(claims.failPrivacyScanIfCurrent(claim, code)
+                    ? Outcome.FAILED : Outcome.NOT_CURRENT, claim);
+        } catch (RuntimeException exception) {
+            // A failed failure-record Commit is not a persisted FAILED outcome.
+            throw new IllegalStateException("AI_PRIVACY_FAILURE_RECORD_FAILED");
+        }
     }
 
     private boolean recordAttemptResult(AiJobClaim claim, AiAttemptResultCode code) {

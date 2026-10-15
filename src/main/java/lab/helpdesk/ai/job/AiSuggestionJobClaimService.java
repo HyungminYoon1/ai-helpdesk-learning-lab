@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 @Service
 @Profile("postgres")
@@ -89,6 +90,37 @@ public class AiSuggestionJobClaimService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean failIfCurrent(AiJobClaim claim, AiJobFailureCode failureCode) {
         jobs.expireProcessingDeadlines();
+        if (isPrivacyFailure(failureCode)) {
+            return finishPrivacyFailure(claim, failureCode);
+        }
         return jobs.failIfCurrent(claim, failureCode);
+    }
+
+    /** Persist the terminal scan failure and block recovery in the same short transaction. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public boolean failPrivacyScanIfCurrent(AiJobClaim claim, AiJobFailureCode failureCode) {
+        Objects.requireNonNull(claim);
+        if (!isPrivacyFailure(failureCode)) {
+            throw new IllegalArgumentException("AI_PRIVACY_FAILURE_CODE_INVALID");
+        }
+        jobs.expireProcessingDeadlines();
+        return finishPrivacyFailure(claim, failureCode);
+    }
+
+    private boolean finishPrivacyFailure(AiJobClaim claim, AiJobFailureCode failureCode) {
+        if (!jobs.recordAttemptResultIfCurrent(claim, AiAttemptResultCode.AUTO_RETRY_BLOCKED)) {
+            return false;
+        }
+        if (!jobs.failIfCurrent(claim, failureCode)) {
+            // Do not commit a partial classification if the deadline expired between statements.
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isPrivacyFailure(AiJobFailureCode failureCode) {
+        return failureCode == AiJobFailureCode.PRIVACY_SCAN_TIMEOUT
+                || failureCode == AiJobFailureCode.PRIVACY_SCAN_INVALID_RESULT;
     }
 }

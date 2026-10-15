@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.processing;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -247,6 +249,7 @@ class AiSuggestionWorkerContextIntegrationTest {
                             "helpdesk.ai.worker.poll-delay-ms", "20")));
                     context.getBeanFactory().registerSingleton("controlledAiSuggestionProvider", provider);
                     context.getBeanFactory().registerSingleton("controlledAiPrivacyGuard", privacy());
+                    context.getBeanFactory().registerSingleton("controlledScannedInputPreparer", completedEmptyScan(privacy()));
                     context.getBeanFactory().registerSingleton("controlledAiOutputValidator", new AiSuggestionOutputValidator(200));
                 }).run();
     }
@@ -254,7 +257,7 @@ class AiSuggestionWorkerContextIntegrationTest {
     private AiSuggestionJobWorker manualWorker(ConfigurableApplicationContext context, AiSuggestionProvider provider) {
         var claims = context.getBean(AiSuggestionJobClaimService.class);
         var processor = new AiSuggestionJobProcessor(claims, context.getBean(JdbcAiSuggestionInputRepository.class),
-                privacy(), provider, new AiSuggestionOutputValidator(200), context.getBean(AiSuggestionResultService.class),
+                completedEmptyScan(privacy()), provider, new AiSuggestionOutputValidator(200), context.getBean(AiSuggestionResultService.class),
                 java.time.Clock.systemUTC());
         return new AiSuggestionJobWorker(processor, claims);
     }

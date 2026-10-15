@@ -58,6 +58,34 @@ function viewElements() {
     ].map((name) => [name, element()]));
 }
 
+for (const code of ["PRIVACY_SCAN_TIMEOUT", "PRIVACY_SCAN_INVALID_RESULT"]) {
+    test(`${code}는 HTTP 200의 FAILED로 읽고 기존 제안을 지운다`, async () => {
+        const body = result("FAILED");
+        body.job.failureCode = code;
+        assert.equal(isAiSuggestionQuery(body, 7), true);
+        const elements = viewElements();
+        const view = createAiSuggestionView(elements);
+        view.render({ kind: "succeeded", result: result() });
+        const calls = [];
+        const client = createAiSuggestionClient({
+            fetchImpl: async (url, options) => {
+                calls.push({ url, method: options.method });
+                return jsonResponse(body);
+            },
+            view
+        });
+
+        await client.readSuggestion(7);
+
+        assert.deepEqual(calls, [{ url: "/api/tickets/7/ai-suggestion", method: "GET" }]);
+        assert.equal(elements.jobStatusElement.textContent, "FAILED");
+        assert.equal(elements.failureCodeElement.textContent, code);
+        assert.equal(elements.statusElement.textContent, "AI 처리가 실패했습니다. 접수한 문의는 유지됩니다.");
+        assert.equal(elements.summaryElement.textContent, "");
+        assert.equal(elements.suggestionElement.hidden, true);
+    });
+}
+
 for (const [status, kind] of [
     [null, "no-job"], ["PENDING", "pending"], ["RUNNING", "running"],
     ["FAILED", "failed"], ["ABSTAINED", "abstained"], ["SUCCEEDED", "succeeded"]

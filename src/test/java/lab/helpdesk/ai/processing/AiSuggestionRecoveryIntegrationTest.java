@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.processing;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -449,7 +451,7 @@ class AiSuggestionRecoveryIntegrationTest {
 
     private AiSuggestionJobWorker worker(AiSuggestionProvider provider, AiSuggestionResultService resultService) {
         var privacy = new AiInputPrivacyGuard(List.of(new SensitiveFragment("SYNTHETIC_CONTACT", SensitiveType.EMAIL)));
-        var processor = new AiSuggestionJobProcessor(claims, inputs, privacy, provider,
+        var processor = new AiSuggestionJobProcessor(claims, inputs, completedEmptyScan(privacy), provider,
                 validator, resultService, Clock.systemUTC());
         return new AiSuggestionJobWorker(processor, claims);
     }

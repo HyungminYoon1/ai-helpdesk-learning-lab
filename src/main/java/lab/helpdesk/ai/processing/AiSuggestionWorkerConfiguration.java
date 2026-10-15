@@ -2,7 +2,7 @@ package lab.helpdesk.ai.processing;
 
 import java.time.Clock;
 
-import lab.helpdesk.ai.input.AiInputPrivacyGuard;
+import lab.helpdesk.ai.input.AiScannedInputPreparer;
 import lab.helpdesk.ai.input.AiSuggestionInputRepository;
 import lab.helpdesk.ai.job.AiSuggestionJobClaimService;
 import lab.helpdesk.ai.provider.AiSuggestionProvider;
@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-/** Opt-in only. A Provider, privacy guard, and output limit must be supplied explicitly. */
+/** Opt-in only. A Provider, scanned-input preparer and output limit are mandatory. */
 @Configuration(proxyBeanMethods = false)
 @Profile("postgres")
 @ConditionalOnProperty(prefix = "helpdesk.ai.worker", name = "enabled", havingValue = "true")
@@ -25,7 +25,7 @@ public class AiSuggestionWorkerConfiguration {
 
     @Bean
     AiSuggestionJobProcessor aiSuggestionJobProcessor(AiSuggestionJobClaimService claims,
-            AiSuggestionInputRepository inputs, AiInputPrivacyGuard privacy,
+            AiSuggestionInputRepository inputs, AiScannedInputPreparer privacy,
             AiSuggestionProvider provider, AiSuggestionOutputValidator validator,
             AiSuggestionResultService results) {
         return new AiSuggestionJobProcessor(claims, inputs, privacy, provider, validator, results, Clock.systemUTC());

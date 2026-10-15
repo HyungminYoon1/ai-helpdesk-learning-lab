@@ -1,9 +1,12 @@
 package lab.helpdesk.ai.processing;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.util.List;
 import java.util.Map;
 
 import lab.helpdesk.ai.input.AiInputPrivacyGuard;
+import lab.helpdesk.ai.input.AiScannedInputPreparer;
 import lab.helpdesk.ai.input.AiSuggestionInputRepository;
 import lab.helpdesk.ai.job.AiSuggestionJobClaimService;
 import lab.helpdesk.ai.provider.AiSuggestionProvider;
@@ -50,14 +53,32 @@ class AiSuggestionWorkerConfigurationTest {
                 .withBean(AiSuggestionJobClaimService.class, () -> mock(AiSuggestionJobClaimService.class))
                 .withBean(AiSuggestionInputRepository.class, () -> mock(AiSuggestionInputRepository.class))
                 .withBean(AiSuggestionResultService.class, () -> mock(AiSuggestionResultService.class))
-                .withBean(AiInputPrivacyGuard.class, () -> new AiInputPrivacyGuard(List.of(
-                        new AiInputPrivacyGuard.SensitiveFragment("SYNTHETIC_CONTACT", AiInputPrivacyGuard.SensitiveType.EMAIL))))
+                .withBean(AiScannedInputPreparer.class, () -> completedEmptyScan(new AiInputPrivacyGuard(List.of(
+                        new AiInputPrivacyGuard.SensitiveFragment("SYNTHETIC_CONTACT", AiInputPrivacyGuard.SensitiveType.EMAIL)))))
                 .withBean(AiSuggestionOutputValidator.class, () -> new AiSuggestionOutputValidator(200))
                 .run(context -> {
                     assertThat(context).hasFailed();
                     assertThat(context.getStartupFailure())
                             .hasRootCauseInstanceOf(NoSuchBeanDefinitionException.class)
                             .hasStackTraceContaining(AiSuggestionProvider.class.getName());
+                });
+    }
+
+    @Test
+    void enabled_processing_requires_a_scanned_preparer_even_with_the_old_guard_present() {
+        runner.withPropertyValues("spring.profiles.active=postgres", "helpdesk.ai.worker.enabled=true")
+                .withBean(AiSuggestionJobClaimService.class, () -> mock(AiSuggestionJobClaimService.class))
+                .withBean(AiSuggestionInputRepository.class, () -> mock(AiSuggestionInputRepository.class))
+                .withBean(AiSuggestionResultService.class, () -> mock(AiSuggestionResultService.class))
+                .withBean(AiInputPrivacyGuard.class, () -> new AiInputPrivacyGuard(List.of(
+                        new AiInputPrivacyGuard.SensitiveFragment("SYNTHETIC_CONTACT", AiInputPrivacyGuard.SensitiveType.EMAIL))))
+                .withBean(AiSuggestionProvider.class, () -> mock(AiSuggestionProvider.class))
+                .withBean(AiSuggestionOutputValidator.class, () -> new AiSuggestionOutputValidator(200))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(NoSuchBeanDefinitionException.class)
+                            .hasStackTraceContaining(AiScannedInputPreparer.class.getName());
                 });
     }
 

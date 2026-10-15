@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.provider;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -80,7 +82,7 @@ class SpringAiOpenAiSuggestionProviderLiveExperiment {
         try (var provider = new SpringAiOpenAiSuggestionProvider(key, privacy, 200)) {
             try {
                 receipt = receipts.receive("로그인 링크 만료 이유 문의", BODY, "synthetic-live-author");
-                var processor = new AiSuggestionJobProcessor(claims, inputs, privacy, provider,
+                var processor = new AiSuggestionJobProcessor(claims, inputs, completedEmptyScan(privacy), provider,
                         new AiSuggestionOutputValidator(200), results, Clock.systemUTC());
                 AiSuggestionProcessingResult processed = processor.processNextPending();
                 report.put("outcome", processed.outcome().name());

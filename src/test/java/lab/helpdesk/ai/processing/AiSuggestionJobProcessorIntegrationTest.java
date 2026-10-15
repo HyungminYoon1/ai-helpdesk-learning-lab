@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.processing;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -420,7 +422,8 @@ class AiSuggestionJobProcessorIntegrationTest {
 
     private AiSuggestionJobProcessor processor(AiSuggestionProvider provider) {
         return new AiSuggestionJobProcessor(claims, inputs,
-                new AiInputPrivacyGuard(List.of(new SensitiveFragment(CONTACT_MARKER, SensitiveType.EMAIL))),
+                completedEmptyScan(new AiInputPrivacyGuard(List.of(
+                        new SensitiveFragment(CONTACT_MARKER, SensitiveType.EMAIL)))),
                 provider, new AiSuggestionOutputValidator(200), results, Clock.systemUTC());
     }
 

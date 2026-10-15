@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.processing;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -147,6 +149,9 @@ public final class AiWorkerProcessTestApplication {
                     context.getBeanFactory().registerSingleton("controlledAiSuggestionProvider", provider);
                     context.getBeanFactory().registerSingleton("controlledAiPrivacyGuard",
                             new AiInputPrivacyGuard(List.of(new SensitiveFragment("SYNTHETIC_CONTACT", SensitiveType.EMAIL))));
+                    context.getBeanFactory().registerSingleton("controlledScannedInputPreparer",
+                            completedEmptyScan(new AiInputPrivacyGuard(List.of(
+                                    new SensitiveFragment("SYNTHETIC_CONTACT", SensitiveType.EMAIL)))));
                     context.getBeanFactory().registerSingleton("controlledAiOutputValidator", new AiSuggestionOutputValidator(200));
                 }).run();
     }

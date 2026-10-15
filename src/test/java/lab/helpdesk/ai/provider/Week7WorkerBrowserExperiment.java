@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.provider;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -195,6 +197,7 @@ final class Week7WorkerBrowserExperiment {
                     context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("worker-browser-fixture", properties));
                     context.getBeanFactory().registerSingleton("experimentProvider", provider);
                     context.getBeanFactory().registerSingleton("experimentPrivacy", privacy);
+                    context.getBeanFactory().registerSingleton("experimentScannedInputPreparer", completedEmptyScan(privacy));
                     context.getBeanFactory().registerSingleton("experimentValidator", new AiSuggestionOutputValidator(200));
                 }).run();
     }

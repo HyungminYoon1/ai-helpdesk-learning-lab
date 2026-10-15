@@ -1,5 +1,7 @@
 package lab.helpdesk.ai.processing;
 
+import static lab.helpdesk.ai.input.AiPrivacyScanFixtures.completedEmptyScan;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -339,7 +341,7 @@ class AiSuggestionStorageRetryIntegrationTest {
 
     private AiSuggestionJobProcessor processor(String output, AiSuggestionJobClaimService claimService) {
         var privacy = new AiInputPrivacyGuard(List.of(new SensitiveFragment("SYNTHETIC_CONTACT", SensitiveType.EMAIL)));
-        return new AiSuggestionJobProcessor(claimService, inputs, privacy, (input, timeout, kind) -> {
+        return new AiSuggestionJobProcessor(claimService, inputs, completedEmptyScan(privacy), (input, timeout, kind) -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             providerCalls.incrementAndGet();
             return output;
