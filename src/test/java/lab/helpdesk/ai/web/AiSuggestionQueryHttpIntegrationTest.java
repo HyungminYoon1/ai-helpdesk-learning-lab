@@ -274,8 +274,9 @@ class AiSuggestionQueryHttpIntegrationTest {
     }
 
     @ParameterizedTest
-    @EnumSource(AiJobFailureCode.class)
-    void failed_job_is_a_200_read_with_only_a_known_failure_code(AiJobFailureCode code) throws Exception {
+    @EnumSource(value = AiJobFailureCode.class, mode = EnumSource.Mode.EXCLUDE,
+            names = {"PRIVACY_SCAN_TIMEOUT", "PRIVACY_SCAN_INVALID_RESULT"})
+    void v7_writable_failure_codes_are_read_as_200_without_side_effects(AiJobFailureCode code) throws Exception {
         TicketReceiptResult receipt = receive();
         AiJobClaim claim = claims.claimNextPending().orElseThrow();
         assertThat(claims.failIfCurrent(claim, code)).isTrue();
