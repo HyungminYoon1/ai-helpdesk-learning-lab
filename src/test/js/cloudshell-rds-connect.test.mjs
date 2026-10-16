@@ -183,7 +183,7 @@ test("generated Bash syntax is valid", { skip: !bash }, () => {
     assert.equal(result.stderr, "");
 });
 
-function executeWithFakePsql(command, { prelude = "", psqlExit = "0" } = {}) {
+function executeWithFakePsql(command, { prelude = "", psqlExit = "0", psqlVersion = "17.11" } = {}) {
     const fixture = mkdtempSync(join(tmpdir(), "helpdesk-cloudshell-connect-test-"));
     const bin = join(fixture, "bin");
     const trace = join(fixture, "trace");
@@ -191,6 +191,7 @@ function executeWithFakePsql(command, { prelude = "", psqlExit = "0" } = {}) {
         mkdirSync(bin);
         writeFileSync(join(bin, "psql"), [
             "#!/usr/bin/env bash", "set -euo pipefail",
+            'if [ "${1-}" = --version ]; then printf \'psql (PostgreSQL) %s\\n\' "$HELPDESK_TEST_PSQL_VERSION"; exit 0; fi',
             'if [ "${PGPASSWORD+x}" = x ] || [ "${PGSERVICE+x}" = x ] || [ "${PGSERVICEFILE+x}" = x ] || [ "${PGHOSTADDR+x}" = x ]; then exit 91; fi',
             '[ "$PGCLIENTENCODING" = UTF8 ] && [ "$PSQL_HISTORY" = /dev/null ]',
             "[ \"$PGOPTIONS\" = '-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000' ]",
@@ -222,7 +223,8 @@ function executeWithFakePsql(command, { prelude = "", psqlExit = "0" } = {}) {
             env: environment({
                 PGPASSWORD: "SYNTHETIC_UNUSED", PGSERVICE: "SYNTHETIC_UNUSED",
                 PGSERVICEFILE: "SYNTHETIC_UNUSED", PGHOSTADDR: "SYNTHETIC_UNUSED",
-                HELPDESK_TEST_TRACE_FILE: bashPath(trace), HELPDESK_TEST_PSQL_EXIT_CODE: psqlExit
+                HELPDESK_TEST_TRACE_FILE: bashPath(trace), HELPDESK_TEST_PSQL_EXIT_CODE: psqlExit,
+                HELPDESK_TEST_PSQL_VERSION: psqlVersion
             })
         });
         return { ...result, calls: existsSync(trace) ? readFileSync(trace, "utf8").trim().split("\n") : [] };
@@ -254,6 +256,14 @@ test("runtime CA checksum failure stops before psql", { skip: !bash }, () => {
     const result = executeWithFakePsql(generated.replace(assets.manifest.sha256, "0".repeat(64)));
     assert.notEqual(result.status, 0);
     assert.equal(result.stderr.includes("RDS_CA_HASH_MISMATCH"), true);
+    assert.equal(result.calls.length, 0);
+});
+
+test("an older psql stops before CA creation and Database connection", { skip: !bash }, () => {
+    const result = executeWithFakePsql(generated, { psqlVersion: "16.15" });
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr.includes("PSQL17_REQUIRED"), true);
+    assert.equal(result.stdout.includes("CLOUDSHELL_RDS_CA_VERIFIED"), false);
     assert.equal(result.calls.length, 0);
 });
 

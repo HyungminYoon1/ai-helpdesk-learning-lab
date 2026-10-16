@@ -5,6 +5,7 @@
 /.playwright-cli/
 /local/ai-experiments/
 /local/deployment/
+/local/tools/
 /output/playwright/
 
 # IDE

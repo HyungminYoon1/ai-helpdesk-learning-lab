@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8 진행 — 10/16 로컬 전체 Java 704개·JavaScript 234개·Python 정책 Test 10개·ESLint 통과. Cloud는 기존 검증 Image를 유지하며 새 Source를 배포한 결과와 구분
-> 현재 학습 영역: Week 8 배포 — AI 비활성 ECS·RDS·HTTPS 접수/SQL Row·HTTP 301·Cloud Log/ALB Metric 확인. 10/16 환경 재개 뒤 별도 Snapshot·RDS의 SQL/App 복원, 단일 App 순차 전환·Session 비교·원본 복귀·AGENT 재로그인 조회 완료. 임시 DB·해당 자동 Backup은 별도 최종 승인으로 삭제했고 원본 DB·검증 Snapshot 유지. 원본 RDS·App 과금은 계속된다. 전체 AI·이전 Image Rollback은 미완료. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
+> 상태: Week 6·7 회귀 유지, Week 8 진행 — 10/16 Java 704개·Python 정책 Test 10개 통과. 10/17 B→P Fixture의 실제 PostgreSQL Test 1개 재통과, JavaScript 전체 262개·ESLint 통과. 현재 Cloud는 읽기 준비 P Image이며 main의 최신 Source 전체를 배포한 상태는 아님
+> 현재 학습 영역: Week 8 배포 — AI 비활성 ECS·RDS·HTTPS 접수/SQL Row·HTTP 301·Cloud Log/ALB Metric, 별도 Snapshot/RDS 복원·원본 복귀와 A→P→B→P Image 전환 완료. 같은 원본 RDS의 V8·업무 데이터 Hash·원래 실패 코드와 새 JVM의 재로그인 조회를 확인했다. 임시 DB는 삭제했고 원본 DB·검증 Snapshot 유지. 10/17에는 RDS를 바꾸지 않고 Private CloudShell의 psql만 17.11로 맞춰 TLS·SQL 조회를 확인했다. [Client 준비 안내](./deploy/cloudshell/README.md). 원본 RDS·App·ALB 과금은 계속되며 전체 AI·남은 관측·최종 회귀/WIL은 미완료. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
 > 실행 기준: Java 25
 
 ## 프로젝트 목적

@@ -6,7 +6,7 @@ Private RDS에 처음 접속해 App용 DB 계정을 만드는 관리 통로다. 
 
 전용 CloudShell VPC 환경 한 개를 `helpdesk-private-a`와 임시 Group `helpdesk-learning-db-bootstrap`에 연결한다. Group의 Inbound는 없고 Outbound는 RDS Group의 TCP 5432 한 개다. RDS에는 기존 App Group 규칙을 유지한 채 Bootstrap Group의 TCP 5432만 임시로 추가한다.
 
-Public DB·NAT Gateway·유료 VPC Endpoint·별도 EC2는 만들지 않는다. CloudShell에서 사용하는 `psql`은 AWS가 제공하는 사전 설치 도구다. Private Subnet에 인터넷 경로를 추가해 패키지를 설치하지 않으며, 도구와 공개 CA 준비를 먼저 확인한다. CloudShell 자체 이용료와 RDS·Storage 비용은 구분한다. [CloudShell의 VPC 환경](https://docs.aws.amazon.com/cloudshell/latest/userguide/using-cshell-in-vpc.html), [사전 설치 도구](https://docs.aws.amazon.com/cloudshell/latest/userguide/vm-specs.html)
+Public DB·NAT Gateway·유료 VPC Endpoint·별도 EC2는 만들지 않는다. CloudShell의 사전 설치 `psql`과 RDS의 Major가 다르면 [공식 psql 17의 오프라인 준비](../cloudshell/README.md)를 먼저 진행한다. 기본 도구는 보존하고 별도 임시 경로의 Client만 선택한다. Private Subnet에 인터넷 경로를 추가해 패키지를 설치하지 않으며, 도구와 공개 CA 준비를 먼저 확인한다. CloudShell 자체 이용료와 RDS·Storage 비용은 구분한다. [CloudShell의 VPC 환경](https://docs.aws.amazon.com/cloudshell/latest/userguide/using-cshell-in-vpc.html), [사전 설치 도구](https://docs.aws.amazon.com/cloudshell/latest/userguide/vm-specs.html)
 
 ## 임시 권한의 두 단계
 
@@ -29,7 +29,7 @@ TLS에는 RDS Endpoint와 공개 CA를 사용해 `verify-full`을 유지한다. 
 
 ### 접속과 계정 준비 순서
 
-1. 기존 환경의 `psql --version`을 확인한다. Private 환경에 인터넷 경로를 열어 도구를 설치하지 않는다.
+1. 기존 환경의 `psql --version`을 확인한다. 현재 접속 생성기는 17.x를 요구한다. 다르면 [분리된 psql 17 준비](../cloudshell/README.md)를 진행하며, Private 환경에 인터넷 경로를 열거나 RDS Engine을 변경하지 않는다.
 2. 저장소에서 확인한 서울 공개 CA를 임시 디렉터리에 전달하고 Manifest의 SHA-256과 대조한다. 이 PEM은 공개 인증서이며 Password·Private Key가 아니다. 파일 전송 URL 권한이나 AWS Credential 전달을 허용하지 않고, 공개 인증서만 터미널에 붙여 넣는다.
 3. 인증서 사슬·RDS Endpoint의 이름을 검증하는 TLS Handshake와 DB Password 인증을 따로 확인한다. 다음의 자리표시자는 실제 Endpoint와 공개 CA 경로로만 바꾼다.
 
@@ -82,14 +82,14 @@ Database는 `helpdesk`, Username은 `helpdesk_app`이 기본값이다. 다른 �
 
 ### CloudShell에서 실행되는 순서
 
-1. `psql`·복원 도구의 존재를 확인한다. 없으면 설치·권한 확대 없이 중단한다.
+1. `psql` 17.x·CA 복원 도구의 존재를 확인한다. Major가 다르면 `PSQL17_REQUIRED`로 중단하므로 [Client 준비](../cloudshell/README.md)부터 진행한다. Network·권한을 확대하지 않는다.
 2. 새 임시 디렉터리에 저장소의 공개 CA를 복구한다. 외부 다운로드나 이전 파일 검색은 하지 않는다.
 3. [CA Manifest](../../docker/rds/bundle-manifest.json)의 SHA-256과 비교하고 파일을 읽기 전용으로 만든다. 불일치하면 접속 전에 중단한다. 생성 시에도 Manifest·공개 Root CA의 형식·유효 기간을 확인한다.
 4. `CLOUDSHELL_RDS_CA_VERIFIED` 뒤 `psql -X -W`로 접속한다. `sslmode=verify-full`·명시적인 CA 파일·접속 제한 시간을 유지한다.
 5. `Password:`에서 **App DB 암호**를 본인이 입력한다. `/helpdesk/learning/db/password`와 맞췄던 PostgreSQL 계정의 암호이며, Browser의 USER·AGENT·IAM·마스터 암호가 아니다. 암호 값은 스크립트·명령 인자·클립보드·문서에 넣지 않는다.
 6. `helpdesk=>`에서 필요한 조회 SQL을 실행한다. `\q`로 종료하면 이번 실행이 만든 공개 CA 파일과 빈 임시 디렉터리만 정리한다. 기존 파일·DB Row·다른 환경은 삭제하지 않는다.
 
-생성한 명령은 CA 생성·검증·접속을 한 번에 실행한다. CloudShell의 임시 저장 특성 자체를 바꾸거나 자동 로그인하는 기능은 아니다. **새 세션에서도 로컬 명령 생성 → 붙여 넣기 → Password 입력**으로 재접속한다. CA 갱신은 기존 Manifest·Test 검토 절차를 따르며 실행 중 자동으로 신뢰 대상을 바꾸지 않는다.
+생성한 명령은 CA 생성·검증·접속을 한 번에 실행한다. CloudShell의 임시 저장 특성 자체를 바꾸거나 자동 로그인하는 기능은 아니다. **새 세션에서는 psql 17 준비 → 로컬 접속 명령 생성 → 붙여 넣기 → Password 입력**으로 재접속한다. CA 갱신은 기존 Manifest·Test 검토 절차를 따르며 실행 중 자동으로 신뢰 대상을 바꾸지 않는다.
 
 ### 비밀값과 읽기 전용 범위
 

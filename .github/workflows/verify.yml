@@ -49,7 +49,7 @@ jobs:
       - name: Test JavaScript without live provider calls
         run: node --test src/test/js/*.test.mjs
       - name: Lint JavaScript
-        run: npx --yes --package eslint@10.11.0 eslint scripts/week7-*.mjs src/main/resources/static/*.mjs src/test/js/*.mjs
+        run: npx --yes --package eslint@10.11.0 eslint scripts/week7-*.mjs scripts/cloudshell-*.mjs src/main/resources/static/*.mjs src/test/js/*.mjs
       - name: Build the image only after verification succeeds
         id: build
         shell: bash

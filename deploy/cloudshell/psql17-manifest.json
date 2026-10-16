@@ -1,0 +1,10 @@
+{
+  "kind": "OFFICIAL_AL2023_PSQL_CLIENT_ONLY",
+  "version": "17.11",
+  "platform": "linux/amd64",
+  "release": "2023.12.20260930",
+  "baseImage": "public.ecr.aws/amazonlinux/amazonlinux:2023@sha256:18c71e6a20f8b0834b002b6002156a84eea76162d5adea72d2ea8b86800eaf91",
+  "source": "https://docs.aws.amazon.com/linux/al2023/release-notes/new-AL2-AL2023.12.html",
+  "archiveBytes": 458696,
+  "sha256": "16827170ff4ddc53a47e555b8993b912734109d2bc851cf72293260e863b24d4"
+}
