@@ -1,6 +1,6 @@
 # ECS 실행 명세와 첫 Cloud 기동
 
-> 상태: 같은 검증 Image·명세에서 Private RDS·Migration 7개·HTTPS 접수/SQL Row·Cookie/CSRF·HTTP 301·Cloud Log/ALB Metric을 확인했다. 10/16 Target 0개·App 실행 0개·RDS 일시중지를 확인했다. 새 Task·기존 문의/재로그인·전체 AI·복구 검증은 미완료다. 공개 Template·AI 기본 비활성은 유지한다.
+> 상태: 같은 검증 Image·명세에서 Private RDS·Migration 7개·HTTPS 접수/SQL Row·Cookie/CSRF·HTTP 301·Cloud Log/ALB Metric을 확인했다. 10/16 환경 재개 뒤 별도 Snapshot·RDS의 SQL/App 복원, 단일 App 전환·Session 비교·원본 복귀·재로그인 조회 완료. 임시 DB·해당 자동 Backup은 별도 최종 승인으로 삭제했고 원본 DB·검증 Snapshot 유지. 전체 AI·이전 Image Rollback은 미완료다. 공개 Template·AI 기본 비활성은 유지한다.
 
 [task-definition.template.json](./task-definition.template.json)은 첫 Cloud 연결에서 사용할 Helpdesk 실행 명세다. PostgreSQL과 배포용 USER·AGENT를 연결하되 Provider·Worker는 명시적으로 끈다. 먼저 서버·DB·로그인·HTTPS를 확인한 뒤 전체 AI 조립과 실행을 별도로 이어간다.
 
@@ -84,6 +84,12 @@ ALB는 Public Subnet 두 개·전용 ALB Group·HTTPS 443 Listener·기본 ACM �
 최종 확인에서 ECS의 실행/보류 Task 0개·활성/드레이닝 Service 0개, RDS ‘일시적으로 중지됨’·연결 0개를 확인했다. ALB는 일시정지 기능이 없어 삭제하지 않았다. ALB·공인 IPv4와 RDS 저장/백업·Image·Log의 비용은 별도로 남는다. RDS 확인창은 10/23 00:57 KST 자동 재시작을 안내했다. 자동 중지·삭제 작업은 만들지 않았다. 상세는 WIL의 `week8/lab-reports/2026-10-16-learning-resource-pause.md`에 기록한다.
 
 재개는 RDS 시작/사용 가능 확인 → 같은 검증 Image·명세의 새 Task → 새 Private IP:8080 Target 등록/Healthy → HTTPS·재로그인·기존 문의 조회 순서다. 중지된 Fargate Task를 재시작하는 것은 아니다. 현재 비용 중지를 교체 후 문의 보존·Session 비교나 이전 Image Rollback 완료로 기록하지 않는다.
+
+10/16 학습 재개에서는 위 순서로 RDS를 시작하고 같은 `helpdesk-learning:1`·검증 Digest의 단독 Task 한 개와 새 Target을 연결했다. Spring 시작 Log·Target Healthy와 익명 Health 200/UP·로그인 200·보호 API 401을 확인했다. 작성자의 AGENT 재로그인 후 기존 Ticket 1·2는 OPEN, 각 Job은 PENDING으로 조회됐다. RDS·App의 실행 과금은 재개됐으며 DB·Schema·DNS·Secret·IAM·AI 비활성은 유지했다. 상세는 WIL의 `week8/lab-reports/2026-10-16-cloud-resource-resume.md`에 기록한다.
+
+중지 전 인증 Session과의 직접 전후 비교·재개 후 SQL Row 전체 대조·이전 Image Rollback·Snapshot 복원을 완료한 결과는 아니다. `DescribeGlobalClusters` 부가 조회 거부는 일반 PostgreSQL 기동 실패와 구분하고 권한을 추가하지 않았다.
+
+이후 [별도 복원 실험](../iam/db-recovery.md)에서 원본과 복원 DB의 일곱 Table 건수·내용 Hash 및 App 조회를 대조했다. 같은 Image의 명세 :2는 JDBC Host만 바꿨고, 두 App을 동시에 실행하지 않은 순차 전환으로 Session 거부·재로그인·원본 복귀를 확인했다. 중지한 임시 DB는 최종 승인 후 삭제했으며 현재 :1의 원본 App·원본 RDS·검증 Snapshot을 유지한다. :2는 삭제한 Endpoint를 참조하는 기록이므로 현재 실행 대상으로 재사용하지 않는다. 이 명세 전환은 Image Rollback과 다르다.
 
 ## 등록 전에 채울 값과 확인할 조건
 

@@ -1,6 +1,6 @@
 # 학습용 배포 사용자 권한
 
-> 상태: Runtime Version 4·조회 보조 정책 Version 2와 기존 생성 조건 유지. Edge 기본 Version 6에 지정 Target Group 한 개의 등록 해제만 추가했다. 기존 Version 1은 JSON 보관·대조 뒤 승인받아 삭제했고 Version 2~5와 기존 16개 문장은 보존했다. Metric 그래프·Private TLS·Migration 7개·HTTPS 접수와 DB Row는 확인했다. Task 교체·재로그인 검증은 진행 중이며 전체 AI·이전 Image 복귀·DB 복원은 별도 진행한다.
+> 상태: Runtime Version 4·조회 보조 정책 Version 2와 기존 생성 조건 유지. Edge 기본 Version 6에 지정 Target Group 한 개의 등록 해제만 추가했다. 기존 Version 1은 JSON 보관·대조 뒤 승인받아 삭제했고 Version 2~5와 기존 16개 문장은 보존했다. 복원 전용 정책 V2와 지정 Snapshot·임시 RDS의 SQL/App 복원 검증 및 원본 복귀를 확인했다. 최종 승인 후 임시 DB만 삭제했고 원본 DB·검증 Snapshot은 유지한다. 전체 AI·이전 Image 복귀는 별도 단계다.
 
 `helpdesk-deployer`는 사람이 Console에서 배포할 때 사용하는 IAM 사용자다. ECS Agent의 `helpdesk-ecs-execution`, GitHub Image 업로드의 `helpdesk-github-ecr-push`, Helpdesk의 USER·AGENT 로그인 계정과 구분한다. 기존 Role의 정책은 바꾸지 않는다.
 
@@ -15,9 +15,15 @@
 | `helpdesk-deployer-edge` | [Edge](./deployer-edge-policy.template.json) | 학습 ALB·Target Group·Listener·ACM, 학습 VPC 한 개의 보안 그룹 조회, 지정 ECR·Log와 MFA·서울 조건의 Metric 조회 |
 | `helpdesk-deployer-rds-console-read` | [RDS Console 조회](./deployer-rds-console-read-policy.template.json) | MFA·서울 조건의 세 메타데이터 조회와 지정 DB 한 개의 태그 조회 |
 
-IAM 사용자 인라인 정책 대신 Network·실행·접속 설정을 세 Customer-managed Policy로 나눈다. [Private DB 관리 통로](./db-bootstrap.md)와 RDS Console 조회는 각각 보조 정책으로 분리한다. Managed Policy 하나의 공백 제외 6,144자 한도와 권한의 경계를 함께 유지하며, 서비스 전체 관리형 정책은 연결하지 않는다. 현재 지정 사용자에는 이 다섯 정책이 직접 연결되어 있다.
+IAM 사용자 인라인 정책 대신 Network·실행·접속 설정을 세 Customer-managed Policy로 나눈다. [Private DB 관리 통로](./db-bootstrap.md)와 RDS Console 조회는 각각 보조 정책으로 분리한다. Managed Policy 하나의 공백 제외 6,144자 한도와 권한의 경계를 함께 유지하며, 서비스 전체 관리형 정책은 연결하지 않는다. 현재 지정 사용자에는 이 다섯 정책과 아래 복원 전용 정책까지 총 여섯 개가 직접 연결되어 있다.
 
 공개 Template의 Account ID는 자리표시자다. Edge의 `<LEARNING_VPC_ID>`와 `<LEARNING_TARGET_GROUP_ID>`는 각각 확인한 학습 VPC 한 개의 ID와 지정 Target Group ARN 끝의 ID로 채운다. 이름이 같다는 이유로 다른 Group의 ID나 와일드카드를 넣지 않는다. 실제 계정의 적용본은 Git 제외 경로에서만 관리하며 Password·MFA Seed·Token·환경 변수 값은 포함하지 않는다. 이 JSON은 AWS 리소스를 생성하거나 정책을 자동 연결하는 스크립트가 아니다.
+
+### Snapshot 복원용 추가 정책
+
+[복원 전용 Policy Template](./deployer-db-recovery-policy.template.json)과 [검증·비용·정리 안내](./db-recovery.md)를 별도로 준비하고, 2026-10-16 승인 후 `helpdesk-deployer-db-recovery` Version 1을 지정 사용자 한 명에게 연결했다. 기존 다섯 Policy·Role은 변경하지 않았다. 지정 원본에서 Snapshot 한 개·별도 Private DB 한 개를 준비하고 복원 데이터와 App 조회를 비교한다. 모든 허용은 MFA·서울 조건을 요구하며, 원본 DB·Snapshot 삭제·공개 공유·Secret 조회·Global Cluster 조회를 추가하지 않는다. 정리 권한은 지정 복원 DB 한 개로 제한하고 실제 삭제는 보존 검증과 별도 최종 승인을 요구한다.
+
+정책 구조 Test 38개·JavaScript 전체 243개가 먼저 통과했고, 읽기 전용 대조 SQL의 Source 보호 3개를 더한 Focused Test 41개와 JavaScript 전체 246개·ESLint 10.11.0도 통과했다. 최초 복원 거부 뒤 별도 승인으로 세 Condition만 조정한 V2를 적용했고 V1은 보존했다. 지정 Snapshot·Private 복원 DB의 일곱 Table 건수/Hash, 같은 Image의 순차 App 전환·Session 소실/재로그인·원본 복귀를 확인했다. 최종 승인 후 지정 임시 DB·해당 자동 Backup만 삭제했으며 원본·수동 Snapshot은 유지한다. 정확한 원인 판정 범위와 실행 기록은 복원 안내에 남긴다. 이번 문서 게시에서는 IAM·DB·App을 변경하지 않는다.
 
 ## 허용 범위
 

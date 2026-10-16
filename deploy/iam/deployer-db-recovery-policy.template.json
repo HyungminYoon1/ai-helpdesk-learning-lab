@@ -1,0 +1,236 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadSnapshotList",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBSnapshots"
+      ],
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:*",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ReadRecoveryTags",
+      "Effect": "Allow",
+      "Action": [
+        "rds:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ReadSnapshotSharing",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBSnapshotAttributes"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "SnapshotOnlySource",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBSnapshot"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning",
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "CreateOnlyRecoverySnapshot",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBSnapshot"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "RestoreOnlyVerificationDb",
+      "Effect": "Allow",
+      "Action": [
+        "rds:RestoreDBInstanceFromDBSnapshot"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:RequestTag/Project": "helpdesk-learning",
+          "rds:DatabaseClass": "db.t4g.micro"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true",
+          "rds:PubliclyAccessible": "false",
+          "rds:MultiAz": "false"
+        },
+        "NumericEquals": {
+          "rds:StorageSize": "20"
+        },
+        "BoolIfExists": {
+          "rds:ManageMasterUserPassword": "false"
+        }
+      }
+    },
+    {
+      "Sid": "RestoreOnlyRecoverySnapshot",
+      "Effect": "Allow",
+      "Action": [
+        "rds:RestoreDBInstanceFromDBSnapshot"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning",
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "RestoreWithLearningSubnet",
+      "Effect": "Allow",
+      "Action": [
+        "rds:RestoreDBInstanceFromDBSnapshot"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:subgrp:helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "rds:subgrp-tag/Project": "helpdesk-learning",
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "RestoreWithDefaultGroups",
+      "Effect": "Allow",
+      "Action": [
+        "rds:RestoreDBInstanceFromDBSnapshot"
+      ],
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:pg:default.postgres17",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:og:default:postgres-17"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "TagOnlyRecoveryObjects",
+      "Effect": "Allow",
+      "Action": [
+        "rds:AddTagsToResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:RequestTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Project"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "StopOnlyVerificationDb",
+      "Effect": "Allow",
+      "Action": [
+        "rds:StopDBInstance"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DeleteOnlyVerificationDb",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DeleteDBInstance"
+      ],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    }
+  ]
+}
