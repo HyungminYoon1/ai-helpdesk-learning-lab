@@ -559,6 +559,8 @@ pwsh -NoProfile -File .\scripts\Verify-Week8ProcessLifecycle.ps1
 
 업로드에는 기존 `main` 전용 IAM Role과 서울의 `ai-helpdesk-learning-lab` ECR Repository를 사용한다. GitHub Repository Variables `AWS_PUBLISH_ROLE_ARN`·`AWS_REGION`·`AWS_ECR_REPOSITORY`가 필요하다. 실제 계정 번호와 ARN은 공개 문서에 기록하지 않는다. ECR은 Immutable Tag를 사용하므로 Tag에 Commit·Run ID·Run Attempt를 함께 넣는다. Upload 실행은 일반 검증과 Concurrency Group을 분리하고, 실행 중인 Upload를 후속 Push로 자동 취소하지 않는다. ECR 업로드만으로 ECS Task가 실행되거나 기존 Task가 갱신되지는 않는다.
 
+읽기 준비 P는 [별도 수동 Workflow와 고정 Source Manifest](./deploy/rollback/README.md)로 검증한다. Workflow와 OIDC는 main 문맥을 유지하지만 Checkout·전체 Test·Image Label은 지정한 P Commit을 사용한다. 기존 main Workflow·IAM을 바꾸거나 main의 후속 코드를 P라고 업로드하지 않는다. 이 경로도 CI에서 검증한 동일 Image를 기존 ECR에 전달할 뿐 App·RDS·ALB는 실행하지 않는다.
+
 2026-10-09 실제 Actions에서 정상 실행과 실패·복구를 비교했다. 아래 실행은 ECR 업로드를 추가하기 전의 검증 근거다.
 
 | 실행 | Java Test | JavaScript Test | ESLint | Image Build |

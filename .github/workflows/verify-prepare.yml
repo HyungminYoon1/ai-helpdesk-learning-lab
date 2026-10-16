@@ -1,0 +1,187 @@
+name: Verify and publish approved prepare image
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_image:
+        description: Publish only the pinned prepare commit after its CI succeeds
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      source_commit: ${{ steps.source.outputs.source_commit }}
+      base_commit: ${{ steps.source.outputs.base_commit }}
+      image_id: ${{ steps.build.outputs.image_id }}
+    env:
+      HELPDESK_AI_PROVIDER_ENABLED: "false"
+      HELPDESK_AI_WORKER_ENABLED: "false"
+    steps:
+      - name: Check out the trusted main workflow and release guard
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Java 25
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Set up Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Validate the pinned commit, ancestry, production hashes and allowed changes
+        id: source
+        run: node scripts/verify-prepare-release.mjs
+      - name: Check out that exact P source without retaining a credential
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ steps.source.outputs.source_commit }}
+          path: prepare-source
+          persist-credentials: false
+      - name: Verify all P Java tests with actual PostgreSQL Testcontainers
+        working-directory: prepare-source
+        run: sh ./mvnw -B -ntp verify
+      - name: Test and lint P JavaScript without live AI calls
+        working-directory: prepare-source
+        run: |
+          node --test src/test/js/*.test.mjs
+          npx --yes --package eslint@10.11.0 eslint scripts/week7-*.mjs src/main/resources/static/*.mjs src/test/js/*.mjs
+      - name: Build the exact verified P source and inspect its packaged migrations
+        id: build
+        working-directory: prepare-source
+        env:
+          PREPARE_COMMIT: ${{ steps.source.outputs.source_commit }}
+        shell: bash
+        run: |
+          [[ "$(git rev-parse HEAD)" == "$PREPARE_COMMIT" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          local_image="helpdesk-prepare-ci:$PREPARE_COMMIT"
+          docker build --platform linux/amd64 --provenance=false \
+            --label "org.opencontainers.image.revision=$PREPARE_COMMIT" \
+            --label "lab.helpdesk.version-role=rollback-prepare" --tag "$local_image" .
+          image_id=$(docker image inspect --format '{{.Id}}' "$local_image")
+          echo "image_id=$image_id" >> "$GITHUB_OUTPUT"
+          artifact_container=$(docker create --network none "$local_image")
+          trap 'docker rm "$artifact_container" >/dev/null' EXIT
+          docker cp "$artifact_container:/app/helpdesk.jar" "$RUNNER_TEMP/prepare.jar"
+          jar tf "$RUNNER_TEMP/prepare.jar" > "$RUNNER_TEMP/prepare-entries.txt"
+          [[ "$(grep -Ec '^BOOT-INF/classes/db/migration/V[1-7]__.*\.sql$' "$RUNNER_TEMP/prepare-entries.txt")" == 7 ]]
+          ! grep -Eq 'V8__|rollback-compatibility|rollback-init' "$RUNNER_TEMP/prepare-entries.txt"
+          docker image save --output "$RUNNER_TEMP/prepare-image.tar" "$local_image"
+      - name: Transfer this run's verified P image
+        if: inputs.publish_image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-prepare-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/prepare-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    name: Publish that verified P image from trusted main
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.AWS_ECR_REPOSITORY }}
+      PREPARE_COMMIT: ${{ needs.verify.outputs.source_commit }}
+      PREPARE_BASE: ${{ needs.verify.outputs.base_commit }}
+      VERIFIED_IMAGE_ID: ${{ needs.verify.outputs.image_id }}
+    steps:
+      - name: Validate the unchanged publishing destination
+        shell: bash
+        env:
+          PUBLISH_ROLE_ARN: ${{ vars.AWS_PUBLISH_ROLE_ARN }}
+        run: |
+          [[ "$AWS_REGION" == "ap-northeast-2" && "$ECR_REPOSITORY" == "ai-helpdesk-learning-lab" ]]
+          [[ "$PUBLISH_ROLE_ARN" =~ ^arn:aws:iam::([0-9]{12}):role/helpdesk-github-ecr-push$ ]]
+          expected_account_id="${BASH_REMATCH[1]}"
+          echo "::add-mask::$expected_account_id"
+          echo "EXPECTED_ACCOUNT_ID=$expected_account_id" >> "$GITHUB_ENV"
+          [[ "$PREPARE_COMMIT" =~ ^[a-f0-9]{40}$ && "$PREPARE_BASE" =~ ^[a-f0-9]{40}$ ]]
+      - name: Download only this run's verified artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-prepare-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verified-prepare
+      - name: Check image identity and origin before requesting AWS credentials
+        shell: bash
+        run: |
+          docker image load --input "$RUNNER_TEMP/verified-prepare/prepare-image.tar"
+          local_image="helpdesk-prepare-ci:$PREPARE_COMMIT"
+          [[ "$(docker image inspect --format '{{.Id}}' "$local_image")" == "$VERIFIED_IMAGE_ID" ]]
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$local_image")" == "linux/amd64" ]]
+          [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$local_image")" == "$PREPARE_COMMIT" ]]
+          [[ "$(docker image inspect --format '{{index .Config.Labels "lab.helpdesk.version-role"}}' "$local_image")" == "rollback-prepare" ]]
+      - name: Use the existing main-only OIDC role without changing IAM
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ env.EXPECTED_ACCOUNT_ID }}
+          role-session-name: helpdesk-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+          unset-current-credentials: true
+          output-credentials: false
+          translate-env-variables: false
+          retry-max-attempts: 2
+          action-timeout-s: 120
+      - name: Push without rebuilding or deleting existing images and confirm the digest
+        shell: bash
+        run: |
+          registry="$EXPECTED_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          image_tag="prepare-git-$PREPARE_COMMIT-run-$GITHUB_RUN_ID-attempt-$GITHUB_RUN_ATTEMPT"
+          image_ref="$registry/$ECR_REPOSITORY:$image_tag"
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$registry"
+          docker image tag "helpdesk-prepare-ci:$PREPARE_COMMIT" "$image_ref"
+          docker image push "$image_ref" | tee "$RUNNER_TEMP/prepare-push.txt"
+          push_digest=$(sed -nE 's/.*digest: (sha256:[a-f0-9]{64}).*/\1/p' "$RUNNER_TEMP/prepare-push.txt" | tail -n 1)
+          [[ "$push_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          registry_digest=$(aws ecr batch-get-image --region "$AWS_REGION" --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$image_tag" --query 'images[0].imageId.imageDigest' --output text)
+          [[ "$registry_digest" == "$push_digest" ]]
+          jq -n --arg source "$PREPARE_COMMIT" --arg base "$PREPARE_BASE" --arg workflow "$GITHUB_SHA" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg repository "$ECR_REPOSITORY" \
+            --arg tag "$image_tag" --arg digest "$registry_digest" --arg image "$VERIFIED_IMAGE_ID" \
+            '{evidence:"ECR_PREPARE_IMAGE_PUBLISHED",sourceCommit:$source,baseCommit:$base,workflowCommit:$workflow,
+              workflowRunId:$run,runAttempt:$attempt,repository:$repository,tag:$tag,digest:$digest,
+              localImageId:$image,platform:"linux/amd64",imageRole:"rollback-prepare",verifiedImageReused:true,
+              productionMigrationMax:7,cloudRuntimeVerified:false}' > "$RUNNER_TEMP/prepare-evidence.json"
+          cat "$RUNNER_TEMP/prepare-evidence.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain nonsecret P publication evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: prepare-ecr-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/prepare-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove the temporary registry login
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${EXPECTED_ACCOUNT_ID:-}" && -n "$AWS_REGION" ]]; then
+            docker logout "$EXPECTED_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          fi

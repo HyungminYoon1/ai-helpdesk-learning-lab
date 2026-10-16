@@ -1,0 +1,12 @@
+{
+  "repository": "HyungminYoon1/ai-helpdesk-learning-lab",
+  "branch": "codex/week8-rollback-prepare",
+  "sourceCommit": "77359c9779a0a9cb7f505fe4b82b7f97c5ea02be",
+  "baseCommit": "2e2cc403f73972d5c0f87ab81342b776e7777f6b",
+  "imageRole": "rollback-prepare",
+  "productionSha256": {
+    "src/main/java/lab/helpdesk/ai/job/AiJobFailureCode.java": "30ee96a0d1d9640542e6f730e269f4b3171cfb5fa1287216ac17c8bbce7b58d9",
+    "src/main/resources/static/ai-suggestion-ui.mjs": "c422b100e9d7a26e06c15a4f696c3b041098d666f74d1313e76d729bbb1c8920"
+  },
+  "v8FixtureSha256": "69a192342ea0bc806e32d0dfcbc104a05f0927551b7423d5b3fa64dff24089f1"
+}
