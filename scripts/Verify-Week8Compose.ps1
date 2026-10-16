@@ -7,6 +7,7 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$ImageTag = 'helpdesk:week8-build-baseline',
     [switch]$DeploymentResourceProbe,
+    [switch]$RollbackPrepareCompatibility,
     [ValidateSet(512, 1024)]
     [int]$MemoryMiB = 512,
     [ValidateSet(0.25, 0.5)]
@@ -298,6 +299,11 @@ function Invoke-ResourceProbe {
     }
 }
 
+if ($RollbackPrepareCompatibility) {
+    # Optional local-only compatibility fixtures; never packaged into the Image.
+    . (Join-Path $PSScriptRoot 'rollback/Verify-PrepareCompatibility.ps1')
+}
+
 try {
     foreach ($name in $environmentNames) {
         $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -317,6 +323,10 @@ try {
         $report.evidence = 'LOCAL_DEPLOYMENT_IMAGE_RESOURCE_PROBE'
         $report.activeProfiles = @('postgres', 'deployment')
         $report.aiProviderEnabled = $false
+    }
+    if ($RollbackPrepareCompatibility) {
+        Assert-Check ($DeploymentResourceProbe -and -not ($RecreateDatabase -or $RestartApplication -or $RecreateApplicationWithSettings)) 'PREPARE_REQUIRES_ISOLATED_DEPLOYMENT_PROBE'
+        $report.evidence = 'LOCAL_PREPARE_IMAGE_V7_V8_HTTP_POSTGRES'
     }
     $report.imageId = Invoke-DockerSafe -DockerArgs @('image', 'inspect', '--format', '{{.Id}}', $ImageTag)
     $null = Invoke-ComposeSafe -ComposeArgs @('config', '--quiet')
@@ -520,6 +530,12 @@ try {
         $report.oldSessionQueryAfterSettingsChangeStatus = $oldSessionQuery.Status
         $report.agentQueryAfterSettingsChangeStatus = $queryAfterSettings.Status
     }
+    if ($RollbackPrepareCompatibility) {
+        $phase = 'PREPARE_IMAGE_V7_V8_COMPATIBILITY'
+        $report.rollbackCompatibility = Invoke-PrepareCompatibility -Anonymous $anonymous -User $user -Agent $agent -PendingTicketId $ticket.id
+        $report.applicationRestarted = $report.rollbackCompatibility.actualContainerAndJvmRecreated
+        $report.applicationContainerRecreated = $report.rollbackCompatibility.actualContainerAndJvmRecreated
+    }
     $phase = 'LOG_SECRET_CHECK'
     $logs = Invoke-ComposeSafe -ComposeArgs @('logs', '--no-color', '--no-log-prefix')
     foreach ($name in @('HELPDESK_DB_ADMIN_PASSWORD', 'HELPDESK_DB_APP_PASSWORD', 'HELPDESK_LOCAL_USER_PASSWORD', 'HELPDESK_LOCAL_AGENT_PASSWORD')) {
@@ -536,6 +552,9 @@ catch {
     $report.outcome = 'FAIL'
     $report.failedPhase = $phase
     $report.failureCode = 'VERIFICATION_FAILED'
+    if ($_.Exception.Message -cmatch '^[A-Z][A-Z0-9_]{3,90}$') {
+        $report.checkCode = $_.Exception.Message
+    }
 }
 finally {
     foreach ($client in $clients) { $client.Dispose() }

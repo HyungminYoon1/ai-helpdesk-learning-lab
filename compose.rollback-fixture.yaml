@@ -1,0 +1,8 @@
+# Test-only migration step. Remove this override before validating normal P startup.
+# V8 stays outside the P Image and runs using the ordinary App database account.
+services:
+  app:
+    environment:
+      SPRING_FLYWAY_LOCATIONS: classpath:db/migration,filesystem:/rollback-test-migrations
+    volumes:
+      - ./src/test/resources/rollback-compatibility:/rollback-test-migrations:ro
