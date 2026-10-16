@@ -33,6 +33,22 @@ gh workflow run verify-prepare.yml --ref main -f publish_image=true
 
 Image 업로드는 App 실행이 아니다. 이 Workflow는 ECS·RDS·ALB·DNS·Secret·IAM을 변경하지 않는다. 기존 A·후속 B Image를 유지하고, 실제 A→P→B·B→P 전환은 현재 DB 호환성·실행 명세·승인 범위를 확인한 뒤 진행한다. ECR의 P가 있다는 사실만으로 Cloud에서 P가 동작하거나 Rollback이 완료됐다고 기록하지 않는다.
 
+## B 이후 P의 Cloud 읽기 호환성 확인
+
+기존 main의 고정 Commit을 B로 검증·전달하고, 실제 P 명세에서 Image만 바꿔 B를 실행한다. 원본 RDS의 V8은 B의 Flyway로 적용한다. AI Provider·Worker는 계속 비활성이며 실제 개인정보 탐지기나 외부 AI의 동작 검증과 구분한다.
+
+[합성 SQL](./cloud-compatibility-fixture.sql)은 명시적으로 승인한 `helpdesk` 학습 DB의 V8에서만 사용한다. 새 두 실패 값을 가진 Ticket·Message·Job·Attempt를 각각 두 건 추가하며 기존 업무 Row를 수정하지 않는다. 제목·본문·작성자·정책 버전에 합성 SQL 자료임을 표시하고 Suggestion은 만들지 않는다. 이 Row와 예약 수는 실제 검사 실패나 AI API 사용량이 아니다. 같은 SQL의 두 번째 실행은 거부한다. 검증 후 자동 삭제하지 않으며 정리는 별도 범위다.
+
+순서는 기존 여섯 업무 Table의 건수/Hash 확보 → B 기동·V8 적용 → 기존 업무 건수/Hash 일치 → 합성 SQL → B의 새 실패 조회 → 여섯 업무 Table의 새 기준 확보 → B 종료·같은 RDS의 P 실행 → V8 이력·건수/Hash 일치 → 재로그인·기존 문의와 새 실패 조회다. P로 돌아갈 때 V8을 되돌리거나 실패 코드를 바꾸지 않는다. Task는 순차 교체하고 기존 Target Draining·Network·TLS·Secret 참조를 유지한다.
+
+SQL을 Cloud에서 쓰기 전 실제 PostgreSQL의 V7 거부·V8 추가·기존 Row 보존·중복 실행 거부를 확인한다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=RollbackCloudFixtureIntegrationTest" test
+```
+
+이 Test는 외부 AI나 AWS를 호출하지 않는다. B Image의 고정 Source 검증과 별개로, 관리 통로에서 실행할 합성 SQL을 검증한다.
+
 ## 결정 기록
 
 - 맥락: P는 기존 main보다 이전 Source에서 분리했지만 업로드 Role은 main 실행 문맥만 허용한다. 현재 main을 P로 되돌리면 후속 구현과 기존 작업을 손상한다.
@@ -41,3 +57,12 @@ Image 업로드는 App 실행이 아니다. 이 Workflow는 ECS·RDS·ALB·DNS·
 - 이유: Source와 업로드 제어를 분리해 지정 P만 검증하며 AWS 권한이나 실제 서비스 실행을 늘리지 않기 위해서다. P의 Test 코드 실행은 AWS 권한 없는 Job에서 끝내고 Publish Job은 전달받은 Image를 실행하지 않는다.
 - 영향 파일: Manifest·Source Guard·선택형 Workflow·안전장치 Test·Lint 대상·README와 이 안내. Java 업무 코드·Schema·기존 IAM은 변경하지 않는다.
 - 후속 검토: 원격 CI와 Image Evidence의 실제 결과, P 이후 새 쓰기 활성화 전 호환성, ECR 산출물 보존 필요성. 새 Source 허용이나 Cloud 실행은 별도 범위다.
+
+### 합성 자료로 Rollback 읽기 호환성을 검증하는 범위
+
+- 맥락: B→P에서 지정 새 DB 값을 읽는지 확인해야 하지만 실제 개인정보 탐지 Adapter는 아직 배포 구성으로 준비되지 않았다. 기존 문의를 실행하거나 실패로 바꿔서는 안 된다.
+- 선택지: Worker를 켜 기존 Job을 처리하기, 새 테스트 API를 운영 코드에 추가하기, Worker를 끈 채 표시된 합성 Row로 저장·조회 호환성만 확인하기.
+- 결정: 승인한 B→P 실험에서는 세 번째 안을 사용한다. 기존 자동 처리와 인증 API는 변경하지 않는다.
+- 이유: 기존 문의·외부 전송·과금을 건드리지 않고 V8의 새 값 허용과 B/P의 읽기를 분리해 검증할 수 있다. 실제 Scanner·Processor의 전체 Cloud 실패 흐름을 검증했다고 주장하지 않는다.
+- 영향 파일: 합성 SQL·그 PostgreSQL Integration Test·이 안내와 WIL 실행 보고서. 고정 B Image Source와 운영 Java 코드는 바꾸지 않는다.
+- 후속 검토: 실제 탐지 Adapter·자원 제한·Main Bean 조립과 전체 AI 흐름은 별도로 완성·검증한다. 합성 Row 정리도 별도 승인으로 진행한다.
