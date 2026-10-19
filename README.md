@@ -448,14 +448,28 @@ Timeout·호출 Thread 중단·읽기 실패 때는 직접 만든 `Process`만 �
 
 V2는 `schemaVersion: 2`·명시적 검사 완료·위치 목록과 `personRelations`를 모두 요구한다. PERSON의 `mentionId`는 Title 다음 Body의 위치 순서에 따른 `m1`~`mN`이며 실제 사람 ID가 아니다. 각 쌍의 `SAME`·`DIFFERENT`·`UNDETERMINED`를 검사하고 명시적 판단 보류는 보존하지만 누락된 쌍을 채우지 않는다. 동일인 관계의 추이와 같은 사람의 제3자 관계도 일관돼야 한다. 서로 다른 두 사람과 각각 다르다는 이유로 제3자 간 DIFFERENT를 추론하지 않는다.
 
-응답 UTF-8 Byte·원시 Span 개수·관계 개수 상한을 생성자로 명시한다. 관계 상한 0은 PERSON이 0~1개인 결과만 허용하는 제한 설정이다. 상한·필드·참조·범위·관계 위반은 기존 고정 `InvalidScanResultException`으로 거부하며 Parser 원문·Cause를 남기지 않는다. 반환값은 불변 메타데이터이고 원문·JSON을 보관하지 않는다. 출력은 검증한 원문에만 적용해야 하며, 실제 치환과 입력 결합은 후속 단계다.
+응답 UTF-8 Byte·원시 Span 개수·관계 개수 상한을 생성자로 명시한다. 관계 상한 0은 PERSON이 0~1개인 결과만 허용하는 제한 설정이다. 상한·필드·참조·범위·관계 위반은 기존 고정 `InvalidScanResultException`으로 거부하며 Parser 원문·Cause를 남기지 않는다. 반환값은 불변 메타데이터이고 원문·JSON을 보관하지 않는다.
 
 새 [V2 Test](./src/test/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2ValidatorTest.java) 172개와 기존 7개 Class를 포함한 핵심 회귀 402개가 실패·오류·건너뜀 없이 통과했다. 세 등장 위치의 관계표 27가지와 두 동일인 집합 간 일관성, Unicode 위치·참조·누락·중복·상한·V1/V2 분리를 확인했다. PostgreSQL 20개는 기존 V1 Pipeline의 회귀이며 V2→DB 연결의 근거가 아니다. 직전 전체 Java 754개는 V2 추가 전 기록으로 구분한다.
 
-구조가 일관된 SAME도 실제 원문의 동명이인과 다를 수 있다. 이 검증기는 모델의 의미 판단 정확도를 증명하거나 개선하지 않는다. 관계를 보존하는 치환·Known Fragment Guard·Provider 입력·실제 모델·Main 조립·AWS·배포 Image는 이번 변경에서 연결하지 않았다.
+구조가 일관된 SAME도 실제 원문의 동명이인과 다를 수 있다. 이 검증기는 모델의 의미 판단 정확도를 증명하거나 개선하지 않는다.
 
 ```powershell
 .\mvnw.cmd -B -ntp "-Dtest=AiPrivacyScanResultV2ValidatorTest" test
+```
+
+### V2 인물 관계를 보존하는 독립 치환
+
+[`AiPrivacyScanResultV2Masker`](./src/main/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2Masker.java)의 `validateAndMask(title, body, rawResult)`는 같은 두 문자열로 V2 검증과 치환을 진행한다. 다른 원문에서 검증한 `ValidatedScan`을 받는 API는 만들지 않았다. Scanner 호출과 그 응답의 대응은 후속 Preparer 연결에서도 유지해야 한다.
+
+SAME으로 연결된 위치는 첫 등장 순서의 `[PERSON_1]` 같은 표시를 공유한다. 서로 다른 SAME 집합에는 다른 표시를 쓰되, 집합 사이의 명시적인 DIFFERENT·UNDETERMINED를 별도 불변 목록으로 반환한다. 다른 표시라는 이유로 다른 사람을 확정하지 않는다. 반환값은 치환한 제목·본문과 생성 표시 사이의 관계뿐이며 실명 역변환 목록·원본 위치·Scanner의 등장 번호를 포함하지 않는다. 탐지가 놓친 정보가 있을 수 있어 결과의 `toString()`은 내용도 숨긴다.
+
+원문에 예약 접두사 `[PERSON_`가 있으면 생성 표시와의 충돌로 결과 전체를 거부한다. 원문을 고치거나 예외적으로 그대로 보내지 않는다. 제목·본문을 합친 치환 후 UTF-8 Byte 상한도 명시적으로 주입한다. 이는 전체 HTTP 요청 크기 상한과 다르다. 기존 V1 치환·Known Fragment Guard는 변경하거나 제거하지 않았다.
+
+새 [치환 Test](./src/test/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2MaskerTest.java) 37개와 앞선 402개를 합친 핵심 회귀 439개가 실패·오류·건너뜀 없이 통과했다. 미확인 관계·SAME 집합·Unicode·원문 나머지 보존·표시 충돌·치환 후 Byte 제한을 확인했다. V2는 아직 Guard·Provider·Main Bean에 연결하지 않았으며 실제 모델·V2→DB·AWS·배포 Image 검증도 아니다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=AiPrivacyScanResultV2MaskerTest,AiPrivacyScanResultV2ValidatorTest" test
 ```
 
 ### AI를 끈 상태의 문의 접수 검증
