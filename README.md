@@ -442,6 +442,22 @@ Timeout·호출 Thread 중단·읽기 실패 때는 직접 만든 `Process`만 �
 .\mvnw.cmd -B -ntp "-Dtest=ProcessAiPrivacyScannerTest,AiScannedInputPreparerTest,AiPrivacyScanResultValidatorTest,AiPrivacyScanPipelineIntegrationTest,AiSuggestionWorkerConfigurationTest" test
 ```
 
+### 배포 선행 검증과 개인정보 후속 과업
+
+인물 관계 V2의 전송 연결과 개인정보 모델 고도화는 배포 마감 뒤 후속 과업으로 분리한다. 기존 V1 검증·Known Fragment Guard·검사 실패 시 전송 중단은 유지한다. 일반 입력의 AI 처리를 활성화하지 않고, 전체 AI 배포 실험은 입력 범위를 강제하는 합성 전용 구성을 먼저 확인한다. 독립 V2 Test의 통과나 합성 배포 실험을 일반 개인정보 보호 완료로 해석하지 않는다.
+
+[`Verify-Week8LinuxProcessTransport.ps1`](./scripts/Verify-Week8LinuxProcessTransport.ps1)은 위 Process Test 24개를 실제 Linux JVM·자식 Process로 재실행한다. 기존 로컬 Image의 Java Runtime만 사용하고 현재 컴파일한 Main/Test Class와 공개 Test 의존성을 읽기 전용으로 Mount한다. 기존 Image 안의 JAR를 실행하거나 새 배포 Image를 만드는 작업은 아니다.
+
+```powershell
+.\scripts\Verify-Week8LinuxProcessTransport.ps1
+# 같은 Suite에 CPU 제한만 바꾸어 비교할 때:
+.\scripts\Verify-Week8LinuxProcessTransport.ps1 -CpuLimit 0.25
+```
+
+기본 CPU는 1개이며 Memory/Swap 상한은 각각 512 MiB다. 비Root·읽기 전용·Network 차단·Capability 제거·PID 제한을 적용하고 실제 설정을 대조한다. Host의 Credential·환경 변수·Docker Socket·DB는 연결하지 않는다. 표준 결과는 개수·실패 타입만 남기며 Assertion 원문·예외 메시지는 출력하지 않는다. 이 실행에서 만든 정확한 Container ID만 정리하고 `target/week8-linux-process-*/results.json`에 결과를 남긴다.
+
+첫 기본 실행의 Linux 24개와 Script Source 보호 Test 6개가 통과했다. Linux Suite는 정상/비정상 종료·Pipe 대기·Timeout·중단·직접 만든 Process와 보조 Thread 회수, 다른 Process 보존을 확인한다. Spring App·Worker·실제 모델·PostgreSQL·AI는 이 Suite에서 실행하지 않으므로, 512 MiB가 전체 App에 충분하다는 근거로 사용하지 않는다. 실제 Cloud 실행 전에는 새 Image의 Code 포함·설정 조립·해당 전체 구성의 자원을 따로 확인한다.
+
 ### V2 인물 관계의 독립 검증
 
 [`AiPrivacyScanResultV2Validator`](./src/main/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2Validator.java)는 인물의 등장 위치와 관계를 분리한 계약의 구조 검증기다. 기존 V1 검증기·치환기·Preparer는 변경하지 않았다. Spring Bean이나 자동 Version 전환도 추가하지 않는다.
