@@ -992,6 +992,18 @@ node .\scripts\week7-worker-browser-live.mjs --live --confirm-helpdesk-key --con
 
 2026-10-19 로컬 핵심 Test 44개와 전체 Java 724개가 실패·오류·건너뜀 없이 통과했다. 실제 PostgreSQL의 지연 FK 제약을 이용해 INSERT 뒤 Commit만 실패시킨 경우에도 접수 Row 0건·접수 Commit Event 없음·HTTP 500을 확인했다. 새 Log의 AWS 전달·Cloud 배포와 실제 AI 호출은 이 검증에 포함하지 않았다.
 
+## App 종료 뒤 DB Connection과 Job
+
+[별도 JVM 재시작 Test](./src/test/java/lab/helpdesk/ai/processing/AiSuggestionWorkerProcessRestartIntegrationTest.java)는 같은 PostgreSQL Testcontainer를 유지하며 Test가 만든 자식 Process만 종료한다. 추가 종료 Case는 접수·실행권 예약을 Commit한 다음, Provider·자동 Worker가 꺼진 상태에서 별도 Test Transaction에 Row Lock과 미완료 제목 변경을 남겨 둔다.
+
+각 JVM의 DB Connection에 관측용 `application_name`을 붙이고 `pg_stat_activity`에서 해당 연결 수만 조회한다. 2026-10-19 실행에서는 강제 종료 전 10개·종료 후 0개였고 Lock도 다시 획득할 수 있었다. 미완료 변경은 반영되지 않았으며, 먼저 Commit한 원문·Job `RUNNING`·Attempt/예약 1회·원장 1건·제안 0건과 기존 정책·처리 기한은 유지됐다. 연결 종료가 업무 상태를 자동으로 `FAILED`로 바꾸지는 않았다.
+
+```powershell
+.\mvnw.cmd "-Dtest=AiSuggestionWorkerProcessRestartIntegrationTest" test
+```
+
+재시작 Class 전체 6개가 실패·오류·건너뜀 없이 통과했다. 이 단계는 Test 전용 변경이며 직전 전체 Java 724개 통과와 실행 범위를 구분한다. Windows의 `Process.destroyForcibly()`를 사용한 실제 JVM 강제 종료이고 Linux SIGKILL·Exit Code·실제 AI·Cloud 종료 실험은 아니다. 운영 Worker가 외부 응답을 기다리는 동안 DB Transaction·Row Lock을 유지하는 방식으로 바꾸지 않았다.
+
 ## 현재 Application 비범위
 
 - 외부 운영 Database 구성과 Backup·복구

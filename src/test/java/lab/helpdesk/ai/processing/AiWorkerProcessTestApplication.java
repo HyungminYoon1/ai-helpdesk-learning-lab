@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
+import javax.sql.DataSource;
+
 import lab.helpdesk.HelpdeskApplication;
 import lab.helpdesk.ai.input.AiInputPrivacyGuard;
 import lab.helpdesk.ai.input.AiInputPrivacyGuard.SensitiveFragment;
@@ -75,7 +77,8 @@ public final class AiWorkerProcessTestApplication {
             };
         };
         boolean firstProcess = mode.isPreparation();
-        boolean workerEnabled = mode != Mode.PREPARE_PENDING && mode != Mode.RESERVE_UNCONFIRMED;
+        boolean workerEnabled = mode != Mode.PREPARE_PENDING && mode != Mode.RESERVE_UNCONFIRMED
+                && mode != Mode.HOLD_UNCOMMITTED_CHANGE;
         try (ConfigurableApplicationContext context = start(firstProcess, workerEnabled, provider)) {
             require(context.getBean(TicketRepository.class) instanceof JdbcTicketRepository);
             require(context.getBean(AiJobPolicy.class).maxGenerationAttempts() == (firstProcess ? 3 : 5));
@@ -87,7 +90,7 @@ public final class AiWorkerProcessTestApplication {
                 ids = new Ids(receipt.ticket().id(), receipt.messageId(), receipt.jobId());
                 switch (mode) {
                     case PREPARE_PENDING -> require(calls.get() == 0);
-                    case RESERVE_UNCONFIRMED -> {
+                    case RESERVE_UNCONFIRMED, HOLD_UNCOMMITTED_CHANGE -> {
                         var claim = context.getBean(AiSuggestionJobClaimService.class).claimNextPending();
                         require(claim.isPresent() && claim.get().jobId() == ids.job());
                         require(calls.get() == 0);
@@ -99,9 +102,13 @@ public final class AiWorkerProcessTestApplication {
                                     Boolean.class, ids.job()));
                     default -> throw new IllegalStateException("AI_JVM_TEST_MODE_INVALID");
                 }
-                // Receipt, reservation and observed outcome are committed before the parent terminates us.
-                emit("READY", ids, calls.get());
-                waitForContinue(); // Parent uses this exact Process handle to terminate this JVM instead.
+                if (mode == Mode.HOLD_UNCOMMITTED_CHANGE) {
+                    holdUncommittedChange(context, ids, calls.get());
+                } else {
+                    // Receipt, reservation and observed outcome are committed before the parent terminates us.
+                    emit("READY", ids, calls.get());
+                    waitForContinue(); // Parent uses this exact Process handle to terminate this JVM instead.
+                }
             } else {
                 ids = new Ids(number("TICKET_ID"), number("MESSAGE_ID"), number("JOB_ID"));
                 AiSuggestionJobWorker worker = context.getBean(AiSuggestionJobWorker.class);
@@ -140,6 +147,8 @@ public final class AiWorkerProcessTestApplication {
                                     Map.entry("spring.datasource.url", required("JDBC_URL")),
                                     Map.entry("spring.datasource.username", required("DB_USERNAME")),
                                     Map.entry("spring.datasource.password", required("DB_PASSWORD")),
+                                    Map.entry("spring.datasource.hikari.connection-init-sql",
+                                            "SET application_name = '" + applicationName(ProcessHandle.current().pid()) + "'"),
                                     Map.entry("spring.main.banner-mode", "off"),
                                     Map.entry("logging.level.root", "OFF"),
                                     Map.entry("helpdesk.ai.worker.enabled", workerEnabled),
@@ -154,6 +163,33 @@ public final class AiWorkerProcessTestApplication {
                                     new SensitiveFragment("SYNTHETIC_CONTACT", SensitiveType.EMAIL)))));
                     context.getBeanFactory().registerSingleton("controlledAiOutputValidator", new AiSuggestionOutputValidator(200));
                 }).run();
+    }
+
+    // This deliberately open transaction is test-only; no Provider runs while its locks are held.
+    private static void holdUncommittedChange(ConfigurableApplicationContext context, Ids ids, int calls)
+            throws Exception {
+        try (var connection = context.getBean(DataSource.class).getConnection()) {
+            connection.setAutoCommit(false);
+            try (var lock = connection.prepareStatement("SELECT id FROM ai_suggestion_jobs WHERE id = ? FOR UPDATE")) {
+                lock.setLong(1, ids.job());
+                try (var row = lock.executeQuery()) {
+                    require(row.next());
+                }
+            }
+            try (var update = connection.prepareStatement("UPDATE tickets SET title = ? WHERE id = ?")) {
+                update.setString(1, "Synthetic uncommitted change");
+                update.setLong(2, ids.ticket());
+                require(update.executeUpdate() == 1);
+            }
+            emit("READY", ids, calls);
+            waitForContinue(); // The parent forcibly terminates this exact child instead.
+            connection.rollback(); // Safe cleanup if the test protocol explicitly continues.
+        }
+    }
+
+    static String applicationName(long pid) {
+        require(pid > 0);
+        return "helpdesk-jvm-test-" + pid;
     }
 
     private static boolean hasResult(JdbcTemplate jdbc, long jobId, String result) {
@@ -205,7 +241,8 @@ public final class AiWorkerProcessTestApplication {
     }
 
     enum Mode {
-        PREPARE_PENDING, RESERVE_UNCONFIRMED, OBSERVE_UNKNOWN, OBSERVE_BLOCKED, PREPARE_RATE_WAIT,
+        PREPARE_PENDING, RESERVE_UNCONFIRMED, HOLD_UNCOMMITTED_CHANGE,
+        OBSERVE_UNKNOWN, OBSERVE_BLOCKED, PREPARE_RATE_WAIT,
         RUN_TO_SUCCESS, CHECK_BLOCKED, WAIT_AND_RESUME;
 
         boolean isPreparation() {

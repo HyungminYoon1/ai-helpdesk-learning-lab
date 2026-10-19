@@ -6,6 +6,8 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.SQLException;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
@@ -19,12 +21,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 /** Different native JVM PIDs; the same PostgreSQL stays alive. No live AI or Browser. */
 @Testcontainers
@@ -105,6 +110,61 @@ class AiSuggestionWorkerProcessRestartIntegrationTest {
             second.awaitSuccessfulExit();
         }
         assertOriginal(ready);
+    }
+
+    @Test
+    void forced_exit_releases_connections_and_locks_but_preserves_the_committed_reservation() throws Exception {
+        Checkpoint ready;
+        Policy policy;
+        Timeline timeline;
+        long connectionsBefore;
+        try (Child first = start(Mode.HOLD_UNCOMMITTED_CHANGE, null)) {
+            ready = first.await("READY");
+            assertThat(ready.calls()).isZero();
+            assertState(ready, "RUNNING", 1, 0);
+            assertResult(ready.job(), 1, "UNCONFIRMED");
+            policy = policy(ready.job());
+            timeline = timeline(ready.job());
+            connectionsBefore = connectionsFor(ready.pid());
+            assertThat(connectionsBefore).isPositive();
+            assertThatThrownBy(() -> lockWithoutWaiting(ready.job()))
+                    .isInstanceOf(DataAccessException.class)
+                    .satisfies(failure -> assertThat(failure.getCause())
+                            .isInstanceOfSatisfying(SQLException.class, sqlFailure ->
+                                    assertThat(sqlFailure.getSQLState()).isEqualTo("55P03")));
+            assertSavedTitle(ready.ticket()); // The other connection cannot see the uncommitted change.
+            first.terminate();
+        }
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(connectionsFor(ready.pid())).isZero());
+        assertThat(lockWithoutWaiting(ready.job())).isEqualTo(ready.job());
+        assertSavedTitle(ready.ticket());
+        assertState(ready, "RUNNING", 1, 0); // Disconnecting is not a Job FAILED transition or a new reservation.
+        assertResult(ready.job(), 1, "UNCONFIRMED");
+        assertThat(policy(ready.job())).isEqualTo(policy);
+        assertThat(timeline(ready.job())).isEqualTo(timeline);
+        assertOriginal(ready);
+        System.out.printf("AI_JVM_SHUTDOWN_VERIFIED connectionsBefore=%d connectionsAfter=0 "
+                + "jobStatus=RUNNING attempt=1 reservations=1 suggestions=0%n", connectionsBefore);
+    }
+
+    private long connectionsFor(long pid) {
+        // Count only our child in this isolated DB. Do not inspect queries, users or credentials.
+        return jdbc.queryForObject("""
+                SELECT COUNT(*) FROM pg_stat_activity
+                WHERE datname = current_database() AND backend_type = 'client backend'
+                  AND application_name = ?
+                """, Long.class, AiWorkerProcessTestApplication.applicationName(pid));
+    }
+
+    private long lockWithoutWaiting(long jobId) {
+        return jdbc.queryForObject("SELECT id FROM ai_suggestion_jobs WHERE id = ? FOR UPDATE NOWAIT",
+                Long.class, jobId);
+    }
+
+    private void assertSavedTitle(long ticketId) {
+        assertThat(jdbc.queryForObject("SELECT title FROM tickets WHERE id = ?", String.class, ticketId))
+                .isEqualTo("Synthetic saved question");
     }
 
     @Test
