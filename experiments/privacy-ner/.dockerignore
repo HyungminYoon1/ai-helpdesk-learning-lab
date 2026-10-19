@@ -5,3 +5,11 @@
 !probe.py
 !synthetic-cases.json
 !README.md
+!koelectra/
+!koelectra/Dockerfile
+!koelectra/requirements.txt
+!koelectra/model-lock.json
+!koelectra/fetch_model.py
+!koelectra/probe_koelectra.py
+!koelectra/test_probe_koelectra.py
+!koelectra/README.md

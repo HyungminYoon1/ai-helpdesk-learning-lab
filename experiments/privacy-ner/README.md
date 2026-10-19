@@ -2,6 +2,8 @@
 
 운영 검사기나 HTTP 서비스가 아니다. 합성 문의 12건만 사용해 한국어 NER와 제한적인 이메일·한국 휴대전화 규칙의 탐지 누락·과도한 마스킹·실행 자원을 확인한다. 인명은 예시 이름, 이메일은 `.invalid`, 전화번호는 합성 값이다. 원문·개체 문자열·Credential을 결과 Log에 출력하지 않는다. 기대값은 모델 입력과 분리하며 모델에는 각 Case의 제목·본문만 전달한다.
 
+후속 [KoELECTRA 후보 비교](./koelectra/README.md)도 같은 12건을 사용한다. spaCy 실험 Source·기대값은 유지하며, 두 실행을 운영 검사기나 독립적인 최종 평가로 취급하지 않는다.
+
 ## 실행과 해석
 
 Repository Root에서 실행한다. Build Context는 이 디렉터리 한 개이며 App Source·환경 파일·Secret·Docker Socket을 복사하거나 Mount하지 않는다.

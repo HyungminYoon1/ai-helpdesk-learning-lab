@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8–9 진행 — 10/19 접수·Worker Log 연결 후 전체 Java 724개 통과. 10/16 Python 정책 Test 10개, 10/17 JavaScript 전체 262개·ESLint 통과 기록 유지. 현재 Cloud는 읽기 준비 P Image이며 main의 최신 Source 전체를 배포한 상태는 아님
+> 상태: Week 6·7 회귀 유지, Week 8–9 진행 — 10/19 Process Transport 추가 후 전체 Java 754개 통과 기록 유지. Python 정책·Decoder Test는 28개 통과, 실제 모델 후보 비교는 아래 별도 결과. 10/17 JavaScript 전체 262개·ESLint 통과 기록 유지. 현재 Cloud는 읽기 준비 P Image이며 main의 최신 Source 전체를 배포한 상태는 아님
 > 현재 학습 영역: Week 8 배포 — AI 비활성 ECS·RDS·HTTPS 접수/SQL Row·HTTP 301·Cloud Log/ALB Metric, 별도 Snapshot/RDS 복원·원본 복귀와 A→P→B→P Image 전환 완료. 같은 원본 RDS의 V8·업무 데이터 Hash·원래 실패 코드와 새 JVM의 재로그인 조회를 확인했다. 임시 DB는 삭제했고 원본 DB·검증 Snapshot 유지. 10/17에는 RDS를 바꾸지 않고 Private CloudShell의 psql만 17.11로 맞춰 TLS·SQL 조회를 확인했다. [Client 준비 안내](./deploy/cloudshell/README.md). 원본 RDS·App·ALB 과금은 계속되며 전체 AI·남은 관측·최종 회귀/WIL은 미완료. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
 > 실행 기준: Java 25
 
@@ -417,6 +417,8 @@ node --test src/test/js/ai-suggestion-ui.test.mjs
 [분리된 모델 실험](./experiments/privacy-ner/README.md)은 spaCy `ko_core_news_sm` 3.8.0과 제한적인 이메일·휴대전화 규칙을 실제 CPU에서 실행했다. App·DB·외부 AI와 연결하지 않고 네트워크를 차단한 Container에서 고정 합성 문의 12건을 평가했다. 정책·연결 Unit Test 10개는 모두 통과했지만, 실제 탐지 결과는 7건만 정확한 범위·종류·업무 사실 보존을 모두 만족했다. 이름 누락, 일반 문구의 PERSON 오탐, 비표준 이메일 누락이 있어 이 후보를 배포용 검사기로 채택하지 않는다.
 
 Python 코드는 모델 평가용이며 Java 서버를 대체하지 않는다. 후속 실행 Transport는 아래 `ProcessAiPrivacyScanner`로 구현했다. 실제 모델 선정과 그 모델의 실행 설정·Main Bean 조립은 남아 있다. 실험 성공 종료나 JSON 검증 통과가 탐지 정확도·Provider 전송·DB 보존·Cloud 검증을 대신하지 않는다. Provider·Worker의 기본 비활성과 기존 배포 Image는 유지한다.
+
+10/19에는 [KoELECTRA 개인정보 후보](./experiments/privacy-ner/koelectra/README.md)를 같은 12건·고정 기대값으로 비교했다. 고정 Revision·Hash의 SafeTensors를 Network 차단·비Root·0.25 CPU·512 MiB에서 실행했다. 처리 흐름의 정확한 범위·종류·업무 사실 기준은 5건 통과, 4건은 잘못된 BIO 연결로 거부됐고 이름 누락·오탐도 남았다. 실험 종료 코드 0은 보고 완료이지 모델 채택이 아니다. 이 후보도 Main에 연결하지 않는다. 정책·Decoder Unit Test 28개는 실제 모델 품질과 구분한다.
 
 후속 정책은 불필요한 실명을 외부 전송에서 가리되 한 문의 안의 인물 관계를 보존하는 것이다. 이름/일반명사의 문맥 판단이 불분명하면 일반명사로 해석하지만, `이메일`·`이매일` 같은 단어를 무조건 제외하는 목록으로 구현하지 않는다. 명확한 이름 문맥과 일반 문구를 구분하고, 이 정책으로 이메일 주소·전화번호·비밀번호의 보호나 검사 실패 시 전송 중단을 생략하지 않는다.
 
