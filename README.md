@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8 진행 — 10/16 Java 704개·Python 정책 Test 10개 통과. 10/17 B→P Fixture의 실제 PostgreSQL Test 1개 재통과, JavaScript 전체 262개·ESLint 통과. 현재 Cloud는 읽기 준비 P Image이며 main의 최신 Source 전체를 배포한 상태는 아님
+> 상태: Week 6·7 회귀 유지, Week 8–9 진행 — 10/19 접수·Worker Log 연결 후 전체 Java 724개 통과. 10/16 Python 정책 Test 10개, 10/17 JavaScript 전체 262개·ESLint 통과 기록 유지. 현재 Cloud는 읽기 준비 P Image이며 main의 최신 Source 전체를 배포한 상태는 아님
 > 현재 학습 영역: Week 8 배포 — AI 비활성 ECS·RDS·HTTPS 접수/SQL Row·HTTP 301·Cloud Log/ALB Metric, 별도 Snapshot/RDS 복원·원본 복귀와 A→P→B→P Image 전환 완료. 같은 원본 RDS의 V8·업무 데이터 Hash·원래 실패 코드와 새 JVM의 재로그인 조회를 확인했다. 임시 DB는 삭제했고 원본 DB·검증 Snapshot 유지. 10/17에는 RDS를 바꾸지 않고 Private CloudShell의 psql만 17.11로 맞춰 TLS·SQL 조회를 확인했다. [Client 준비 안내](./deploy/cloudshell/README.md). 원본 RDS·App·ALB 과금은 계속되며 전체 AI·남은 관측·최종 회귀/WIL은 미완료. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
 > 실행 기준: Java 25
 
@@ -971,6 +971,26 @@ node .\scripts\week7-worker-browser-live.mjs --live --confirm-helpdesk-key --con
 새 실행기 Test 12개를 포함한 JavaScript 145개와 ESLint가 통과했다. 통제된 Provider의 실제 Browser Experiment 뒤 같은 수직 흐름의 실제 AI Live Experiment도 완료했다. 2026-10-06 사용자 실행의 `LIVE_WORKER_BROWSER_POSTGRES`·`completed: true`와 Local Report·별도 JUnit 1개 통과·AGENT Screenshot을 대조했다. 접수 `201`·누락 CSRF `403`·익명 조회 `401`·USER 조회 `403`·AGENT 조회 `200`, 원문·인증 작성자 보존, 예약·제안·분류 각 1건, 화면과 DB 일치·조회 무변경을 확인했다.
 
 실제 생성 HTTP 요청은 1회·Provider `200`, 사용량은 입력 1,169·출력 57 Token이다. 해당 호출 추정치는 `$0.000174625`이며 이전 비용 미확인과 보류 이력은 그대로 유지한다. Ticket은 `OPEN`, Job은 `SUCCEEDED`, 제안은 `PENDING_REVIEW`다. 실행기의 `manualContentReview: NOT_SCORED`는 실행 당시 상태로 보존한다. 이후 작성자가 원문과 요약을 대조해 핵심 누락·추측이 없다고 확인한 2점 평가는 WIL에 따로 기록했다. 이 평가로 DB의 담당자 검토 상태를 변경하지 않았다. 이번 실제 실행은 Test 전용 조립의 근거이고 일반 Application의 유료 자동 구성·Job 정책·Migration은 변경하지 않았다.
+
+## HTTP 접수와 AI Worker Log
+
+`RequestIdFilter`가 서버에서 만든 UUID를 응답의 `X-Request-Id`와 Request Attribute에 넣는다. Client Header는 ID로 채택하지 않으며 Log에서는 정규 UUID만 사용한다. 진단 Attribute가 없거나 잘못됐으면 `unavailable`로 표시하고 HTTP 결과는 바꾸지 않는다.
+
+| Event | 기록하는 Field와 범위 |
+|---|---|
+| `TICKET_RECEIPT_COMMITTED` | Transactional 접수 Service Proxy가 정상 반환한 뒤 `requestId`·`ticketId`·`messageId`·`jobId` 기록 |
+| `HANDLER_COMPLETED` | MVC Handler 완료의 `requestId`·Handler·Status·`elapsedNanos` |
+| `AI_WORKER_TICK_RESULT` | 한 Tick의 `jobId`·`attempt`·처리 `outcome`·`tickElapsedNanos` |
+
+접수 Controller에는 바깥 Transaction이 없으며 Service Proxy의 Commit 실패는 정상 반환과 접수 완료 Log를 막는다. Worker는 접수와 별도 실행이므로 Job·Attempt로 연결한다. Handler 시간은 전체 Network 왕복이나 AI 처리 시간이 아니며, Tick 시간도 대기·여러 Tick을 합친 Job 전체 시간이 아니다. `STORAGE_PENDING`·`NOT_CURRENT`를 최종 성공·실패로 바꾸어 기록하지 않는다.
+
+`NO_JOB`·`STORAGE_RETRY_WAITING`의 반복 조회는 Log에서 제외한다. 예외는 기존 고정 경고만 남기며 원문·작성자·제안·Password·Cookie·Token·전체 객체·Exception Message/Cause를 추가하지 않는다. Security가 MVC 이전에 거부한 요청은 Handler Log에 없을 수 있어 전체 HTTP Status 집계와 함께 관찰한다. DB Commit과 Log 출력은 원자적이지 않으므로 기록이 없다는 이유로 DB 상태 확인을 생략하지 않는다.
+
+```powershell
+.\mvnw.cmd "-Dtest=RequestIdFilterTest,HandlerTimingInterceptorTest,AiSuggestionWorkerSchedulerTest,WebInfrastructureIntegrationTest,DeploymentHttpObservationTest,TicketReceiptHttpIntegrationTest" test
+```
+
+2026-10-19 로컬 핵심 Test 44개와 전체 Java 724개가 실패·오류·건너뜀 없이 통과했다. 실제 PostgreSQL의 지연 FK 제약을 이용해 INSERT 뒤 Commit만 실패시킨 경우에도 접수 Row 0건·접수 Commit Event 없음·HTTP 500을 확인했다. 새 Log의 AWS 전달·Cloud 배포와 실제 AI 호출은 이 검증에 포함하지 않았다.
 
 ## 현재 Application 비범위
 

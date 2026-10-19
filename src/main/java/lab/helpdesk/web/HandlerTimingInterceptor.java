@@ -55,7 +55,8 @@ public final class HandlerTimingInterceptor
                 : handler.getClass().getSimpleName();
 
         logger.info(
-                "handler={} status={} elapsedNanos={}",
+                "event=HANDLER_COMPLETED requestId={} handler={} status={} elapsedNanos={}",
+                RequestIdFilter.requestIdForLog(request),
                 handlerName,
                 response.getStatus(),
                 elapsedNanos);

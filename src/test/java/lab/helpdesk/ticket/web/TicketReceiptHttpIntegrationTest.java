@@ -8,6 +8,7 @@ import lab.helpdesk.ai.processing.AiSuggestionJobWorker;
 import lab.helpdesk.ai.processing.AiSuggestionWorkerScheduler;
 import lab.helpdesk.ai.provider.AiSuggestionProvider;
 import lab.helpdesk.ticket.application.TicketReceiptApplicationService;
+import lab.helpdesk.web.RequestIdFilter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -147,6 +148,34 @@ class TicketReceiptHttpIntegrationTest {
     }
 
     @Test
+    void committed_receipt_links_the_response_id_to_database_ids_without_logging_input(CapturedOutput output)
+            throws Exception {
+        String original = "SYNTHETIC_RECEIPT_BODY_NOT_FOR_LOG";
+        String clientId = "UNTRUSTED_CLIENT_REQUEST_ID";
+        MvcResult created = mockMvc.perform(post("/api/tickets").session(sessionFor(USER_NAME)).with(csrf())
+                        .header(RequestIdFilter.HEADER_NAME, clientId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(payload(original))))
+                .andExpect(status().isCreated()).andReturn();
+        String requestId = created.getResponse().getHeader(RequestIdFilter.HEADER_NAME);
+        assertThat(requestId).isNotNull().isNotEqualTo(clientId);
+        assertThat(UUID.fromString(requestId).toString()).isEqualTo(requestId);
+        long ticketId = objectMapper.readTree(created.getResponse().getContentAsString()).path("id").asLong();
+        var ids = jdbcTemplate.queryForMap("""
+                SELECT m.id AS message_id, j.id AS job_id FROM ticket_messages m
+                JOIN ai_suggestion_jobs j ON j.input_message_id = m.id WHERE m.ticket_id = ?
+                """, ticketId);
+        String bridge = "event=TICKET_RECEIPT_COMMITTED requestId=" + requestId + " ticketId=" + ticketId
+                + " messageId=" + ids.get("message_id") + " jobId=" + ids.get("job_id");
+        assertThat(output.getAll()).contains(bridge,
+                        "event=HANDLER_COMPLETED requestId=" + requestId
+                                + " handler=TicketReceiptController#create status=201 elapsedNanos=")
+                .doesNotContain(original, USER_NAME, AGENT_NAME, LOGIN_SECRET, clientId);
+        assertThat(output.getAll().lines().filter(line -> line.contains(bridge)).count()).isOne();
+        assertRowCounts(1);
+    }
+
+    @Test
     void client_author_claim_does_not_replace_authenticated_author() throws Exception {
         Map<String, Object> request = payload("작성자 신뢰 경계 실험");
         request.put("authorUsername", "someone-else");
@@ -194,7 +223,7 @@ class TicketReceiptHttpIntegrationTest {
     }
 
     @Test
-    void missing_csrf_returns_403_before_controller_and_service() throws Exception {
+    void missing_csrf_returns_403_before_controller_and_service(CapturedOutput output) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/tickets")
                         .session(sessionFor(USER_NAME))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -202,6 +231,7 @@ class TicketReceiptHttpIntegrationTest {
                 .andExpect(status().isForbidden()).andReturn();
         assertThat(result.getHandler()).isNull();
         assertNoReceipt();
+        assertThat(output.getAll()).doesNotContain("event=TICKET_RECEIPT_COMMITTED");
     }
 
     @Test
@@ -252,7 +282,8 @@ class TicketReceiptHttpIntegrationTest {
                     .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
             verify(receipts).receive("접수 문의", original, USER_NAME);
             assertRowCounts(0);
-            assertThat(output.getAll()).doesNotContain(original, "Failing row contains");
+            assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
+                    "event=TICKET_RECEIPT_COMMITTED");
         } finally {
             jdbcTemplate.execute("ALTER TABLE ticket_messages DROP CONSTRAINT http_receipt_reject_message");
         }
@@ -273,9 +304,36 @@ class TicketReceiptHttpIntegrationTest {
                     .andExpect(jsonPath("$.detail").value("an unexpected server error occurred"));
             verify(receipts).receive("접수 문의", original, USER_NAME);
             assertRowCounts(0);
-            assertThat(output.getAll()).doesNotContain(original, "Failing row contains");
+            assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
+                    "event=TICKET_RECEIPT_COMMITTED");
         } finally {
             jdbcTemplate.execute("ALTER TABLE ai_suggestion_jobs DROP CONSTRAINT http_receipt_reject_job");
+        }
+    }
+
+    @Test
+    void a_deferred_commit_failure_never_emits_a_committed_receipt(CapturedOutput output)
+            throws Exception {
+        // All INSERT statements can finish; the empty FK target rejects only at Commit.
+        jdbcTemplate.execute("CREATE TABLE http_receipt_commit_guard (id bigint PRIMARY KEY)");
+        jdbcTemplate.execute("""
+                ALTER TABLE ai_suggestion_jobs ADD CONSTRAINT http_receipt_commit_guard_fk
+                FOREIGN KEY (input_message_id) REFERENCES http_receipt_commit_guard(id)
+                DEFERRABLE INITIALLY DEFERRED
+                """);
+        try {
+            String original = "SYNTHETIC_COMMIT_FAILURE_BODY_NOT_FOR_LOG";
+            create(sessionFor(USER_NAME), payload(original))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
+                    .andExpect(jsonPath("$.detail").value("an unexpected server error occurred"));
+            verify(receipts).receive("접수 문의", original, USER_NAME);
+            assertRowCounts(0);
+            assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
+                    "event=TICKET_RECEIPT_COMMITTED");
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE ai_suggestion_jobs DROP CONSTRAINT http_receipt_commit_guard_fk");
+            jdbcTemplate.execute("DROP TABLE http_receipt_commit_guard");
         }
     }
 

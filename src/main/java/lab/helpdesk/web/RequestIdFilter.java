@@ -20,6 +20,22 @@ public final class RequestIdFilter
     public static final String ATTRIBUTE_NAME = RequestIdFilter.class.getName()
             + ".requestId";
 
+    // Log only the canonical, server-generated ID, never a client Header or arbitrary Attribute.
+    public static String requestIdForLog(HttpServletRequest request) {
+        Object value = request.getAttribute(ATTRIBUTE_NAME);
+        if (value instanceof String requestId) {
+            try {
+                String canonical = UUID.fromString(requestId).toString();
+                if (canonical.equals(requestId)) {
+                    return canonical;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // A missing/invalid diagnostic ID must not change the HTTP result.
+            }
+        }
+        return "unavailable";
+    }
+
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,
