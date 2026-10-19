@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -11,6 +13,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -18,6 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.sun.net.httpserver.HttpServer;
+import experiment.helpdesk.privacy.PrivacyScannerProcessSupport;
+import experiment.helpdesk.privacy.PrivacyScannerProcessSupport.Launch;
 import lab.helpdesk.ai.input.AiInputPrivacyGuard;
 import lab.helpdesk.ai.input.AiInputPrivacyGuard.SensitiveFragment;
 import lab.helpdesk.ai.input.AiInputPrivacyGuard.SensitiveType;
@@ -26,6 +31,7 @@ import lab.helpdesk.ai.input.AiPrivacyScanner.ScanTimeoutException;
 import lab.helpdesk.ai.input.AiPrivacyScanResultValidator;
 import lab.helpdesk.ai.input.AiScannedInputPreparer;
 import lab.helpdesk.ai.input.JdbcAiSuggestionInputRepository;
+import lab.helpdesk.ai.input.ProcessAiPrivacyScanner;
 import lab.helpdesk.ai.job.AiSuggestionJobClaimService;
 import lab.helpdesk.ai.processing.AiSuggestionJobProcessor;
 import lab.helpdesk.ai.processing.AiSuggestionJobWorker;
@@ -37,6 +43,7 @@ import lab.helpdesk.ticket.application.TicketReceiptResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -79,6 +86,8 @@ class AiPrivacyScanPipelineIntegrationTest {
     @Autowired private JdbcAiSuggestionInputRepository inputs;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PlatformTransactionManager transactionManager;
+    @TempDir Path processTemporary;
+    private final List<Path> processPidFiles = new ArrayList<>();
     private final AtomicInteger scans = new AtomicInteger();
     private final AtomicInteger requests = new AtomicInteger();
     private final AtomicInteger providerInvocations = new AtomicInteger();
@@ -121,9 +130,12 @@ class AiPrivacyScanPipelineIntegrationTest {
     }
 
     @AfterEach
-    void closeControlledResources() {
+    void closeControlledResources() throws Exception {
         if (provider != null) provider.close();
         if (server != null) server.stop(0);
+        for (Path file : processPidFiles) {
+            PrivacyScannerProcessSupport.stopIfStillOwned(file);
+        }
     }
 
     @Test
@@ -156,6 +168,52 @@ class AiPrivacyScanPipelineIntegrationTest {
     @Test
     void observedScannerTimeoutBlocksHttpAndPersistsItsOwnCode() {
         assertScanFailure((title, body, timeout) -> { throw new ScanTimeoutException(); }, "PRIVACY_SCAN_TIMEOUT");
+    }
+
+    @Test
+    void realLocalProcessOutputIsValidatedBeforeTheExactHttpBodyAndDatabaseResult() throws Exception {
+        Launch launch = processLaunch("EMAIL_SPAN");
+        var processor = processor(processScanner(launch), Clock.systemUTC());
+        assertThat(processor.processNextPending().outcome()).isEqualTo(Outcome.STORED);
+        assertProcessStopped(launch);
+        assertThat(scans).hasValue(1);
+        assertThat(requests).hasValue(1);
+        assertThat(providerInvocations).hasValue(1);
+        assertThat(checkedRequest).isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM ai_suggestion_jobs WHERE id = ?", String.class, receipt.jobId()))
+                .isEqualTo("SUCCEEDED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_suggestions WHERE job_id = ?", Long.class, receipt.jobId()))
+                .isOne();
+        assertReceiptPreserved();
+    }
+
+    @Test
+    void realHangingProcessIsReapedBeforeItsTimeoutFailureIsCommitted() throws Exception {
+        Launch launch = processLaunch("HANG");
+        assertScanFailure(processScanner(launch), "PRIVACY_SCAN_TIMEOUT", Duration.ofSeconds(2));
+        assertProcessStopped(launch);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"INVALID_UTF8", "FLOOD_STDOUT"})
+    void realInvalidProcessOutputStopsWithoutHttpOrSuggestionAndKeepsTheReceipt(String mode) throws Exception {
+        Launch launch = processLaunch(mode);
+        assertScanFailure(processScanner(launch), "PRIVACY_SCAN_INVALID_RESULT");
+        assertProcessStopped(launch);
+    }
+
+    @Test
+    void realNonzeroProcessExitIsNotRelabeledAsATimeoutOrValidEmptyScan() throws Exception {
+        Launch launch = processLaunch("NONZERO");
+        var processor = processor(processScanner(launch), Clock.systemUTC());
+        assertThat(processor.processNextPending().outcome()).isEqualTo(Outcome.FAILED);
+        assertProcessStopped(launch);
+        assertThat(jdbc.queryForObject("SELECT last_failure_code FROM ai_suggestion_jobs WHERE id = ?", String.class, receipt.jobId()))
+                .isEqualTo("ADAPTER_CONFIGURATION_ERROR");
+        assertThat(requests).hasValue(0);
+        assertThat(providerInvocations).hasValue(0);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_suggestions", Long.class)).isZero();
+        assertReceiptPreserved();
     }
 
     @Test
@@ -243,7 +301,11 @@ class AiPrivacyScanPipelineIntegrationTest {
     }
 
     private void assertScanFailure(AiPrivacyScanner scanner, String code) {
-        var processor = processor(scanner, Clock.systemUTC());
+        assertScanFailure(scanner, code, Duration.ofSeconds(10));
+    }
+
+    private void assertScanFailure(AiPrivacyScanner scanner, String code, Duration scanLimit) {
+        var processor = processor(scanner, Clock.systemUTC(), scanLimit);
         assertThat(processor.processNextPending().outcome()).isEqualTo(Outcome.FAILED);
         assertThat(jdbc.queryForObject("SELECT status = 'FAILED' AND last_failure_code = ? FROM ai_suggestion_jobs WHERE id = ?",
                 Boolean.class, code, receipt.jobId())).isTrue();
@@ -264,6 +326,10 @@ class AiPrivacyScanPipelineIntegrationTest {
     }
 
     private AiSuggestionJobProcessor processor(AiPrivacyScanner scanner, Clock clock) {
+        return processor(scanner, clock, Duration.ofSeconds(10));
+    }
+
+    private AiSuggestionJobProcessor processor(AiPrivacyScanner scanner, Clock clock, Duration scanLimit) {
         AiPrivacyScanner observed = (title, body, timeout) -> {
             scans.incrementAndGet();
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
@@ -276,7 +342,7 @@ class AiPrivacyScanPipelineIntegrationTest {
             return scanner.scan(title, body, timeout);
         };
         return new AiSuggestionJobProcessor(claims, inputs, new AiScannedInputPreparer(observed,
-                new AiPrivacyScanResultValidator(4_096, 16), GUARD, Duration.ofSeconds(10)),
+                new AiPrivacyScanResultValidator(4_096, 16), GUARD, scanLimit),
                 (prepared, timeout, kind) -> {
                     providerInvocations.incrementAndGet();
                     providerBudget.set(timeout);
@@ -289,6 +355,21 @@ class AiPrivacyScanPipelineIntegrationTest {
         int start = BODY.codePointCount(0, index);
         return MAPPER.writeValueAsString(Map.of("completed", true, "spans", List.of(
                 Map.of("field", "body", "start", start, "end", start + 11, "type", "EMAIL"))));
+    }
+
+    private Launch processLaunch(String mode) throws Exception {
+        Launch launch = PrivacyScannerProcessSupport.prepare(processTemporary, mode);
+        processPidFiles.add(launch.pidFile());
+        return launch;
+    }
+
+    private ProcessAiPrivacyScanner processScanner(Launch launch) {
+        return new ProcessAiPrivacyScanner(launch.command(), 8_192, 4_096, 4_096, Duration.ofSeconds(3));
+    }
+
+    private void assertProcessStopped(Launch launch) throws Exception {
+        assertThat(Files.isRegularFile(launch.pidFile())).isTrue();
+        assertThat(PrivacyScannerProcessSupport.stillOwned(launch.pidFile()).map(ProcessHandle::isAlive).orElse(false)).isFalse();
     }
 
     private void assertReceiptPreserved() {

@@ -400,7 +400,7 @@ node --test src/test/js/ai-suggestion-ui.test.mjs
 
 [Processor](./src/main/java/lab/helpdesk/ai/processing/AiSuggestionJobProcessor.java)는 typed Timeout·Invalid Result를 `failPrivacyScanIfCurrent()`로 전달한다. 실패 기록의 Commit 오류에는 원인·원문 없이 `AI_PRIVACY_FAILURE_RECORD_FAILED`를 던지며 `FAILED` 결과를 반환하지 않는다. 스캔 성공 뒤에는 Provider의 남은 시간과 현재 Attempt·Lease를 다시 확인한다. 검사 대기 중 Transaction이나 Job Lock을 유지하지 않는다.
 
-자동 Worker는 이제 `AiScannedInputPreparer` Bean이 필수다. 기존 `AiInputPrivacyGuard`만으로 조립되지 않으며, Main에는 빈 결과 검사기나 시간·크기 상한의 임의 기본값을 추가하지 않았다. 실제 탐지 모델·로컬 실행 Adapter와 Main Bean 구성은 아직 남아 있다. 기존 회귀·합성 Experiment는 Test 영역의 `AiPrivacyScanFixtures`를 명시적으로 사용하며, 이를 탐지 정확도의 근거로 취급하지 않는다.
+자동 Worker는 이제 `AiScannedInputPreparer` Bean이 필수다. 기존 `AiInputPrivacyGuard`만으로 조립되지 않으며, Main에는 빈 결과 검사기나 시간·크기 상한의 임의 기본값을 추가하지 않았다. 실제 탐지 모델·모델에 맞춘 실행 설정과 Main Bean 구성은 아직 남아 있다. 로컬 Process의 실행 제한은 아래 별도 절에서 다룬다. 기존 회귀·합성 Experiment는 Test 영역의 `AiPrivacyScanFixtures`를 명시적으로 사용하며, 이를 탐지 정확도의 근거로 취급하지 않는다.
 
 ```powershell
 .\mvnw.cmd -B -ntp "-Dtest=AiScannedInputPreparerTest,AiPrivacyScanPipelineIntegrationTest,AiSuggestionWorkerConfigurationTest,AiPrivacyScanResultValidatorTest,AiPrivacyScanFailureIntegrationTest" test
@@ -416,13 +416,29 @@ node --test src/test/js/ai-suggestion-ui.test.mjs
 
 [분리된 모델 실험](./experiments/privacy-ner/README.md)은 spaCy `ko_core_news_sm` 3.8.0과 제한적인 이메일·휴대전화 규칙을 실제 CPU에서 실행했다. App·DB·외부 AI와 연결하지 않고 네트워크를 차단한 Container에서 고정 합성 문의 12건을 평가했다. 정책·연결 Unit Test 10개는 모두 통과했지만, 실제 탐지 결과는 7건만 정확한 범위·종류·업무 사실 보존을 모두 만족했다. 이름 누락, 일반 문구의 PERSON 오탐, 비표준 이메일 누락이 있어 이 후보를 배포용 검사기로 채택하지 않는다.
 
-Python 코드는 모델 평가용이며 Java 서버를 대체하지 않는다. Main의 실제 `AiPrivacyScanner` Adapter·Bean, Job별 강제 Timeout·응답 읽기 제한·자원 회수는 아직 구현할 대상이다. 실험 성공 종료나 JSON 검증 통과가 탐지 정확도·Provider 전송·DB 보존·Cloud 검증을 대신하지 않는다. Provider·Worker의 기본 비활성과 기존 배포 Image는 유지한다.
+Python 코드는 모델 평가용이며 Java 서버를 대체하지 않는다. 후속 실행 Transport는 아래 `ProcessAiPrivacyScanner`로 구현했다. 실제 모델 선정과 그 모델의 실행 설정·Main Bean 조립은 남아 있다. 실험 성공 종료나 JSON 검증 통과가 탐지 정확도·Provider 전송·DB 보존·Cloud 검증을 대신하지 않는다. Provider·Worker의 기본 비활성과 기존 배포 Image는 유지한다.
 
 후속 정책은 불필요한 실명을 외부 전송에서 가리되 한 문의 안의 인물 관계를 보존하는 것이다. 이름/일반명사의 문맥 판단이 불분명하면 일반명사로 해석하지만, `이메일`·`이매일` 같은 단어를 무조건 제외하는 목록으로 구현하지 않는다. 명확한 이름 문맥과 일반 문구를 구분하고, 이 정책으로 이메일 주소·전화번호·비밀번호의 보호나 검사 실패 시 전송 중단을 생략하지 않는다.
 
 이 관계 보존·문맥 판정은 아직 미구현이다. 기존 4필드 범위 계약과 단일 `[PERSON_REDACTED]`가 관계를 표현한다고 가정하지 않는다. 정책을 정리하면서 Main·Scanner JSON·고정 모델 평가 Dataset·배포 Image를 변경하지 않았으며, 앞선 Test·모델 평가를 새 정책의 실행 근거로 소급하지 않는다.
 
 10/16 Commit 전에는 PERSON 추가와 접속 도구·IAM Test를 포함한 현재 Source 전체를 다시 검증했다. `mvnw.cmd -B -ntp clean test`는 Java 704개·실패/오류/건너뜀 0건·8분 52초에 성공했다. JavaScript 234개·실패/취소/건너뜀 0건, Python 정책 Unit Test 10개와 ESLint 10.11.0도 통과했다. Python Unit Test는 통제한 NER 출력이며 실제 모델 정확도의 새 평가가 아니다. 실제 AI·Browser E2E·Image Build/Push·원격 CI를 재실행하거나 RDS에 V8을 적용하지 않았다.
+
+### 로컬 검사 Process의 실행 제한과 회수
+
+[`ProcessAiPrivacyScanner`](./src/main/java/lab/helpdesk/ai/input/ProcessAiPrivacyScanner.java)는 기존 `AiPrivacyScanner` Port의 로컬 Process Transport다. 실제 모델을 고르거나 자동 Bean을 등록하지 않는다. 관리자가 정한 절대 실행 파일·고정 인자 목록을 직접 실행하며 Shell을 추가하지 않는다. 검사 프로그램은 자식 Process를 만들거나 Daemon으로 분리되지 않는 단일 전경 실행을 사용해야 한다.
+
+원문 제목·본문은 UTF-8 JSON의 `title`·`body`로 표준 입력에만 전달한다. 명령행 인자·임시 파일·Log에는 넣지 않는다. App 환경 변수를 자식에게 복사하지 않으며, 표준 출력은 결과 JSON, 표준 오류는 크기를 제한해 버리는 별도 통로로 처리한다. 네 개의 보조 Thread가 입력 쓰기·결과 읽기·오류 읽기·종료 대기를 수행하므로 한 Pipe가 막혀도 주 호출부가 제한 시간을 확인할 수 있다.
+
+입력·출력·표준 오류의 Byte 상한과 종료 확인 시간을 생성자에 명시한다. 입력 직렬화·쓰기·읽기·정상 종료에는 전달받은 하나의 시간 예산을 사용한다. 결과를 끝까지 읽고 Exit Code 0을 확인한 뒤에만 문자열을 반환한다. 응답 초과·잘못된 UTF-8·빈 응답은 `PRIVACY_SCAN_INVALID_RESULT`, 실제 시간 초과는 `PRIVACY_SCAN_TIMEOUT`이다. 시작 실패·비정상 종료·예상 밖의 I/O 오류는 고정 내부 오류로 거부하며 기존 Processor의 `ADAPTER_CONFIGURATION_ERROR` 경로를 따른다. JSON·위치 검증과 마스킹은 기존 전처리기에 남겨 둔다.
+
+Timeout·호출 Thread 중단·읽기 실패 때는 직접 만든 `Process`만 강제 종료하고 실제 종료, Pipe 닫힘과 보조 Thread 종료를 확인한다. 별도 회수 예산 안에 확인하지 못하면 `AI_PRIVACY_PROCESS_CLEANUP_UNCONFIRMED`를 던지며 성공이나 빈 결과로 반환하지 않는다. 호출 Thread의 Interrupt 표시도 복원한다. 이 Transport는 Process의 CPU·메모리·Network를 격리하는 Sandbox가 아니다. 실제 모델의 Process 구조를 검토하고 Container의 자원·Network 제한과 전체 AI 측정을 함께 적용해야 한다.
+
+실제 자식 JVM을 쓰는 [실행 Test](./src/test/java/lab/helpdesk/ai/input/ProcessAiPrivacyScannerTest.java)는 한글·이모지·따옴표·줄바꿈 보존, Byte 상한, 응답 없이 대기·입력을 읽지 않는 실행·유효 결과 뒤 종료하지 않는 실행, 중단·종료와 다른 Process 보존을 확인한다. [PostgreSQL Pipeline Test](./src/test/java/lab/helpdesk/ai/provider/AiPrivacyScanPipelineIntegrationTest.java)는 정상 결과의 HTTP Body 마스킹·제안 저장과 검사 실패의 Provider/HTTP 0회·원문/예약 보존·반복 Polling 무재시도를 함께 확인한다. 자식 JVM은 통제된 검사 응답 Fixture이며 실제 한국어 모델이나 외부 AI는 호출하지 않는다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=ProcessAiPrivacyScannerTest,AiScannedInputPreparerTest,AiPrivacyScanResultValidatorTest,AiPrivacyScanPipelineIntegrationTest,AiSuggestionWorkerConfigurationTest" test
+```
 
 ### AI를 끈 상태의 문의 접수 검증
 

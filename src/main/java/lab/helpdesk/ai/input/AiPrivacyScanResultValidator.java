@@ -131,7 +131,8 @@ public final class AiPrivacyScanResultValidator {
 
     /** A typed, fixed error; contains no raw response, original input or cause. */
     public static final class InvalidScanResultException extends IllegalArgumentException {
-        private InvalidScanResultException() {
+        /** Also used by a transport for an oversized or malformed UTF-8 response. */
+        public InvalidScanResultException() {
             super("PRIVACY_SCAN_INVALID_RESULT");
         }
     }
