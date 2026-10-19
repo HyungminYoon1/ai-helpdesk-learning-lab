@@ -485,6 +485,30 @@ Timeout·호출 Thread 중단·읽기 실패 때는 직접 만든 `Process`만 �
 
 자식의 `-Xmx64m`은 자식 JVM의 Heap 상한이지 App과 자식의 전체 메모리 상한이 아니다. 전체 Scheduler·Provider 자동 조립·Container 자원·실제 모델·유료 AI·Browser·AWS 배포는 이 Test의 검증 범위가 아니다. V2·모델 고도화는 계속 후속으로 유지한다.
 
+### 합성 구성의 자동 Worker와 Container 자원 측정
+
+[`Verify-Week8SyntheticRuntime.ps1`](./scripts/Verify-Week8SyntheticRuntime.ps1)과 [별도 Compose](./compose.synthetic-runtime-probe.yaml)는 새 Image의 Main JAR·자동 Scheduler·합성 검사 자식 JVM·새 PostgreSQL을 연결한다. 일반 Provider 구성은 끄고 Test 전용 Factory로 같은 Spring AI Adapter를 문자 그대로의 Loopback HTTP 서버에 연결한다. Main의 Provider URL·업무 코드·DB Migration은 변경하지 않는다.
+
+```powershell
+.\mvnw.cmd -B -ntp test-compile
+$probeRevision = git rev-parse --short HEAD
+$probeImage = "helpdesk:week8-synthetic-$probeRevision"
+docker build --platform linux/amd64 --provenance=false --label "org.opencontainers.image.revision=$probeRevision" --tag $probeImage .
+.\scripts\Verify-Week8SyntheticRuntime.ps1 -Image $probeImage
+```
+
+Build 전 관련 Source 변경을 Commit해 Revision과 내용을 맞춘다. 다른 Image는 `-Image`로 지정한다. 기본은 0.25 CPU·512 MiB이며 Memory와 Memory+Swap 한도를 같게 두어 추가 Swap을 허용하지 않는다. PostgreSQL은 별도 Container라 App 메모리 한도에 포함하지 않는다.
+
+Test 전용 Main/중첩 Class와 Bridge만 읽기 전용 Mount하고 `target/classes`는 연결하지 않는다. Preparer·Worker·입력 제한의 Class가 Image 안 `/app/helpdesk.jar`에서 로드됐는지도 대조한다. 일반 Main JAR 대신 Test Launcher로 기동하는 실험이며, Test Launcher 자체가 배포용 Image에 들어가는 것은 아니다.
+
+고정 합성 문의 3건의 자동 성공·허용 범위 밖 1건의 최종 실패, 정확히 가려진 HTTP Body·원문/작성자/예약 보존을 검사한다. Service에 합성 작성자를 직접 전달하므로 Browser 로그인·인증 작성자 선택·HTTP 접수 201의 새 검증은 아니다. 처리 뒤 자식 Process와 개인정보 I/O Thread가 없는지도 확인한다.
+
+`memory.current`·`memory.peak`·`memory.events`·`cpu.stat`은 App cgroup에서 직접 읽는다. Peak는 측정 종료 시점까지의 최고 사용량이며 부모/자식·Native 메모리·파일 Cache도 포함한다. Job 시간은 Service 접수부터 최종 상태를 관찰할 때까지라 Scanner 단독 시간이나 Provider 시간으로 해석하지 않는다.
+
+실행 전 내부 Network·공개 Port 없음·CPU/Memory 한도·동일 Image를 대조한다. 실제 Key를 읽지 않고 합성 파일만 App에 Mount하며, 자식 Docker CLI에서 실제 Key 환경 변수와 자동 `.env` 읽기를 제거한다. 결과에는 숫자·고정 상태만 저장하고 원문 Log·예외를 출력하지 않는다. 종료 후 해당 UUID Project의 Container·Network와 합성 Secret 파일을 제거하며 DB Volume·Image는 보존한다. 결과는 `target/week8-synthetic-runtime/<run-id>/results.json`에 남는다.
+
+이 구성의 측정은 외부 AI 대신 로컬 응답을 사용하는 제한 실험이다. 향후 Task 안에 개인정보 탐지 모델을 넣는다면 모델 파일·추론 메모리·CPU까지 다시 측정해야 한다. 원격 OpenAI 모델의 가중치는 Provider 서버에 있으며 이 Task에 올리지 않는다. 실제 AI Key·AWS·ECR·원격 CI·RDS TLS·Browser 검증과 구분한다.
+
 ### V2 인물 관계의 독립 검증
 
 [`AiPrivacyScanResultV2Validator`](./src/main/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2Validator.java)는 인물의 등장 위치와 관계를 분리한 계약의 구조 검증기다. 기존 V1 검증기·치환기·Preparer는 변경하지 않았다. Spring Bean이나 자동 Version 전환도 추가하지 않는다.

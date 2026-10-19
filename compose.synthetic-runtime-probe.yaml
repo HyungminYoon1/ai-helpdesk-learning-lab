@@ -1,0 +1,74 @@
+# Local, synthetic, internal-network experiment. No real AI credential or published port.
+services:
+  db:
+    image: postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
+    environment:
+      POSTGRES_DB: helpdesk_local
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${HELPDESK_RUNTIME_PROBE_DB_ADMIN:?synthetic admin value required}
+      HELPDESK_DB_APP_PASSWORD: ${HELPDESK_RUNTIME_PROBE_DB_APP:?synthetic app value required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/001-local-app-role.sql:/docker-entrypoint-initdb.d/001-local-app-role.sql:ro
+    networks: [probe]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "helpdesk_app", "-d", "helpdesk_local"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: "no"
+
+  app:
+    image: ${HELPDESK_RUNTIME_PROBE_IMAGE:?reviewed image required}
+    pull_policy: never
+    cpus: ${HELPDESK_RUNTIME_PROBE_CPUS:?CPU limit required}
+    mem_limit: ${HELPDESK_RUNTIME_PROBE_MEMORY:?memory limit required}m
+    memswap_limit: ${HELPDESK_RUNTIME_PROBE_MEMORY:?memory limit required}m
+    pids_limit: 128
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=67108864,mode=1777"]
+    networks: [probe]
+    volumes:
+      - type: bind
+        source: ${HELPDESK_RUNTIME_PROBE_CLASSES:?selected test classes required}
+        target: /opt/probe
+        read_only: true
+      - type: bind
+        source: ${HELPDESK_RUNTIME_PROBE_SECRETS:?synthetic app files required}
+        target: /run/secrets
+        read_only: true
+    entrypoint:
+      - java
+      - -Dloader.main=experiment.helpdesk.runtime.SyntheticRuntimeResourceExperiment
+      - -Dloader.path=/opt/probe
+      - -cp
+      - /app/helpdesk.jar
+      - org.springframework.boot.loader.launch.PropertiesLauncher
+    environment:
+      SPRING_PROFILES_ACTIVE: postgres,deployment,synthetic-ai
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/helpdesk_local
+      SPRING_DATASOURCE_USERNAME: helpdesk_app
+      SERVER_PORT: "0"
+      HELPDESK_AI_PROVIDER_ENABLED: "false"
+      HELPDESK_AI_PROVIDER_MAX_SUMMARY_CODE_POINTS: "200"
+      HELPDESK_AI_WORKER_ENABLED: "true"
+      HELPDESK_AI_WORKER_POLL_DELAY_MS: "500"
+      HELPDESK_AI_SYNTHETIC_SCAN_ENABLED: "true"
+      HELPDESK_AI_SYNTHETIC_SCAN_SCANNER_JAR: /app/helpdesk.jar
+      HELPDESK_AI_SYNTHETIC_SCAN_TIMEOUT_MS: "20000"
+      HELPDESK_AI_SYNTHETIC_SCAN_CLEANUP_TIMEOUT_MS: "3000"
+      LOGGING_LEVEL_ROOT: "OFF"
+    depends_on:
+      db: {condition: service_healthy}
+    stop_grace_period: 45s
+    restart: "no"
+
+networks:
+  probe:
+    internal: true
+volumes:
+  postgres-data:
