@@ -442,6 +442,22 @@ Timeout·호출 Thread 중단·읽기 실패 때는 직접 만든 `Process`만 �
 .\mvnw.cmd -B -ntp "-Dtest=ProcessAiPrivacyScannerTest,AiScannedInputPreparerTest,AiPrivacyScanResultValidatorTest,AiPrivacyScanPipelineIntegrationTest,AiSuggestionWorkerConfigurationTest" test
 ```
 
+### V2 인물 관계의 독립 검증
+
+[`AiPrivacyScanResultV2Validator`](./src/main/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2Validator.java)는 인물의 등장 위치와 관계를 분리한 계약의 구조 검증기다. 기존 V1 검증기·치환기·Preparer는 변경하지 않았다. Spring Bean이나 자동 Version 전환도 추가하지 않는다.
+
+V2는 `schemaVersion: 2`·명시적 검사 완료·위치 목록과 `personRelations`를 모두 요구한다. PERSON의 `mentionId`는 Title 다음 Body의 위치 순서에 따른 `m1`~`mN`이며 실제 사람 ID가 아니다. 각 쌍의 `SAME`·`DIFFERENT`·`UNDETERMINED`를 검사하고 명시적 판단 보류는 보존하지만 누락된 쌍을 채우지 않는다. 동일인 관계의 추이와 같은 사람의 제3자 관계도 일관돼야 한다. 서로 다른 두 사람과 각각 다르다는 이유로 제3자 간 DIFFERENT를 추론하지 않는다.
+
+응답 UTF-8 Byte·원시 Span 개수·관계 개수 상한을 생성자로 명시한다. 관계 상한 0은 PERSON이 0~1개인 결과만 허용하는 제한 설정이다. 상한·필드·참조·범위·관계 위반은 기존 고정 `InvalidScanResultException`으로 거부하며 Parser 원문·Cause를 남기지 않는다. 반환값은 불변 메타데이터이고 원문·JSON을 보관하지 않는다. 출력은 검증한 원문에만 적용해야 하며, 실제 치환과 입력 결합은 후속 단계다.
+
+새 [V2 Test](./src/test/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2ValidatorTest.java) 172개와 기존 7개 Class를 포함한 핵심 회귀 402개가 실패·오류·건너뜀 없이 통과했다. 세 등장 위치의 관계표 27가지와 두 동일인 집합 간 일관성, Unicode 위치·참조·누락·중복·상한·V1/V2 분리를 확인했다. PostgreSQL 20개는 기존 V1 Pipeline의 회귀이며 V2→DB 연결의 근거가 아니다. 직전 전체 Java 754개는 V2 추가 전 기록으로 구분한다.
+
+구조가 일관된 SAME도 실제 원문의 동명이인과 다를 수 있다. 이 검증기는 모델의 의미 판단 정확도를 증명하거나 개선하지 않는다. 관계를 보존하는 치환·Known Fragment Guard·Provider 입력·실제 모델·Main 조립·AWS·배포 Image는 이번 변경에서 연결하지 않았다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=AiPrivacyScanResultV2ValidatorTest" test
+```
+
 ### AI를 끈 상태의 문의 접수 검증
 
 2026-10-12에는 [접수 HTTP Test](./src/test/java/lab/helpdesk/ticket/web/TicketReceiptHttpIntegrationTest.java)에 Provider·Worker의 명시적 비활성과 해당 Bean·Scheduler 부재를 확인하는 Case를 추가했다. 인증된 USER의 유효한 CSRF 요청은 `201`이고, 실제 PostgreSQL의 Ticket·Message·Job은 각각 1건, Job은 `PENDING`·생성 예약은 0건이었다.
