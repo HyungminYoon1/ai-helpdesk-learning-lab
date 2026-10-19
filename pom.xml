@@ -137,6 +137,29 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven-surefire-plugin.version}</version>
             </plugin>
+
+            <!-- The synthetic child runs from the packaged JAR, never a stale target/classes mount. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${maven-surefire-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <includes>
+                        <include>**/SyntheticDeploymentPrivacyPackagedIT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <helpdesk.synthetic.test-jar>${project.build.directory}/${project.build.finalName}.jar</helpdesk.synthetic.test-jar>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>

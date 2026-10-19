@@ -458,6 +458,33 @@ Timeout·호출 Thread 중단·읽기 실패 때는 직접 만든 `Process`만 �
 
 첫 기본 실행의 Linux 24개와 Script Source 보호 Test 6개가 통과했다. Linux Suite는 정상/비정상 종료·Pipe 대기·Timeout·중단·직접 만든 Process와 보조 Thread 회수, 다른 Process 보존을 확인한다. Spring App·Worker·실제 모델·PostgreSQL·AI는 이 Suite에서 실행하지 않으므로, 512 MiB가 전체 App에 충분하다는 근거로 사용하지 않는다. 실제 Cloud 실행 전에는 새 Image의 Code 포함·설정 조립·해당 전체 구성의 자원을 따로 확인한다.
 
+### 합성 입력만 허용하는 배포 실험 구성
+
+[`SyntheticDeploymentPrivacyConfiguration`](./src/main/java/lab/helpdesk/ai/input/synthetic/SyntheticDeploymentPrivacyConfiguration.java)은 일반 개인정보 탐지기가 아니라 고정 합성 문의 한 건의 실행 구성을 제공한다. `postgres,deployment,synthetic-ai` Profile을 모두 활성화하고 `helpdesk.ai.synthetic-scan.enabled=true`를 명시해야 등록된다. 기본 Provider·Worker 비활성은 그대로이며, 이 설정만으로 외부 요청이나 자동 Polling을 시작하지 않는다.
+
+[`SyntheticDeploymentPrivacyScanner`](./src/main/java/lab/helpdesk/ai/input/synthetic/SyntheticDeploymentPrivacyScanner.java)의 `TITLE`·`BODY`와 정확히 같은 입력만 허용한다. 공백·연락처·복구 사실을 바꾸거나 문장을 추가해도 거부하며 정규화·부분 일치·Client가 선택한 허용 목록을 사용하지 않는다. 범위 밖 입력은 자식 Process를 시작하기 전에 거부한다. 기존 Processor에서는 이 구성의 처리 범위를 벗어난 `ADAPTER_CONFIGURATION_ERROR`로 기록한다. JSON 검증 실패나 Timeout으로 바꾸지 않으며 새 DB 코드·Migration을 만들지 않았다.
+
+| 필수 Property | 의미 |
+|---|---|
+| `helpdesk.ai.synthetic-scan.scanner-jar` | 검토한 현재 Boot JAR의 절대 경로. Image에서는 `/app/helpdesk.jar` |
+| `helpdesk.ai.synthetic-scan.timeout-ms` | 검사 전체 예산, 1~60,000ms. 실행 예시 값 20,000 |
+| `helpdesk.ai.synthetic-scan.cleanup-timeout-ms` | 직접 시작한 Process·Pipe 회수 예산, 1~10,000ms. 실행 예시 값 3,000 |
+
+누락·잘못된 경로·필수 실행 Class가 없는 JAR·잘못된 시간 값은 Bean 조립 시 고정 메시지로 거부한다. 경로·설정값·Parser Cause를 오류에 넣지 않는다. JAR 내용 확인은 서명이나 전체 Artifact 무결성 검증이 아니므로 배포할 때 검증한 Image Digest도 별도로 대조해야 한다.
+
+[`SyntheticPrivacyScannerProgram`](./src/main/java/lab/helpdesk/ai/input/synthetic/SyntheticPrivacyScannerProgram.java)은 같은 JAR의 별도 자식 JVM에서 고정 합성 이메일 위치 한 건만 V1 JSON으로 반환한다. Main의 Spring App을 다시 기동하거나 모델을 실행하지 않는다. 입력은 stdin으로만 받고 같은 입력 제한을 다시 검사한다. 입력 4,096 Byte·결과 1,024 Byte·stderr 1,024 Byte·Span 1건 상한을 고정 실험 계약으로 둔다. 실제 실행 제한·종료 코드·회수는 기존 `ProcessAiPrivacyScanner`, JSON·범위 검증과 치환은 V1 Preparer, 실제 전송 문자열 확인은 Guard가 담당한다.
+
+범위 밖 입력의 AI 실패는 이미 Commit한 Ticket·Message를 취소하지 않는다. Claim 단계에서 생성 예약이 먼저 Commit됐으므로 Provider 호출이 0회여도 Attempt·예약은 1회로 남을 수 있다. 최종 실패 Job을 반복 Polling해 임의로 재호출하지 않는다. 활성화 전에 기존 PENDING 입력도 확인해야 하며, 일반 문의를 이 실험 구성으로 처리해도 된다는 뜻이 아니다.
+
+```powershell
+# Docker Engine이 있는 로컬 환경. 실제 AI Key를 사용하지 않는다.
+.\mvnw.cmd -B -ntp verify
+```
+
+기본 `test` 단계는 입력 제한·설정·자식 프로그램 Unit Test를 실행한다. `verify`는 그 뒤 현재 JAR를 패키징하고 Failsafe의 [`SyntheticDeploymentPrivacyPackagedIT`](./src/test/java/lab/helpdesk/ai/provider/SyntheticDeploymentPrivacyPackagedIT.java)를 실행한다. 같은 JAR의 실제 자식 Process와 Spring 개인정보 Bean·수동 Worker Tick·PostgreSQL·Loopback HTTP를 연결해 허용 입력의 마스킹/제안 저장과 범위 밖 입력의 HTTP 0회·원문/예약 보존을 확인한다. 기존 Actions의 `mvn verify`에도 이 검사가 포함되지만, 원격 CI 실행은 Push 후 별도 결과로 확인해야 한다.
+
+자식의 `-Xmx64m`은 자식 JVM의 Heap 상한이지 App과 자식의 전체 메모리 상한이 아니다. 전체 Scheduler·Provider 자동 조립·Container 자원·실제 모델·유료 AI·Browser·AWS 배포는 이 Test의 검증 범위가 아니다. V2·모델 고도화는 계속 후속으로 유지한다.
+
 ### V2 인물 관계의 독립 검증
 
 [`AiPrivacyScanResultV2Validator`](./src/main/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2Validator.java)는 인물의 등장 위치와 관계를 분리한 계약의 구조 검증기다. 기존 V1 검증기·치환기·Preparer는 변경하지 않았다. Spring Bean이나 자동 Version 전환도 추가하지 않는다.
