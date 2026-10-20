@@ -1,0 +1,21 @@
+{
+  "environment": [
+    { "name": "SPRING_PROFILES_ACTIVE", "value": "postgres,deployment,synthetic-ai" },
+    { "name": "HELPDESK_AI_PROVIDER_ENABLED", "value": "true" },
+    { "name": "HELPDESK_AI_WORKER_ENABLED", "value": "true" },
+    { "name": "HELPDESK_AI_PROVIDER_MAX_SUMMARY_CODE_POINTS", "value": "200" },
+    { "name": "HELPDESK_AI_SYNTHETIC_SCAN_ENABLED", "value": "true" },
+    { "name": "HELPDESK_AI_SYNTHETIC_SCAN_SCANNER_JAR", "value": "/app/helpdesk.jar" },
+    { "name": "HELPDESK_AI_SYNTHETIC_SCAN_TIMEOUT_MS", "value": "20000" },
+    { "name": "HELPDESK_AI_SYNTHETIC_SCAN_CLEANUP_TIMEOUT_MS", "value": "3000" },
+    { "name": "HELPDESK_AI_JOB_POLICYVERSION", "value": "cloud-synthetic-once-v1" },
+    { "name": "HELPDESK_AI_JOB_MAXGENERATIONATTEMPTS", "value": "1" },
+    { "name": "HELPDESK_AI_JOB_MAXOUTPUTREPAIRATTEMPTS", "value": "0" }
+  ],
+  "secrets": [
+    {
+      "name": "HELPDESK_AI_PROVIDER_KEY",
+      "valueFrom": "arn:aws:ssm:ap-northeast-2:<AWS_ACCOUNT_ID>:parameter/helpdesk/learning/ai/provider-key"
+    }
+  ]
+}

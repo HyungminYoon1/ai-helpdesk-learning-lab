@@ -37,6 +37,31 @@ DB 계정은 App용 계정이며 RDS 관리자 Credential과 이후 AI Key는 �
 
 저장소 변경은 이미 실행 중인 Task를 갱신하지 않는다. Password 값만 교체했다면 같은 Image로 새 Task를 시작하되 DB의 실제 Password도 일치시킨다. Parameter 읽기 실패와 JDBC Password 인증 실패는 발생 단계가 다르다.
 
+## 고정 합성 문의의 AI 활성 실험 준비
+
+이 절은 별도 승인 후 사용하는 선택형 구성이다. 기본 [task-definition.template.json](./task-definition.template.json)과 여섯 Parameter 권한은 그대로 두며, 파일을 추가한 것만으로 실제 AWS 설정이나 AI가 바뀌지 않는다.
+
+- [synthetic-ai-container-settings.template.json](./synthetic-ai-container-settings.template.json): 새 명세에 병합할 Container 설정 조각이다. 완전한 Task Definition이나 `run-task --overrides` 입력이 아니다. 기존 명세의 `environment`·`secrets`를 이름 기준으로 병합하고, 여섯 Secret 참조·JDBC·Cookie·Image·Network·Log 설정은 유지한다.
+- [synthetic-ai-parameter-read-policy.template.json](./synthetic-ai-parameter-read-policy.template.json): AI Key 한 개의 `ssm:GetParameters` 권한 조각이다. 기존 Execution Role 정책의 `Statement`에 추가하며 전체 정책을 이 파일로 교체하지 않는다. Task Role·업로드 Role·배포 사용자에게 Secret 읽기를 추가하지 않는다.
+
+실행할 Main Image에는 기존 Provider·Worker·합성 검사 구성이 있어야 한다. 새 코드가 필요한 것이 아니라 기존 구성을 켜는 경우에는 같은 검증 Digest를 사용한다. 실제 Main 코드·의존성이 바뀌었다면 새 Image 검증·전달이 필요하다.
+
+### 입력과 호출 범위
+
+`postgres,deployment,synthetic-ai`와 세 활성 스위치를 명시하고, 검사 JAR `/app/helpdesk.jar`·검사 20초·회수 3초·요약 200 Code Point를 지정한다. 일반 탐지 모델이나 인물 관계 V2를 활성화하는 구성이 아니다. 허용 입력은 `SyntheticDeploymentPrivacyScanner`의 제목·본문 한 건과 정확히 일치해야 한다.
+
+신규 Job의 정책은 `cloud-synthetic-once-v1`, 생성 한도 1회·출력 보완 한도 0회다. 기존 Job의 정책 Snapshot·예약·기한은 변경하지 않는다. 환경 변수는 `@ConfigurationProperties`의 실제 Binding에 맞는 `HELPDESK_AI_JOB_MAXGENERATIONATTEMPTS`처럼 사용한다. 비슷한 이름의 환경 변수를 임의로 만들고 한도가 바뀌었다고 가정하지 않는다.
+
+한도는 Job마다 적용되며 전체 Task의 전역 호출 한도가 아니다. 활성화 전 읽기 전용 SQL로 PENDING·RUNNING Job의 ID·상태·예약과 합성 입력 일치 여부만 확인한다. 원문·작성자·Secret은 출력하지 않는다. 승인한 기존 Job은 입력 거부로 FAILED·예약 증가가 발생할 수 있지만 Ticket·Message는 유지한다. 추가 대상이나 허용 입력과 일치하는 기존 Job이 있으면 실행 범위를 다시 확인한다. 신규 합성 문의는 한 건만 접수하며 연결 오류만 보고 재접수하지 않는다.
+
+### Secret 준비와 검증 순서
+
+AI Key는 별도 Standard SecureString `/helpdesk/learning/ai/provider-key`에 사용자가 직접 등록한다. `HELPDESK_AI_PROVIDER_KEY`는 값이 아니라 그 Parameter ARN을 참조한다. 다른 프로젝트의 `OPENAI_API_KEY`를 가져오거나 값을 명세·Image·Log에 넣지 않는다. 기존 `aws/ssm`을 사용하며 별도 KMS Key·광범위 복호화·Parameter 쓰기 권한을 추가하지 않는다.
+
+읽기 전용 대상 확인 → 필요한 Parameter·Execution Role 변경 승인 및 적용 → 새 실행 명세 등록 → 같은 Image의 Task와 Healthy 확인 → 재로그인·합성 문의 한 건 접수 → Job·Attempt·제안·원문 보존·Cloud Log 확인 순서로 진행한다. 실제 AI 생성이 실패해도 이번 실험에서 추가 호출을 승인받은 것으로 보지 않는다. 확인이 끝나면 AI 비활성 명세로 복귀해 추가 자동 처리를 막는다. RDS Instance·Schema·DNS와 기존 Secret은 변경하지 않는다.
+
+로컬 Java Test는 실제 환경 변수 이름으로 Policy·검사 Property가 Binding되는지 확인하고, JavaScript Test는 설정 조각·한 Key 권한·병합 후 기본 보안 설정 보존을 검사한다. 실제 IAM 평가·Secret 접근·Provider 인증·Cloud 실행은 별도로 확인한다.
+
 ## 실습 종료와 재개
 
 실행 수를 0으로 내린 뒤 Service Task뿐 아니라 단독 실행 Task도 남지 않았는지 확인한다. ALB는 Task가 없어도 과금되고, RDS Stop은 Storage·Backup 비용을 중단하지 않으며 7일 후 자동 재시작된다. 장기 휴지기의 기본 절차는 **쓰기·Worker 중단 → 마지막 Snapshot → 별도 복원 검증 → 승인된 ALB·DB Instance 정리 → 필요한 Image·Snapshot·Parameter 보관**이다. 실제 삭제 명령이나 자동 정리는 이 초안에 넣지 않았다.
