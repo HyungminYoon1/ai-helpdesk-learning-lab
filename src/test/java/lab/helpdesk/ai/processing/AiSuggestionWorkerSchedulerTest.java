@@ -2,9 +2,12 @@ package lab.helpdesk.ai.processing;
 
 import java.time.Instant;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -23,6 +26,20 @@ import static org.mockito.Mockito.when;
 
 class AiSuggestionWorkerSchedulerTest {
 
+    private final Logger logger = (Logger) LoggerFactory.getLogger(AiSuggestionWorkerScheduler.class);
+    private Level previousLevel;
+
+    @BeforeEach
+    void enable_info_for_this_logger_without_depending_on_spring_test_order() {
+        previousLevel = logger.getLevel();
+        logger.setLevel(Level.INFO);
+    }
+
+    @AfterEach
+    void restore_the_previous_logger_level() {
+        logger.setLevel(previousLevel);
+    }
+
     @Test
     void the_scheduler_calls_one_tick_without_adding_its_own_retry_loop() {
         AiSuggestionJobWorker worker = mock(AiSuggestionJobWorker.class);
@@ -39,7 +56,6 @@ class AiSuggestionWorkerSchedulerTest {
         var output = mock(ContractValidatedOutput.class);
         when(output.toString()).thenReturn("UNSAFE_VALIDATED_OUTPUT_MARKER");
         when(worker.runOnce()).thenReturn(new AiSuggestionProcessingResult(outcome, claim(), output));
-        Logger logger = (Logger) LoggerFactory.getLogger(AiSuggestionWorkerScheduler.class);
         var appender = new ListAppender<ILoggingEvent>();
         appender.start();
         logger.addAppender(appender);
@@ -66,7 +82,6 @@ class AiSuggestionWorkerSchedulerTest {
         AiSuggestionJobWorker worker = mock(AiSuggestionJobWorker.class);
         when(worker.runOnce()).thenReturn(new AiSuggestionProcessingResult(outcome,
                 outcome == Outcome.NO_JOB ? null : claim(), null));
-        Logger logger = (Logger) LoggerFactory.getLogger(AiSuggestionWorkerScheduler.class);
         var appender = new ListAppender<ILoggingEvent>();
         appender.start();
         logger.addAppender(appender);
@@ -85,7 +100,6 @@ class AiSuggestionWorkerSchedulerTest {
         AiSuggestionJobWorker worker = mock(AiSuggestionJobWorker.class);
         when(worker.runOnce()).thenReturn(new AiSuggestionProcessingResult(
                 Outcome.RECOVERY_STATE_UNCONFIRMED, null, null));
-        Logger logger = (Logger) LoggerFactory.getLogger(AiSuggestionWorkerScheduler.class);
         var appender = new ListAppender<ILoggingEvent>();
         appender.start();
         logger.addAppender(appender);
@@ -106,7 +120,6 @@ class AiSuggestionWorkerSchedulerTest {
         AiSuggestionJobWorker worker = mock(AiSuggestionJobWorker.class);
         when(worker.runOnce()).thenThrow(new IllegalStateException("UNSAFE_INPUT_MARKER",
                 new IllegalArgumentException("UNSAFE_CAUSE_MARKER")));
-        Logger logger = (Logger) LoggerFactory.getLogger(AiSuggestionWorkerScheduler.class);
         var appender = new ListAppender<ILoggingEvent>();
         appender.start();
         logger.addAppender(appender);

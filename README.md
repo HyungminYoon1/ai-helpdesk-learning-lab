@@ -1119,6 +1119,14 @@ node .\scripts\week7-worker-browser-live.mjs --live --confirm-helpdesk-key --con
 
 2026-10-19 로컬 핵심 Test 44개와 전체 Java 724개가 실패·오류·건너뜀 없이 통과했다. 실제 PostgreSQL의 지연 FK 제약을 이용해 INSERT 뒤 Commit만 실패시킨 경우에도 접수 Row 0건·접수 Commit Event 없음·HTTP 500을 확인했다. 새 Log의 AWS 전달·Cloud 배포와 실제 AI 호출은 이 검증에 포함하지 않았다.
 
+10/20의 [CI Run 39396150055](https://github.com/HyungminYoon1/ai-helpdesk-learning-lab/actions/runs/39396150055)에서는 앞선 Spring Test의 Root `WARN` 설정이 남아 Handler의 `INFO` Log를 수집하지 못했다. Java 1,009개 중 1개가 실패했고 뒤의 JavaScript·Image Build는 실행하지 않았다. 같은 순서를 로컬에서 재현한 뒤 Handler·Worker의 Log 검증 Test가 자기 Logger만 `INFO`로 설정하고 매번 이전 값을 복원하도록 수정했다. 운영 Logger·Event·업무 코드는 바꾸지 않았으며, `WARN` 설정에서는 Handler가 `INFO`를 강제로 출력하지 않는 Case도 추가했다.
+
+아래의 순서 고정 실행은 통합 Test의 `WARN` 설정을 먼저 적용한 뒤 두 Log Test를 실행한다. 수정 후 28개가 실패·오류·건너뜀 없이 통과했다. 앞선 전체 로컬 `verify`의 성공과 이 실행, 수정 Source의 원격 CI 결과는 구분한다.
+
+```powershell
+.\mvnw.cmd -B -ntp "-Dtest=AiPrivacyScanFailureIntegrationTest,AiSuggestionWorkerSchedulerTest,HandlerTimingInterceptorTest" "-Dsurefire.runOrder=alphabetical" test
+```
+
 ## App 종료 뒤 DB Connection과 Job
 
 [별도 JVM 재시작 Test](./src/test/java/lab/helpdesk/ai/processing/AiSuggestionWorkerProcessRestartIntegrationTest.java)는 같은 PostgreSQL Testcontainer를 유지하며 Test가 만든 자식 Process만 종료한다. 추가 종료 Case는 접수·실행권 예약을 Commit한 다음, Provider·자동 Worker가 꺼진 상태에서 별도 Test Transaction에 Row Lock과 미완료 제목 변경을 남겨 둔다.
