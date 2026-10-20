@@ -509,6 +509,18 @@ Test 전용 Main/중첩 Class와 Bridge만 읽기 전용 Mount하고 `target/cla
 
 이 구성의 측정은 외부 AI 대신 로컬 응답을 사용하는 제한 실험이다. 향후 Task 안에 개인정보 탐지 모델을 넣는다면 모델 파일·추론 메모리·CPU까지 다시 측정해야 한다. 원격 OpenAI 모델의 가중치는 Provider 서버에 있으며 이 Task에 올리지 않는다. 실제 AI Key·AWS·ECR·원격 CI·RDS TLS·Browser 검증과 구분한다.
 
+실패와 자원 회수는 Test 전용 `-ScanMode`로 별도 실행한다. 기본 `NORMAL`은 기존 합성 검사 구성을 사용한다. `TIMEOUT`·`NON_ZERO_EXIT`는 Test Configuration의 Primary Scanner만 교체하며, 고정 입력 제한·Image의 Process Transport·Preparer·자동 Worker·DB 저장은 유지한다. Main 코드나 배포용 설정에 실패 주입 옵션을 추가하지 않는다.
+
+```powershell
+# 위에서 선택한 검증 Image를 그대로 사용한다. 실제 Key는 필요 없다.
+.\scripts\Verify-Week8SyntheticRuntime.ps1 -Image $probeImage -ScanMode TIMEOUT
+.\scripts\Verify-Week8SyntheticRuntime.ps1 -Image $probeImage -ScanMode NON_ZERO_EXIT
+```
+
+Test 자식은 JAR의 합성 프로그램으로 정상 JSON을 출력한 뒤 PID만 담은 실행 증거를 만들고, 각각 종료하지 않고 대기하거나 Exit Code 7로 끝난다. 부모는 그 지점까지 실행됐고 해당 Process가 종료됐는지 확인한다. Timeout 이전에 자식이 시작되지 못한 결과를 성공으로 세지 않는다. Timeout은 `PRIVACY_SCAN_TIMEOUT`, 비정상 종료는 기존 `ADAPTER_CONFIGURATION_ERROR`의 최종 실패를 확인하며, 두 경우 모두 HTTP·제안 0건과 원문·작성자·예약 1회 보존을 검사한다. 추가 범위 밖 입력도 별도로 거부하고 반복 Polling의 무재호출과 Process·Thread 회수를 확인한다.
+
+세 Mode는 각각 새 Project·DB에서 실행하며 함께 실행할 수도 있다. 이때 자원 수치의 차이를 실패 원인 하나의 효과로 단정하지 않는다. Test Launcher의 JUnit Test Class는 Mount 대상에서 제외한다. 정리 뒤 해당 Project의 Container·Network 0개와 합성 Secret 파일 제거를 다시 확인하고, DB Volume·Image는 그대로 보존한다.
+
 ### V2 인물 관계의 독립 검증
 
 [`AiPrivacyScanResultV2Validator`](./src/main/java/lab/helpdesk/ai/input/AiPrivacyScanResultV2Validator.java)는 인물의 등장 위치와 관계를 분리한 계약의 구조 검증기다. 기존 V1 검증기·치환기·Preparer는 변경하지 않았다. Spring Bean이나 자동 Version 전환도 추가하지 않는다.

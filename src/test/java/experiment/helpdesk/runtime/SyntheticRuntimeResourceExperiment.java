@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -18,8 +19,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.sun.net.httpserver.HttpServer;
 import lab.helpdesk.HelpdeskApplication;
 import lab.helpdesk.ai.input.AiInputPrivacyGuard;
+import lab.helpdesk.ai.input.AiPrivacyScanner;
 import lab.helpdesk.ai.input.AiScannedInputPreparer;
+import lab.helpdesk.ai.input.ProcessAiPrivacyScanner;
 import lab.helpdesk.ai.input.synthetic.SyntheticDeploymentPrivacyScanner;
+import lab.helpdesk.ai.input.synthetic.SyntheticPrivacyScannerProgram;
 import lab.helpdesk.ai.processing.AiSuggestionJobWorker;
 import lab.helpdesk.ai.processing.AiSuggestionWorkerScheduler;
 import lab.helpdesk.ai.provider.SpringAiOpenAiSuggestionProvider;
@@ -29,8 +33,10 @@ import lab.helpdesk.ticket.application.TicketReceiptApplicationService;
 import lab.helpdesk.ticket.application.TicketReceiptResult;
 import org.springframework.boot.Banner;
 import org.springframework.boot.SpringApplication;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.json.JsonMapper;
@@ -44,6 +50,9 @@ public final class SyntheticRuntimeResourceExperiment {
     private static final String TITLE = SyntheticDeploymentPrivacyScanner.TITLE;
     private static final String BODY = SyntheticDeploymentPrivacyScanner.BODY;
     private static final String OUTSIDE = BODY + " 허용 목록 밖의 추가 문장";
+    private static final Path CHILD_WITNESS = Path.of("/tmp/helpdesk-synthetic-scan-witness");
+
+    enum ScanMode { NORMAL, TIMEOUT, NON_ZERO_EXIT }
 
     private SyntheticRuntimeResourceExperiment() { }
 
@@ -63,6 +72,9 @@ public final class SyntheticRuntimeResourceExperiment {
             application.setLogStartupInfo(false);
             try (var context = application.run()) {
                 var environment = context.getEnvironment();
+                var scanMode = scanMode(environment);
+                report.put("scanMode", scanMode.name());
+                report.put("testScannerOverride", scanMode != ScanMode.NORMAL);
                 require(List.of(environment.getActiveProfiles()).containsAll(List.of("postgres", "deployment", "synthetic-ai")));
                 require("jdbc:postgresql://db:5432/helpdesk_local".equals(environment.getProperty("spring.datasource.url")));
                 require("false".equals(environment.getProperty("helpdesk.ai.provider.enabled")));
@@ -72,6 +84,8 @@ public final class SyntheticRuntimeResourceExperiment {
                 requirePackaged(AiScannedInputPreparer.class);
                 requirePackaged(AiSuggestionJobWorker.class);
                 requirePackaged(SyntheticDeploymentPrivacyScanner.class);
+                requirePackaged(ProcessAiPrivacyScanner.class);
+                requirePackaged(SyntheticPrivacyScannerProgram.class);
                 report.put("mainClassesFromImageJar", true);
                 report.put("automaticSchedulerRegistered", true);
                 report.put("appReadySeconds", seconds(started));
@@ -94,43 +108,48 @@ public final class SyntheticRuntimeResourceExperiment {
                 stage = "AUTOMATIC_JOBS";
                 var receipts = context.getBean(TicketReceiptApplicationService.class);
                 var fixture = context.getBean(LoopbackAi.class);
-                var accepted = new ArrayList<TicketReceiptResult>();
-                var snapshots = new ArrayList<Map<String, Object>>();
-                for (int index = 0; index < 3; index++) {
-                    long jobStarted = System.nanoTime();
-                    var receipt = receipts.receive(TITLE, BODY, AUTHOR);
-                    awaitTerminal(jdbc, receipt.jobId(), "SUCCEEDED");
-                    assertReceipt(jdbc, receipt, BODY);
-                    require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions WHERE job_id = ?", Integer.class,
-                            receipt.jobId()) == 1);
+                if (scanMode == ScanMode.NORMAL) {
+                    var accepted = new ArrayList<TicketReceiptResult>();
+                    var snapshots = new ArrayList<Map<String, Object>>();
+                    for (int index = 0; index < 3; index++) {
+                        long jobStarted = System.nanoTime();
+                        var receipt = receipts.receive(TITLE, BODY, AUTHOR);
+                        awaitTerminal(jdbc, receipt.jobId(), "SUCCEEDED");
+                        assertReceipt(jdbc, receipt, BODY);
+                        require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions WHERE job_id = ?", Integer.class,
+                                receipt.jobId()) == 1);
+                        requireNoScannerResources();
+                        accepted.add(receipt);
+                        var snapshot = resources();
+                        snapshot.put("receiptToObservedTerminalSeconds", seconds(jobStarted));
+                        snapshots.add(snapshot);
+                    }
+                    var rejected = receipts.receive(TITLE, OUTSIDE, AUTHOR);
+                    awaitTerminal(jdbc, rejected.jobId(), "FAILED");
+                    assertReceipt(jdbc, rejected, OUTSIDE);
+                    require("ADAPTER_CONFIGURATION_ERROR".equals(jdbc.queryForObject(
+                            "SELECT last_failure_code FROM ai_suggestion_jobs WHERE id = ?", String.class, rejected.jobId())));
+                    require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions WHERE job_id = ?", Integer.class, rejected.jobId()) == 0);
+                    // Several scheduled idle ticks must not turn the terminal failure into another call.
+                    Thread.sleep(1_500);
                     requireNoScannerResources();
-                    accepted.add(receipt);
-                    var snapshot = resources();
-                    snapshot.put("receiptToObservedTerminalSeconds", seconds(jobStarted));
-                    snapshots.add(snapshot);
+                    require(fixture.requests.get() == 3 && fixture.validMaskedRequests.get() == 3);
+                    require(jdbc.queryForObject("SELECT count(*) FROM tickets", Integer.class) == 4);
+                    require(jdbc.queryForObject("SELECT count(*) FROM ticket_messages", Integer.class) == 4);
+                    require(jdbc.queryForObject("SELECT count(*) FROM ai_suggestion_attempts", Integer.class) == 4);
+                    require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions", Integer.class) == 3);
+                    report.put("acceptedJobs", accepted.size());
+                    report.put("rejectedJobs", 1);
+                    report.put("providerHttpRequests", fixture.requests.get());
+                    report.put("exactMaskedRequests", fixture.validMaskedRequests.get());
+                    report.put("originalsAuthorsAndReservationsPreserved", true);
+                    report.put("liveChildProcessesAfterJobs", 0);
+                    report.put("livePrivacyIoThreadsAfterJobs", 0);
+                    report.put("afterEachAcceptedJob", snapshots);
+                } else {
+                    stage = "CONTROLLED_SCANNER_FAILURE";
+                    verifyScannerFailure(jdbc, receipts, fixture, scanMode, report);
                 }
-                var rejected = receipts.receive(TITLE, OUTSIDE, AUTHOR);
-                awaitTerminal(jdbc, rejected.jobId(), "FAILED");
-                assertReceipt(jdbc, rejected, OUTSIDE);
-                require("ADAPTER_CONFIGURATION_ERROR".equals(jdbc.queryForObject(
-                        "SELECT last_failure_code FROM ai_suggestion_jobs WHERE id = ?", String.class, rejected.jobId())));
-                require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions WHERE job_id = ?", Integer.class, rejected.jobId()) == 0);
-                // Several scheduled idle ticks must not turn the terminal failure into another call.
-                Thread.sleep(1_500);
-                requireNoScannerResources();
-                require(fixture.requests.get() == 3 && fixture.validMaskedRequests.get() == 3);
-                require(jdbc.queryForObject("SELECT count(*) FROM tickets", Integer.class) == 4);
-                require(jdbc.queryForObject("SELECT count(*) FROM ticket_messages", Integer.class) == 4);
-                require(jdbc.queryForObject("SELECT count(*) FROM ai_suggestion_attempts", Integer.class) == 4);
-                require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions", Integer.class) == 3);
-                report.put("acceptedJobs", accepted.size());
-                report.put("rejectedJobs", 1);
-                report.put("providerHttpRequests", fixture.requests.get());
-                report.put("exactMaskedRequests", fixture.validMaskedRequests.get());
-                report.put("originalsAuthorsAndReservationsPreserved", true);
-                report.put("liveChildProcessesAfterJobs", 0);
-                report.put("livePrivacyIoThreadsAfterJobs", 0);
-                report.put("afterEachAcceptedJob", snapshots);
                 report.put("afterJobs", resources());
                 stage = "CLOSE_APPLICATION";
             }
@@ -146,6 +165,61 @@ public final class SyntheticRuntimeResourceExperiment {
         report.put("experimentSeconds", seconds(started));
         System.out.println(PREFIX + MAPPER.writeValueAsString(report));
         if (!passed) System.exit(1);
+    }
+
+    private static void verifyScannerFailure(JdbcTemplate jdbc, TicketReceiptApplicationService receipts,
+            LoopbackAi fixture, ScanMode mode, Map<String, Object> report) throws Exception {
+        require(!Files.exists(CHILD_WITNESS));
+        long started = System.nanoTime();
+        var receipt = receipts.receive(TITLE, BODY, AUTHOR);
+        awaitTerminal(jdbc, receipt.jobId(), "FAILED");
+        assertReceipt(jdbc, receipt, BODY);
+        String expectedCode = mode == ScanMode.TIMEOUT ? "PRIVACY_SCAN_TIMEOUT" : "ADAPTER_CONFIGURATION_ERROR";
+        require(expectedCode.equals(jdbc.queryForObject("SELECT last_failure_code FROM ai_suggestion_jobs WHERE id = ?",
+                String.class, receipt.jobId())));
+        // The child writes this only after the packaged program emitted its valid JSON.
+        // Thus a timeout before child startup cannot count as this experiment's success.
+        String witness = Files.readString(CHILD_WITNESS).trim();
+        require(witness.matches("[1-9][0-9]*"));
+        long childPid = Long.parseLong(witness);
+        require(ProcessHandle.of(childPid).map(handle -> !handle.isAlive()).orElse(true));
+        requireNoScannerResources();
+        var failureResources = resources();
+        double failureSeconds = seconds(started);
+        require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions", Integer.class) == 0);
+        require(fixture.requests.get() == 0);
+
+        var rejected = receipts.receive(TITLE, OUTSIDE, AUTHOR);
+        awaitTerminal(jdbc, rejected.jobId(), "FAILED");
+        assertReceipt(jdbc, rejected, OUTSIDE);
+        require("ADAPTER_CONFIGURATION_ERROR".equals(jdbc.queryForObject(
+                "SELECT last_failure_code FROM ai_suggestion_jobs WHERE id = ?", String.class, rejected.jobId())));
+        Thread.sleep(1_500); // Observe terminal failures through several automatic idle ticks.
+        require(Files.readString(CHILD_WITNESS).trim().equals(witness));
+        requireNoScannerResources();
+        require(fixture.requests.get() == 0);
+        require(jdbc.queryForObject("SELECT count(*) FROM tickets", Integer.class) == 2);
+        require(jdbc.queryForObject("SELECT count(*) FROM ticket_messages", Integer.class) == 2);
+        require(jdbc.queryForObject("SELECT count(*) FROM ai_suggestion_attempts", Integer.class) == 2);
+        require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions", Integer.class) == 0);
+        require(Boolean.TRUE.equals(jdbc.queryForObject("SELECT bool_and(current_attempt = 1 "
+                + "AND reserved_generation_count = 1 AND status = 'FAILED') FROM ai_suggestion_jobs", Boolean.class)));
+        report.put("acceptedJobs", 0);
+        report.put("rejectedJobs", 2);
+        report.put("controlledScannerFailureJobs", 1);
+        report.put("expectedScannerFailureCode", expectedCode);
+        report.put("childReachedAfterJsonWrite", true);
+        report.put("ownedChildConfirmedDead", true);
+        report.put("providerHttpRequests", 0);
+        report.put("originalsAuthorsAndReservationsPreserved", true);
+        report.put("liveChildProcessesAfterJobs", 0);
+        report.put("livePrivacyIoThreadsAfterJobs", 0);
+        report.put("afterControlledFailure", failureResources);
+        report.put("receiptToObservedFailureSeconds", failureSeconds);
+    }
+
+    static ScanMode scanMode(Environment environment) {
+        return ScanMode.valueOf(environment.getRequiredProperty("helpdesk.runtime.probe.scan-mode"));
     }
 
     private static void awaitTerminal(JdbcTemplate jdbc, long id, String expected) throws InterruptedException {
@@ -200,6 +274,20 @@ public final class SyntheticRuntimeResourceExperiment {
 
     @Configuration(proxyBeanMethods = false)
     static class ControlledAiConfiguration {
+        @Bean @Primary
+        AiPrivacyScanner runtimeProbeScanner(@Qualifier("aiPrivacyScanner") AiPrivacyScanner packagedScanner,
+                Environment environment) {
+            var mode = scanMode(environment);
+            if (mode == ScanMode.NORMAL) return packagedScanner;
+            String java = Path.of(System.getProperty("java.home"), "bin", "java").toAbsolutePath().toString();
+            var command = List.of(java, "-Xms16m", "-Xmx64m", "-XX:ActiveProcessorCount=1",
+                    "-Dfile.encoding=UTF-8", "-Dloader.path=/opt/probe",
+                    "-Dloader.main=" + FaultScannerProgram.class.getName(), "-cp", "/app/helpdesk.jar",
+                    "org.springframework.boot.loader.launch.PropertiesLauncher", mode.name());
+            return new SyntheticDeploymentPrivacyScanner(new ProcessAiPrivacyScanner(command, 4_096, 1_024, 1_024,
+                    Duration.ofMillis(environment.getRequiredProperty(
+                            "helpdesk.ai.synthetic-scan.cleanup-timeout-ms", Long.class))));
+        }
         @Bean(destroyMethod = "close") LoopbackAi loopbackAi() throws IOException { return new LoopbackAi(); }
         @Bean(destroyMethod = "close") SpringAiOpenAiSuggestionProvider controlledProvider(Environment environment,
                 AiInputPrivacyGuard guard, LoopbackAi fixture) {
@@ -207,6 +295,18 @@ public final class SyntheticRuntimeResourceExperiment {
         }
         @Bean AiSuggestionOutputValidator controlledValidator(Environment environment) {
             return SyntheticRuntimeProviderBridge.validator(environment);
+        }
+    }
+
+    /** Test-only foreground child; no user-selected mode or new Main configuration. */
+    public static final class FaultScannerProgram {
+        private FaultScannerProgram() { }
+        public static void main(String[] args) throws Exception {
+            if (args.length != 1 || !List.of("TIMEOUT", "NON_ZERO_EXIT").contains(args[0])) System.exit(9);
+            SyntheticPrivacyScannerProgram.main(new String[0]);
+            Files.writeString(CHILD_WITNESS, Long.toString(ProcessHandle.current().pid()), StandardOpenOption.CREATE_NEW);
+            if ("NON_ZERO_EXIT".equals(args[0])) System.exit(7);
+            Thread.sleep(120_000); // Keep stdout open after valid JSON; the parent must enforce its deadline.
         }
     }
 

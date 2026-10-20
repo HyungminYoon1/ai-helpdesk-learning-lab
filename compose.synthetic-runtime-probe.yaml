@@ -53,6 +53,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/helpdesk_local
       SPRING_DATASOURCE_USERNAME: helpdesk_app
       SERVER_PORT: "0"
+      HELPDESK_RUNTIME_PROBE_SCAN_MODE: ${HELPDESK_RUNTIME_PROBE_SCAN_MODE:?test-only scan mode required}
       HELPDESK_AI_PROVIDER_ENABLED: "false"
       HELPDESK_AI_PROVIDER_MAX_SUMMARY_CODE_POINTS: "200"
       HELPDESK_AI_WORKER_ENABLED: "true"

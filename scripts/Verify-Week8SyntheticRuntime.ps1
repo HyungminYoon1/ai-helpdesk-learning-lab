@@ -4,7 +4,8 @@ param(
     [ValidatePattern('^[a-z0-9][a-z0-9/_.:-]+$')]
     [string] $Image = 'helpdesk:week8-synthetic-9f2074b',
     [ValidateSet(512, 1024)] [int] $MemoryMiB = 512,
-    [ValidateSet(0.25, 0.5)] [double] $CpuLimit = 0.25
+    [ValidateSet(0.25, 0.5)] [double] $CpuLimit = 0.25,
+    [ValidateSet('NORMAL', 'TIMEOUT', 'NON_ZERO_EXIT')] [string] $ScanMode = 'NORMAL'
 )
 
 Set-StrictMode -Version Latest
@@ -25,7 +26,8 @@ $stage = 'PREREQUISITES'
 $cleanupPassed = $true
 $passed = $false
 $report = [ordered]@{ evidence = 'LOCAL_SYNTHETIC_AUTOMATIC_RUNTIME_RESOURCES'; realAiCalled = $false;
-    awsChanged = $false; browserE2e = $false; childOnlyEnvironment = $true; volumeDeleted = $false }
+    awsChanged = $false; browserE2e = $false; childOnlyEnvironment = $true; volumeDeleted = $false;
+    scanMode = $ScanMode }
 
 function Invoke-ProbeDocker {
     param([string[]] $Arguments, [int] $TimeoutSeconds = 60)
@@ -84,7 +86,8 @@ try {
     foreach ($relative in @('experiment/helpdesk/runtime', 'lab/helpdesk/ai/provider')) {
         [void] [System.IO.Directory]::CreateDirectory((Join-Path $classesPath $relative))
     }
-    $launcherClasses = @(Get-ChildItem -LiteralPath (Join-Path $repo 'target/test-classes/experiment/helpdesk/runtime') -Filter 'SyntheticRuntimeResourceExperiment*.class' -File)
+    $launcherClasses = @(Get-ChildItem -LiteralPath (Join-Path $repo 'target/test-classes/experiment/helpdesk/runtime') -Filter 'SyntheticRuntimeResourceExperiment*.class' -File |
+        Where-Object { $_.BaseName -eq 'SyntheticRuntimeResourceExperiment' -or $_.BaseName.StartsWith('SyntheticRuntimeResourceExperiment$') })
     Require-Probe ($launcherClasses.Count -ge 3)
     foreach ($file in $launcherClasses) { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $classesPath 'experiment/helpdesk/runtime') }
     Copy-Item -LiteralPath (Join-Path $repo 'target/test-classes/lab/helpdesk/ai/provider/SyntheticRuntimeProviderBridge.class') -Destination (Join-Path $classesPath 'lab/helpdesk/ai/provider')
@@ -107,6 +110,7 @@ try {
     $settings['HELPDESK_RUNTIME_PROBE_MEMORY'] = [string] $MemoryMiB
     $settings['HELPDESK_RUNTIME_PROBE_CLASSES'] = $classesPath
     $settings['HELPDESK_RUNTIME_PROBE_SECRETS'] = $secretsPath
+    $settings['HELPDESK_RUNTIME_PROBE_SCAN_MODE'] = $ScanMode
     $null = Docker-Value ($compose + @('config', '--quiet'))
     $stage = 'CREATE_AND_VERIFY_ISOLATION'
     $null = Docker-Value ($compose + @('create', '--no-build'))
@@ -154,7 +158,8 @@ try {
     $probe = $lines[0].Substring($prefix.Length) | ConvertFrom-Json
     $report.probe = $probe
     Require-Probe ($wait.ExitCode -eq 0 -and $wait.Output -eq '0' -and $state[0] -eq '0' -and $state[1] -eq 'false' -and
-        $probe.outcome -eq 'PASS' -and $probe.realAiCalled -eq $false -and $probe.mainClassesFromImageJar -eq $true)
+        $probe.outcome -eq 'PASS' -and $probe.realAiCalled -eq $false -and $probe.mainClassesFromImageJar -eq $true -and
+        $probe.scanMode -eq $ScanMode)
     Require-Probe ($probe.beforeJobs.'memory.max' -eq $MemoryMiB * 1MB -and $probe.beforeJobs.'memory.swap.max' -eq 0)
     $passed = $true
 } catch {
@@ -183,6 +188,14 @@ try {
                 [System.IO.Path]::GetFileName($resolvedRun) -eq $runId)
             Remove-Item -LiteralPath $resolvedSecrets -Recurse -Force
         }
+        Require-Probe ([string]::IsNullOrWhiteSpace((Docker-Value @('ps', '-aq', '--filter',
+                ('label=com.docker.compose.project=' + $project)))))
+        Require-Probe ([string]::IsNullOrWhiteSpace((Docker-Value @('network', 'ls', '-q', '--filter',
+                ('label=com.docker.compose.project=' + $project)))))
+        Require-Probe (-not (Test-Path -LiteralPath $secretsPath))
+        $report.remainingProjectContainers = 0
+        $report.remainingProjectNetworks = 0
+        $report.syntheticSecretFilesRemoved = $true
     } catch { $cleanupPassed = $false }
 }
 $report.stage = $stage

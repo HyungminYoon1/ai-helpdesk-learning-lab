@@ -77,3 +77,32 @@ test("failures publish fixed stage/codes without raw logs or exception text", ()
   assert.doesNotMatch(experiment, /printStackTrace|failure\.getMessage|failure\.toString/);
   assert.doesNotMatch(runner, /Write-Output \$logs|Write-Error|Format-List \*/);
 });
+
+test("failure injection is an explicit test-only mode, never a Main input option", () => {
+  assert.match(runner, /ValidateSet\('NORMAL', 'TIMEOUT', 'NON_ZERO_EXIT'\)/);
+  assert.match(compose, /HELPDESK_RUNTIME_PROBE_SCAN_MODE: \$\{HELPDESK_RUNTIME_PROBE_SCAN_MODE:/);
+  assert.match(experiment, /@Qualifier\("aiPrivacyScanner"\)/);
+  assert.match(experiment, /if \(mode == ScanMode\.NORMAL\) return packagedScanner/);
+  assert.doesNotMatch(read("src/main/java/lab/helpdesk/ai/input/synthetic/SyntheticDeploymentPrivacyConfiguration.java"),
+    /probe\.scan-mode|FaultScannerProgram|NON_ZERO_EXIT/);
+});
+
+test("valid JSON followed by timeout or nonzero exit cannot count as a successful scan", () => {
+  assert.match(experiment, /SyntheticPrivacyScannerProgram\.main\(new String\[0\]\)/);
+  assert.match(experiment, /StandardOpenOption\.CREATE_NEW/);
+  assert.match(experiment, /System\.exit\(7\)/);
+  assert.match(experiment, /Thread\.sleep\(120_000\)/);
+  assert.match(experiment, /PRIVACY_SCAN_TIMEOUT" : "ADAPTER_CONFIGURATION_ERROR/);
+  assert.match(experiment, /childReachedAfterJsonWrite", true/);
+  assert.match(experiment, /ownedChildConfirmedDead", true/);
+  assert.match(experiment, /fixture\.requests\.get\(\) == 0/);
+});
+
+test("failed runs preserve reservations and independently recheck project cleanup", () => {
+  assert.match(experiment, /bool_and\(current_attempt = 1/);
+  assert.match(experiment, /reserved_generation_count = 1 AND status = 'FAILED'/);
+  assert.match(runner, /remainingProjectContainers = 0/);
+  assert.match(runner, /remainingProjectNetworks = 0/);
+  assert.match(runner, /syntheticSecretFilesRemoved = \$true/);
+  assert.match(runner, /\$probe\.scanMode -eq \$ScanMode/);
+});
