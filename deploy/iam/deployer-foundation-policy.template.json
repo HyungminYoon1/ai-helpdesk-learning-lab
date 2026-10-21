@@ -28,7 +28,14 @@
       "NotAction": [
         "iam:*",
         "sts:GetCallerIdentity",
-        "sts:GetSessionToken"
+        "sts:GetSessionToken",
+        "route53:GetHostedZoneCount",
+        "route53:ListHostedZones",
+        "route53:ListHostedZonesByName",
+        "route53:GetHostedZone",
+        "route53:ListResourceRecordSets",
+        "route53:ChangeResourceRecordSets",
+        "route53:GetChange"
       ],
       "Resource": "*",
       "Condition": {

@@ -1,0 +1,40 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadDnsLabZoneList",
+      "Effect": "Allow",
+      "Action": [
+        "route53:GetHostedZoneCount",
+        "route53:ListHostedZones",
+        "route53:ListHostedZonesByName"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "us-east-1" },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" }
+      }
+    },
+    {
+      "Sid": "CreatePublicDnsLabZoneTemporarily",
+      "Effect": "Allow",
+      "Action": ["route53:CreateHostedZone"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "us-east-1" },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" },
+        "Null": { "route53:VPCs": "true" }
+      }
+    },
+    {
+      "Sid": "ReadDnsLabChangeStatus",
+      "Effect": "Allow",
+      "Action": ["route53:GetChange"],
+      "Resource": "arn:aws:route53:::change/*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "us-east-1" },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" }
+      }
+    }
+  ]
+}

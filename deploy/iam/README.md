@@ -197,6 +197,62 @@ Edge는 이미 Version 1~5를 보관해 AWS의 5개 한도에 도달했다. 사�
 
 VPC Console의 `ec2:DescribeNetworkAcls` 조회는 Allow가 없어 거부됐다. 이 오류를 해결하려고 권한을 확대하지 않았으며 VPC 목록·생성 폼 확인과 구분했다. 이 초기 적용 단계에서는 서비스 연결 Role 세 개의 생성 권한만 허용했고 실제 생성은 하지 않았다. 이후의 RDS 요청 거부와 재개 시점의 Role 존재 여부는 별도로 확인한다. App·RDS·ALB 실행과 DNS·HTTPS 검증은 이 IAM 적용 결과에 포함하지 않는다.
 
+## Route 53 실습의 두 단계 권한
+
+2026-10-21에 `dns-lab.hmyoon.com` Public Hosted Zone 한 개와 실습용 Record 두 개를 생성·조회하고 임시 생성 권한을 회수했다. 아래 Template은 생성 단계와 회수 뒤의 최종 권한을 구분한다. 실제 적용 결과는 아래에 기록했으며, Cloudflare NS·기존 서비스 CNAME·App·RDS·Secret과 기존 Role은 변경하지 않았다.
+
+### 글로벌 DNS와 서울 제한
+
+Route 53의 글로벌 API는 `us-east-1`을 사용하므로 기존 서울 외 요청 거부와 충돌한다. Foundation의 `RestrictRegionalOperationsToSeoul`에서 필요한 Route 53 Action만 `NotAction` 예외로 분리하고, `RequireMfaExceptSelfEnrollment`와 나머지 문장은 보존한다. 예외는 그 거부 문장의 적용 대상에서 빼는 것이며 그 자체로 허용을 부여하지 않는다. 별도 `helpdesk-deployer-dns-lab` 정책의 모든 Allow에 MFA `true`·글로벌 API의 `us-east-1` 조건을 명시한다. ECS·RDS·ALB 등 기존 Regional 서비스의 서울 제한은 유지한다. [AWS 글로벌 서비스 예외](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_examples_aws_deny-requested-region.html)
+
+Foundation Template은 **생성 권한 회수 뒤의 최종 상태**다. 최종 DNS 예외는 `GetHostedZoneCount`, `ListHostedZones`, `ListHostedZonesByName`, `GetHostedZone`, `ListResourceRecordSets`, `ChangeResourceRecordSets`, `GetChange` 일곱 개다. 1단계 생성 동안만 여기에 `route53:CreateHostedZone` 한 개를 추가하며 `route53:*`는 사용하지 않는다.
+
+### 생성과 회수 순서
+
+1. Root에서 현행 Foundation 전체 JSON·Version·연결 대상을 확인하고 보관한다. 승인한 예외 이외 내용이 다르면 자동으로 덮어쓰지 않는다. 기존 Version을 보존하며 다섯 Version 한도로 삭제가 필요하면 먼저 확인한다.
+2. Foundation에 위 여덟 Action 예외를 적용하고, [임시 생성 Template](./deployer-dns-lab-bootstrap-policy.template.json)으로 `helpdesk-deployer-dns-lab`을 만들어 지정 사용자 한 명에게 연결한다. 임시 정책은 Zone 목록·생성·변경 상태 조회만 허용하며 다른 Zone의 Record 조회·변경은 허용하지 않는다.
+3. 비Root MFA 로그인 뒤 기존 동일 이름 Zone을 확인하고 Public Zone 한 개만 생성한다. 기본 NS·SOA는 AWS가 자동 생성한다. `route53:VPCs`가 없는 요청만 허용하고 VPC 연결·태그 변경·DNSSEC·유료 Health Check 권한은 추가하지 않는다. 생성 응답과 목록에서 새 Zone ID를 확인한다. 상세·Record 조회는 2단계 권한 적용 전에는 거부될 수 있으므로 이를 생성 실패로 해석하거나 재생성하지 않는다.
+4. 새 Zone ID가 확인되면 같은 정책을 [최종 Record Template](./deployer-dns-lab-records-policy.template.json)으로 교체하고, Foundation도 Template의 최종 일곱 DNS 예외로 바꾼다. `CreateHostedZone`은 별도 Allow와 지역 거부 예외 양쪽에서 제거한다. 이전 기본 Version을 보존하되 현재 기본 Version과 실제 사용자 연결을 다시 대조한다.
+5. 비Root로 돌아와 해당 Zone에서 아래 두 Record만 `CREATE`하고 다시 조회한다. `UPSERT`·`DELETE`·NS/SOA 변경은 허용하지 않는다. 새 Zone의 Name Server 직접 조회와 일반 DNS 조회를 비교하며 Cloudflare에 NS 위임은 추가하지 않는다.
+
+| 이름 | 유형 | 실습 값 |
+|---|---|---|
+| `proof.dns-lab.hmyoon.com` | TXT | `route53-direct-query`, TTL 60초 |
+| `dns-lab.hmyoon.com` | Alias A | 기존 서울 학습 ALB, Evaluate Target Health 비활성 |
+
+`CreateHostedZone`은 Zone 이름으로 제한하는 IAM 조건과 사전 Zone ARN 제한을 지원하지 않아 `Resource: "*"`가 필요하다. 따라서 생성 한 건은 실행 범위로 지키고, 생성 직후 권한을 회수한다. 목록 API는 계정의 다른 Zone 이름도 조회할 수 있고 `GetChange`는 `change/*` 상태 메타데이터를 조회할 수 있다. 최종 Zone 조회·Record 생성만 확인한 `arn:aws:route53:::hostedzone/<DNS_LAB_ZONE_ID>` 한 개에 제한한다. 이 자리표시자를 wildcard나 부모 Zone ID로 바꾸지 않는다. [Route 53 권한 정의](https://docs.aws.amazon.com/service-authorization/latest/reference/list_route53.html)
+
+Record 생성은 이름·유형을 각 문장에서 짝지어 제한하고, `ForAllValues:StringEquals`와 필수 조건 Key의 `Null: false`를 함께 사용한다. Alias A의 목표가 특정 ALB라는 조건은 이 IAM Key로 강제하지 못하므로 실제 저장한 Alias 대상과 기존 ALB 이름을 따로 대조한다. HTTPS·로그인 검증은 기존 `helpdesk.hmyoon.com`에서 유지하며 새 실습 이름의 인증서를 추가하지 않는다.
+
+### 설계 결정과 후속 확인
+
+서비스 전체 권한을 추가하는 안, Root에서 실습 전체를 실행하는 안, 비Root의 임시 생성과 지정 Zone 권한을 분리하는 안을 비교해 마지막 안을 선택했다. 이름으로 생성 권한을 제한할 수 없는 구간을 짧게 끝내고 이후 Record 작업을 Zone ID로 제한하기 위해서다. 영향 파일은 Foundation·DNS 두 Template·정책 Test·이 안내다. 실제 IAM 편집기의 검증, 비Root 실행 결과와 생성 권한 회수를 로컬 구조 Test와 구분해 기록한다.
+
+### 2026-10-21 실제 적용·조회 결과
+
+- `helpdesk-deployer-dns-lab`은 지정 IAM 사용자 `helpdesk-deployer` 한 명에게만 연결했다. 현재 기본값은 **Version 2**이며, Zone 조회·Record 생성 대상은 `Z079404317QHM5M3AEG4Y` 한 개다. 임시 생성 정책 Version 1은 비기본 버전으로 보존했다.
+- Foundation은 임시 **Version 2**에서 최종 **Version 3**으로 바꿨다. `CreateHostedZone`을 DNS Allow와 지역 거부의 예외 양쪽에서 제거했다. 저장 후 전체 JSON을 승인안과 대조했으며, 지역 예외 문장을 제외한 기존 14개 문장과 MFA·서울 조건은 그대로다. Foundation Version 1·2도 보존했다.
+- 두 정책의 AWS 편집기 검증은 보안·오류·경고·추천 모두 0이었다. 생성 권한 회수는 저장된 기본 정책 JSON으로 확인했으며, 회수 후 추가 Zone 생성을 시도하지는 않았다.
+- 비Root MFA 세션에서 Public Zone 한 개, TXT 한 개와 Alias A 한 개를 생성·조회했다. 최종 Record 수는 **4개(NS·SOA 기본 2개 + 실습 2개)**다. 첫 생성 직후 Console은 당시 허용되지 않았던 상세 조회를 재시도하다 오류를 표시했지만, 목록에서 생성된 Zone ID를 확인하고 중복 생성하지 않았다.
+- Alias 대상은 기존 `dualstack.helpdesk-learning-989929145.ap-northeast-2.elb.amazonaws.com`이며, 별칭 대상 Zone ID는 `ZWKZPGTI48KDX`, Evaluate Target Health는 `false`다. 변경 상태는 `INSYNC`였다.
+- 새 권한 서버 `ns-1455.awsdns-53.org`에 직접 질의하면 TXT 값 `route53-direct-query`와 Alias A의 IPv4 응답을 받았다. 일반 Resolver의 TXT 질의는 `NXDOMAIN`이었다. Cloudflare에 하위 Zone NS를 위임하지 않아 일반 조회 경로가 새 Route 53 Zone에 도달하지 않는 차이다.
+- 부모 NS는 `sierra.ns.cloudflare.com`·`vicky.ns.cloudflare.com`, 기존 서비스 CNAME은 `helpdesk-learning-989929145.ap-northeast-2.elb.amazonaws.com`으로 변경 전과 같았다. 이 실습 결과는 DNS 생성·전파·조회에 관한 것이며 새 실습 이름의 HTTPS나 App 기능을 검증한 것은 아니다.
+
+```powershell
+# Route 53 권한 서버에 직접 질의: 부모 위임 없이 새 Zone의 답을 확인한다.
+Resolve-DnsName proof.dns-lab.hmyoon.com -Type TXT -Server ns-1455.awsdns-53.org -DnsOnly -NoRecursion
+Resolve-DnsName dns-lab.hmyoon.com -Type A -Server ns-1455.awsdns-53.org -DnsOnly -NoRecursion
+
+# 일반 Resolver는 부모 DNS의 위임 경로를 따른다.
+Resolve-DnsName proof.dns-lab.hmyoon.com -Type TXT -DnsOnly
+```
+
+Public Hosted Zone은 첫 25개 기준 월 $0.50이며 부분 월 일할 계산은 없다. 생성 후 12시간 이내 삭제하면 Zone 요금은 면제되지만 일반 DNS 질의는 별도 과금한다. 이 정책에는 삭제 권한을 넣지 않으며 실습 뒤 보존·삭제를 다시 확인한다. [Route 53 요금](https://aws.amazon.com/route53/pricing/)
+
+```powershell
+node --test src/test/js/iam-dns-lab-policy.test.mjs src/test/js/iam-deployer-policy.test.mjs
+```
+
 ## 로컬 구조 검사
 
 Private RDS의 최초 계정 설정에는 [별도의 임시 관리 통로](./db-bootstrap.md)를 사용한다. 기존 세 정책은 유지하고, CloudShell의 환경 생성·지정 환경 사용과 한정된 정리 권한을 Bootstrap 정책 하나로 분리한다. DB 관리자 Credential을 App에 전달하거나 배포 사용자에게 Secret 조회·자기 권한 수정 권한을 주지 않는다.
