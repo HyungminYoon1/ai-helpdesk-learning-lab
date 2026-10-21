@@ -10,7 +10,8 @@
       "Resource": [
         "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:*",
         "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
-        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016"
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261021"
       ],
       "Condition": {
         "StringEquals": {
@@ -29,7 +30,9 @@
       ],
       "Resource": [
         "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
-        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016"
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261021-final",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261021"
       ],
       "Condition": {
         "StringEquals": {
@@ -46,7 +49,10 @@
       "Action": [
         "rds:DescribeDBSnapshotAttributes"
       ],
-      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261021-final"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "ap-northeast-2"
@@ -80,7 +86,10 @@
       "Action": [
         "rds:CreateDBSnapshot"
       ],
-      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261021-final"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "ap-northeast-2",
@@ -97,7 +106,10 @@
       "Action": [
         "rds:RestoreDBInstanceFromDBSnapshot"
       ],
-      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261021"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "ap-northeast-2",
@@ -123,7 +135,10 @@
       "Action": [
         "rds:RestoreDBInstanceFromDBSnapshot"
       ],
-      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261021-final"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "ap-northeast-2",
@@ -181,7 +196,9 @@
       ],
       "Resource": [
         "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261016-recovery",
-        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016"
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:snapshot:helpdesk-learning-20261021-final",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261021"
       ],
       "Condition": {
         "StringEquals": {
@@ -204,7 +221,10 @@
       "Action": [
         "rds:StopDBInstance"
       ],
-      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261021"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "ap-northeast-2",

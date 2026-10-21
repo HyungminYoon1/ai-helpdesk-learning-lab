@@ -12,6 +12,10 @@ const prefix = "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:";
 const source = `${prefix}db:helpdesk-learning`;
 const snapshot = `${prefix}snapshot:helpdesk-learning-20261016-recovery`;
 const restored = `${prefix}db:helpdesk-learning-restore-20261016`;
+const latestSnapshot = `${prefix}snapshot:helpdesk-learning-20261021-final`;
+const latestRestored = `${prefix}db:helpdesk-learning-restore-20261021`;
+const snapshots = [snapshot, latestSnapshot];
+const restoredDbs = [restored, latestRestored];
 const rulesFor = (action) => statements.filter((entry) => entry.Action.includes(action));
 
 test("recovery template is valid JSON within one managed policy size limit", () => {
@@ -41,14 +45,14 @@ test("recovery template adds only the eight named RDS actions with no wildcard a
 test("only snapshot list metadata covers other snapshots in the same account and Seoul", () => {
   const reader = statement("ReadSnapshotList");
   assert.deepEqual(reader.Action, ["rds:DescribeDBSnapshots"]);
-  assert.deepEqual(reader.Resource, [`${prefix}snapshot:*`, source, restored]);
+  assert.deepEqual(reader.Resource, [`${prefix}snapshot:*`, source, ...restoredDbs]);
   assert.deepEqual(statements.filter((entry) => [entry.Resource].flat()
     .some((resource) => resource.includes("*"))), [reader]);
 });
 
-test("snapshot creation names only the source DB and one destination snapshot", () => {
+test("snapshot creation keeps the original source and only the two approved snapshot names", () => {
   const creators = rulesFor("rds:CreateDBSnapshot");
-  assert.deepEqual(creators.map((entry) => entry.Resource), [source, snapshot]);
+  assert.deepEqual(creators.flatMap((entry) => [entry.Resource].flat()), [source, ...snapshots]);
   assert.equal(statement("SnapshotOnlySource").Condition.StringEquals["aws:ResourceTag/Project"],
     "helpdesk-learning");
   assert.equal(creators.every((entry) => entry.Condition.StringEquals["aws:RequestTag/Project"]
@@ -57,7 +61,7 @@ test("snapshot creation names only the source DB and one destination snapshot", 
 
 test("restore target keeps private Single-AZ minimum after only three approved condition removals", () => {
   const target = statement("RestoreOnlyVerificationDb");
-  assert.equal(target.Resource, restored);
+  assert.deepEqual(target.Resource, restoredDbs);
   assert.deepEqual(target.Action, ["rds:RestoreDBInstanceFromDBSnapshot"]);
   assert.deepEqual(target.Condition.StringEquals, {
     "aws:RequestedRegion": "ap-northeast-2",
@@ -75,7 +79,7 @@ test("restore target keeps private Single-AZ minimum after only three approved c
 test("restore uses only the selected snapshot, subnet group and PostgreSQL 17 defaults", () => {
   const restorers = rulesFor("rds:RestoreDBInstanceFromDBSnapshot");
   assert.deepEqual(restorers.flatMap((entry) => [entry.Resource].flat()).sort(), [
-    restored, snapshot, `${prefix}subgrp:helpdesk-learning`,
+    ...restoredDbs, ...snapshots, `${prefix}subgrp:helpdesk-learning`,
     `${prefix}pg:default.postgres17`, `${prefix}og:default:postgres-17`,
   ].sort());
   assert.equal(restorers.every((entry) => entry.Condition.StringEquals["aws:RequestTag/Project"]
@@ -87,20 +91,36 @@ test("restore uses only the selected snapshot, subnet group and PostgreSQL 17 de
 });
 
 test("sharing inspection and tag access do not add snapshot sharing or modification", () => {
-  assert.equal(statement("ReadSnapshotSharing").Resource, snapshot);
-  assert.deepEqual(statement("ReadRecoveryTags").Resource, [snapshot, restored]);
+  assert.deepEqual(statement("ReadSnapshotSharing").Resource, snapshots);
+  assert.deepEqual(statement("ReadRecoveryTags").Resource,
+    [snapshot, restored, latestSnapshot, latestRestored]);
   const tagger = statement("TagOnlyRecoveryObjects");
-  assert.deepEqual(tagger.Resource, [snapshot, restored]);
+  assert.deepEqual(tagger.Resource, [snapshot, restored, latestSnapshot, latestRestored]);
   assert.equal(tagger.Condition.StringEquals["aws:RequestTag/Project"], "helpdesk-learning");
   assert.deepEqual(tagger.Condition["ForAllValues:StringEquals"]["aws:TagKeys"], ["Project"]);
 });
 
-test("stop and deletion permissions never target the original DB or any snapshot", () => {
+test("stop targets approved temporary DBs but deletion is not expanded for closeout", () => {
   for (const action of ["rds:StopDBInstance", "rds:DeleteDBInstance"]) {
     const rules = rulesFor(action);
     assert.equal(rules.length, 1);
-    assert.equal(rules[0].Resource, restored);
+    assert.deepEqual([rules[0].Resource].flat(), action === "rds:StopDBInstance"
+      ? restoredDbs : [restored]);
     assert.equal(rules[0].Condition.StringEquals["aws:ResourceTag/Project"], "helpdesk-learning");
   }
   assert.equal(statements.flatMap((entry) => entry.Action).includes("rds:DeleteDBSnapshot"), false);
+});
+
+test("closeout permissions add no wildcard or original DB mutation beyond snapshot creation", () => {
+  assert.equal(statements.length, 12);
+  for (const entry of statements) {
+    if (entry.Sid === "ReadSnapshotList") continue;
+    assert.equal([entry.Resource].flat().some((resource) => resource.includes("*")), false);
+    if ([entry.Resource].flat().includes(source)) {
+      assert.equal(entry.Sid, "SnapshotOnlySource");
+      assert.deepEqual(entry.Action, ["rds:CreateDBSnapshot"]);
+    }
+  }
+  assert.equal(rulesFor("rds:DeleteDBInstance").some((entry) =>
+    [entry.Resource].flat().includes(latestRestored)), false);
 });

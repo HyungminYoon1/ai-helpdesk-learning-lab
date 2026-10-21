@@ -90,6 +90,40 @@ App 검증 준비로 `helpdesk-learning:2`를 등록했다. 실제 :1 JSON에서
 
 App의 접속 대상만 바꿔도 Snapshot 시점의 DB 계정·Password와 현재 Parameter 값이 일치해야 한다. 오류가 나면 값을 읽어 출력하거나 원본 Credential을 임의 변경하지 않고 작성자의 직접 입력과 인증 결과로 확인한다. 검사용 Worker를 켜거나 Job/예약을 초기화하는 것은 이번 범위에 없다.
 
+## 2026-10-21 최신 데이터 복구 검증
+
+상태: 작성자가 App Task 한 개 중지·최신 Snapshot 한 개·임시 복원 DB 한 개의 검증을 승인했다. 10/21 19:25 KST에 복원 전용 IAM V3 적용·저장 JSON 대조·V1/V2 보존까지 확인했다. 이후 비Root·서울에서 기존 App Task 한 개를 중지하고 원본 SQL 기준을 확보했으며, 지정 최신 Snapshot의 Available·암호화·Private를 확인했다. 임시 DB의 보안·최소 사양과 TLS 1.3 접속을 확인했고, 원본과 동일한 읽기 전용 SQL에서 일곱 Table의 건수/Hash·Job 집계·참조 관계·Migration·Sequence가 모두 일치했다. App은 중지 상태이며 임시 DB의 정리는 별도 승인 대기다. 아래 과거 10/16 결과와 이번 실행 결과를 구분한다.
+
+| 대상 | 이번 범위 |
+|---|---|
+| 원본 | `helpdesk-learning`의 설정·Schema·계정·Password·자동 Backup 유지 |
+| 새 Snapshot | `helpdesk-learning-20261021-final` 한 개. 기존 Snapshot 유지 |
+| 임시 DB | `helpdesk-learning-restore-20261021` 한 개. 기존 Private Network·aws/rds 암호화·PostgreSQL 17·db.t4g.micro·Single-AZ·gp3 20 GiB |
+| App | 현재 AI 비활성 Task 한 개만 중지. 새 Task·Service·Worker는 실행하지 않음 |
+| 검증 | App 중지 후 원본과 복원 DB에 동일한 Read-only 대조 SQL 실행. 실제 저장된 제안·Category·Attempt·Job·Migration도 건수/Hash로 비교 |
+| 변경 제외 | 원본 DB 설정·기존 Snapshot·ALB/Target 등록·DNS·Secret·Schema 변경·새 AI 호출 |
+| 정리 | 이번 임시 DB 삭제는 별도 최종 확인. 이번 IAM 초안은 해당 DB의 삭제 권한을 추가하지 않음 |
+
+의사결정: 7일 자동 Backup만으로 장기 보관 준비를 완료 처리하거나, 10/16의 빈 제안 Table 복원 결과를 최신 제안 복원 결과로 대신하지 않는다. 최신 Snapshot에서 별도 DB를 복원해 실제 비어 있지 않은 제안까지 비교한다. App을 새 DB로 연결하는 실험은 이미 10/16에 수행했으므로 반복하지 않고, App 중지로 쓰기를 멈춘 뒤 TLS·SQL 비교에 한정한다. 비용과 변경 대상을 줄이면서 최신 업무 데이터의 복구 여부를 확인하기 위한 선택이다.
+
+권한 결정: 별도 광역 Policy를 추가하지 않고 기존 복원 전용 Policy의 Resource에 새 Snapshot·임시 DB 이름만 추가하는 Version을 준비한다. 기존 12문장·여덟 Action·모든 Condition과 과거 대상은 유지한다. 새 이름의 조회·생성·복원·Project 태그·임시 DB 중지만 추가하며, `DeleteOnlyVerificationDb`는 기존 10/16 대상 그대로 둔다. 원본 DB·Snapshot 삭제, 공유 변경, Secret 조회, KMS 권한 확대는 하지 않는다. 실제 IAM 문서와 일치하는지 확인하고 AWS 검증 후 적용한다. 영향 파일은 Policy Template·정책 Test·이 안내이며, 후속 검토는 저장된 정책 대조·복원 Hash·최신 Snapshot 보존·임시 DB의 별도 정리 승인이다.
+
+실제 IAM 적용: Root에서 읽은 기본 V2 전체 JSON은 기존 기준과 일치했다. 입력한 V3 전체 JSON과 저장 후 기본 정책 전체 JSON을 각각 준비안과 대조해 일치를 확인했다. 공백 제외 5,550자·12문장·여덟 Action이며, Action·Condition·기존 Resource·삭제 문장은 변경하지 않았다. AWS 편집기의 보안·오류·경고·추천은 모두 0이었다. 버전 표에서 V3 기본값과 V1/V2 보존을 확인한 뒤 Root를 로그아웃했다. 관련 로컬 정책·SQL 보호 Test 13개는 통과했으며, 이 결과는 아직 하지 않은 비Root Snapshot 생성·복원 성공을 대신하지 않는다.
+
+App 중지·접속 준비: 작성자의 helpdesk-deployer 재로그인·MFA 후 서울·단일 실행 Task·Service 0개를 확인했다. AI 비활성 명세 `helpdesk-learning:6`의 Task `4ebe4966f22f4798bf987022f6809ffa` 한 개만 중지했다. 실제 Task와 Container의 중지됨·Container Exit Code 143·종료 시각 10/21 20:00:11 KST를 확인했으며, Target 등록이나 ALB·DNS는 수정하지 않았다. 새 Task는 실행하지 않았으므로 웹 서비스는 중지 상태다. 원본 RDS는 사용 가능·연결 0개와 기존 Endpoint를 확인했다. 기존 Private CloudShell VPC 환경의 새 세션에서 검증된 공식 Client 묶음만 다시 준비해 psql 17.11을 확인했고, CA Hash·verify-full·읽기 전용 기본값을 유지한 App 암호 직접 입력 단계까지 진행했다. 관리 도구 관련 로컬 Test 26개와 변경 정책 Test의 ESLint도 통과했다. 이 시점에는 원본 SQL·Snapshot·복원 검증 결과가 아직 없으며, 암호·Secret은 출력하지 않았다.
+
+원본 기준 확보: 작성자의 App 암호 직접 입력 후 TLS 1.3 접속을 확인했다. 기존 대조 SQL을 Read-only·Repeatable Read·5초 Statement/2초 Lock Timeout으로 실행하고 COMMIT까지 완료했다. Ticket·Message·Job·Attempt는 각각 5건, Suggestion·Category는 각각 1건, Flyway 이력은 8건이었다. Message 5건 모두 본문·작성자가 있었고 다섯 참조 누락은 모두 0건이었다. Job 집계는 FAILED 4건·SUCCEEDED 1건이며 모두 current_attempt=1·생성 예약=1·보완 예약=0이었다. Attempt/예약 건수를 실제 외부 Provider 전송 횟수로 해석하지 않는다. 일곱 Table 전체 Hash와 Migration V1~V8·세 Sequence를 Git 제외 로컬 비교 근거에 보관하고 접속을 종료했다. 이후 기존 수동 Snapshot 한 개를 유지한 채 지정 최신 Snapshot 한 개를 요청했으며, 생성 중 안내를 확인했다.
+
+Snapshot 및 복원 준비: 새 Snapshot의 생성 시각은 10/21 20:14 KST이며 manual·Available·PostgreSQL 17.11·gp3 20 GiB·원본과 같은 aws/rds Key·Project 태그를 확인했다. 공유 화면의 Private 선택과 외부 계정 목록 없음을 읽기 전용으로 확인하고 저장 없이 취소했다. 원본 DB의 기존 VPC·Private Subnet 두 개·DB Subnet Group·RDS Group과 암호화·최소 사양도 다시 조회했다. 복원 양식의 초기 Multi-AZ·큰 Class·default Group을 그대로 사용하지 않고, 승인한 Single-AZ·db.t4g.micro·기존 RDS Group 한 개로 맞췄다. IPv4·Public Access 비활성·gp3 20 GiB·5432·default.postgres17·default:postgres-17·aws/rds 암호화·Project 태그·확장 지원 비활성·로그 내보내기 비활성을 제출 전에 대조했다. 원본의 보안·보관 조건을 유지하기 위해 임시 DB의 자동 Backup은 상속된 7일 값을 유지하며, 원본 Backup은 수정하지 않는다.
+
+임시 DB 생성 요청은 비Root에서 수락됐다. 실제 목록에서 원본 사용 가능·임시 DB 생성 중의 두 인스턴스를 확인했다. 임시 DB의 구성·태그·연결 화면에서도 엔진 17.11·Single-AZ·db.t4g.micro·gp3 20 GiB·같은 KMS Key·Private Subnet Group·RDS Group 한 개·Public Access 비활성·Project 태그·스토리지 자동 조정 비활성·표준 Insights·향상된 모니터링 비활성을 확인했다. 이 시점에는 상태가 생성 중이고 Endpoint도 아직 없으므로 SQL 복원 성공으로 기록하지 않는다. 기존 DescribeGlobalClusters 조회 거부는 그대로 두었으며, 원본 DB·기존 Snapshot·ALB/Target·DNS·Secret은 변경하지 않았다.
+
+임시 DB는 백업 중·수정 중을 거쳐 사용 가능 상태가 됐다. 생성 기록은 10/21 20:28 KST다. Available 이후 실제 새 Endpoint와 5432·기존 VPC/Subnet 두 개·DB Subnet Group·RDS Group 한 개·비공개를 다시 대조했고, 엔진·기본 Group·KMS·Storage·Single-AZ·최소 Class·자동 증설/향상된 모니터링 비활성도 유지됐다. Storage 초기화 안내는 별도로 남아 있어 전체 성능 초기화 완료와 구분한다. 대기 중 관리 CloudShell은 비활성 시간 제한으로 종료돼 기존 VPC 환경에 다시 연결했다. 원본 SQL 기준은 이미 로컬에 보관돼 있으며, 이 쉘 재연결은 원본/복원 RDS나 데이터 변경이 아니다. 다음 단계는 psql 17·CA 재확인 후 작성자의 App 암호 직접 입력과 동일 대조 SQL 실행이다.
+
+복원 SQL 대조: 공식 psql 17.11과 공개 CA Hash 검증을 다시 준비하고, 작성자가 Snapshot 시점의 App 암호를 직접 입력했다. 잠시 끊긴 터미널 연결을 복구하자 기존 psql 접속이 이어졌으며, 암호 재설정 없이 TLS 1.3·verify-full 연결을 확인했다. 원본 기준과 SHA-256이 같은 SQL을 Read-only·Repeatable Read·5초 Statement/2초 Lock Timeout으로 한 번 실행해 COMMIT까지 완료했다. 일곱 Table의 건수와 전체 내용 Hash가 모두 같았고, Message 5건의 본문/작성자 존재·FAILED 4건/SUCCEEDED 1건의 Job 집계·각 Job의 실행 Attempt/생성 예약 1 및 보완 예약 0·다섯 참조 누락 0·Migration V1~V8 성공·세 Sequence 값도 일치했다. 원문·작성자·암호는 출력하지 않았다.
+
+비교 근거는 WIL 저장소의 Git 제외 `local/evidence/2026-10-21-deployment-closeout/latest-recovery-source-baseline.json`·`latest-recovery-restored-baseline.json`·`latest-recovery-sql-comparison.json`과 SQL 출력 캡처로 보관했다. psql은 `\q`로 종료했다. 이번에는 복원 DB에 App을 연결하거나 새 문의·AI 호출·Job 상태 변경을 하지 않았다. 따라서 최신 제안까지 포함한 DB 복원은 확인했지만, 복원 DB를 사용하는 App의 새 실행이나 서비스 성능까지 검증한 것은 아니다. 원본 App은 계속 STOPPED이며, 원본 DB·두 수동 Snapshot과 임시 DB는 보존돼 있다. 이번 임시 DB의 중지·삭제 및 새 삭제 권한은 아직 적용하지 않았다.
+
 ## 추가 비용과 대기 관리
 
 2026-10-16 [AWS 서울 공개 요금 JSON](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/ap-northeast-2/index.json)에서 PostgreSQL Single-AZ db.t4g.micro 0.025 USD/시간, gp3 0.131 USD/GB·월을 확인했다. 복원 DB를 대기 포함 2시간 실행한다는 예시의 Instance 요금은 0.05 USD다. 20 GiB의 Storage는 한 달 전체 유지 시 2.62 USD이며 실제 사용 기간에 따른 청구를 따로 본다.
