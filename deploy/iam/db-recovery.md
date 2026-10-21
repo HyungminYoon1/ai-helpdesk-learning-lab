@@ -102,7 +102,7 @@ App의 접속 대상만 바꿔도 Snapshot 시점의 DB 계정·Password와 현�
 | App | 현재 AI 비활성 Task 한 개만 중지. 새 Task·Service·Worker는 실행하지 않음 |
 | 검증 | App 중지 후 원본과 복원 DB에 동일한 Read-only 대조 SQL 실행. 실제 저장된 제안·Category·Attempt·Job·Migration도 건수/Hash로 비교 |
 | 변경 제외 | 원본 DB 설정·기존 Snapshot·ALB/Target 등록·DNS·Secret·Schema 변경·새 AI 호출 |
-| 정리 | 이번 임시 DB 삭제는 별도 최종 확인. 이번 IAM 초안은 해당 DB의 삭제 권한을 추가하지 않음 |
+| 정리 | 실제 임시 DB 삭제는 별도 최종 확인. V3에는 삭제 권한을 추가하지 않았으며, 복원 검증 뒤 별도 승인한 V4의 정리 권한은 아래 절에 기록 |
 
 의사결정: 7일 자동 Backup만으로 장기 보관 준비를 완료 처리하거나, 10/16의 빈 제안 Table 복원 결과를 최신 제안 복원 결과로 대신하지 않는다. 최신 Snapshot에서 별도 DB를 복원해 실제 비어 있지 않은 제안까지 비교한다. App을 새 DB로 연결하는 실험은 이미 10/16에 수행했으므로 반복하지 않고, App 중지로 쓰기를 멈춘 뒤 TLS·SQL 비교에 한정한다. 비용과 변경 대상을 줄이면서 최신 업무 데이터의 복구 여부를 확인하기 위한 선택이다.
 
@@ -122,7 +122,17 @@ Snapshot 및 복원 준비: 새 Snapshot의 생성 시각은 10/21 20:14 KST이�
 
 복원 SQL 대조: 공식 psql 17.11과 공개 CA Hash 검증을 다시 준비하고, 작성자가 Snapshot 시점의 App 암호를 직접 입력했다. 잠시 끊긴 터미널 연결을 복구하자 기존 psql 접속이 이어졌으며, 암호 재설정 없이 TLS 1.3·verify-full 연결을 확인했다. 원본 기준과 SHA-256이 같은 SQL을 Read-only·Repeatable Read·5초 Statement/2초 Lock Timeout으로 한 번 실행해 COMMIT까지 완료했다. 일곱 Table의 건수와 전체 내용 Hash가 모두 같았고, Message 5건의 본문/작성자 존재·FAILED 4건/SUCCEEDED 1건의 Job 집계·각 Job의 실행 Attempt/생성 예약 1 및 보완 예약 0·다섯 참조 누락 0·Migration V1~V8 성공·세 Sequence 값도 일치했다. 원문·작성자·암호는 출력하지 않았다.
 
-비교 근거는 WIL 저장소의 Git 제외 `local/evidence/2026-10-21-deployment-closeout/latest-recovery-source-baseline.json`·`latest-recovery-restored-baseline.json`·`latest-recovery-sql-comparison.json`과 SQL 출력 캡처로 보관했다. psql은 `\q`로 종료했다. 이번에는 복원 DB에 App을 연결하거나 새 문의·AI 호출·Job 상태 변경을 하지 않았다. 따라서 최신 제안까지 포함한 DB 복원은 확인했지만, 복원 DB를 사용하는 App의 새 실행이나 서비스 성능까지 검증한 것은 아니다. 원본 App은 계속 STOPPED이며, 원본 DB·두 수동 Snapshot과 임시 DB는 보존돼 있다. 이번 임시 DB의 중지·삭제 및 새 삭제 권한은 아직 적용하지 않았다.
+비교 근거는 WIL 저장소의 Git 제외 `local/evidence/2026-10-21-deployment-closeout/latest-recovery-source-baseline.json`·`latest-recovery-restored-baseline.json`·`latest-recovery-sql-comparison.json`과 SQL 출력 캡처로 보관했다. psql은 `\q`로 종료했다. 이번에는 복원 DB에 App을 연결하거나 새 문의·AI 호출·Job 상태 변경을 하지 않았다. 따라서 최신 제안까지 포함한 DB 복원은 확인했지만, 복원 DB를 사용하는 App의 새 실행이나 서비스 성능까지 검증한 것은 아니다. 원본 App은 계속 STOPPED이며, 원본 DB·두 수동 Snapshot과 임시 DB는 보존돼 있다. 이 SQL 검증을 마친 시점에는 이번 임시 DB의 중지·삭제 및 새 삭제 권한을 아직 적용하지 않았으며, 이후 정리 권한의 별도 승인·적용은 다음 절에 기록한다.
+
+### 최신 임시 DB의 정리 권한 준비
+
+작성자는 최신 복원 SQL 대조 뒤 기존 복원 정책에 `helpdesk-learning-restore-20261021` 한 개의 삭제 권한만 추가하도록 승인했다. 현 권한 유지·포괄적인 RDS 삭제 권한·정확한 임시 DB ARN 한 개 추가를 비교해 마지막 안을 선택했다. 검증이 끝난 중복 DB의 정리 경로만 준비하고 원본 DB와 두 수동 Snapshot은 보존하기 위해서다.
+
+`DeleteOnlyVerificationDb`의 Resource만 기존 10/16 임시 DB와 이번 10/21 임시 DB 두 개의 배열로 바꾼다. Action은 기존 `rds:DeleteDBInstance` 한 개 그대로이며, Project 태그·MFA·서울 조건과 나머지 11문장·모든 기존 Resource/Action/Condition은 유지한다. Snapshot 삭제·공유 변경·Secret 조회·다른 DB 삭제 권한은 추가하지 않는다. 영향 파일은 Policy Template·정책 Test·이 안내다.
+
+10/21 22:35 KST에 새 기본 Version 4로 저장했다. 변경 전 화면에 표시된 V3 전체 JSON이 기존 기준과 일치했고, 편집기에 입력한 전체 JSON과 저장 후 기본 정책 전체 JSON도 각각 준비안과 일치했다. 저장 정책에서 추가한 삭제 대상 한 개만 제외해 대조하면 기존 V3와 완전히 같다. 12문장·여덟 Action·공백 제외 5,632자이며 기존 V1~V3도 보존했다. 연결 대상은 기존 `helpdesk-deployer` 한 명이고 권한 경계로 사용하는 엔터티는 없었다. 정책/SQL 보호 Test 14개와 접속 도구 Test를 합친 40개·ESLint가 통과했다.
+
+Root에서 로그아웃하고 비Root 직접 로그인 양식을 준비했다. 이 변경은 삭제할 권한의 준비이며 DB 삭제 실행이 아니다. 원본 DB·두 Snapshot·App·ALB·DNS·Secret에는 변경 요청을 보내지 않았다. 실제 삭제는 비Root에서 정확한 임시 DB와 원본·Snapshot 보존을 확인하고, 최종 Snapshot 및 자동 Backup 처리까지 다시 제시해 최종 승인을 받은 뒤에만 요청한다. 저장 JSON과 버전 표·대조 기록은 같은 Git 제외 증거 폴더의 `recovery-delete-policy-live-v3-before.json`·`recovery-delete-policy-live-v4-after.json`·`recovery-delete-policy-verification.json`·`recovery-delete-policy-v4-versions.png`에 보관했다.
 
 ## 추가 비용과 대기 관리
 

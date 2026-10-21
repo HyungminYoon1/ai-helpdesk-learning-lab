@@ -100,12 +100,11 @@ test("sharing inspection and tag access do not add snapshot sharing or modificat
   assert.deepEqual(tagger.Condition["ForAllValues:StringEquals"]["aws:TagKeys"], ["Project"]);
 });
 
-test("stop targets approved temporary DBs but deletion is not expanded for closeout", () => {
+test("stop and deletion target only the two explicitly approved temporary DBs", () => {
   for (const action of ["rds:StopDBInstance", "rds:DeleteDBInstance"]) {
     const rules = rulesFor(action);
     assert.equal(rules.length, 1);
-    assert.deepEqual([rules[0].Resource].flat(), action === "rds:StopDBInstance"
-      ? restoredDbs : [restored]);
+    assert.deepEqual([rules[0].Resource].flat(), restoredDbs);
     assert.equal(rules[0].Condition.StringEquals["aws:ResourceTag/Project"], "helpdesk-learning");
   }
   assert.equal(statements.flatMap((entry) => entry.Action).includes("rds:DeleteDBSnapshot"), false);
@@ -122,5 +121,20 @@ test("closeout permissions add no wildcard or original DB mutation beyond snapsh
     }
   }
   assert.equal(rulesFor("rds:DeleteDBInstance").some((entry) =>
-    [entry.Resource].flat().includes(latestRestored)), false);
+    [entry.Resource].flat().includes(latestRestored)), true);
+});
+
+test("approved cleanup preserves the exact delete action, tag, MFA and Seoul conditions", () => {
+  const cleanup = statement("DeleteOnlyVerificationDb");
+  assert.deepEqual(cleanup.Action, ["rds:DeleteDBInstance"]);
+  assert.deepEqual(cleanup.Resource, restoredDbs);
+  assert.deepEqual(cleanup.Condition, {
+    StringEquals: {
+      "aws:RequestedRegion": "ap-northeast-2",
+      "aws:ResourceTag/Project": "helpdesk-learning",
+    },
+    Bool: { "aws:MultiFactorAuthPresent": "true" },
+  });
+  assert.equal([source, ...snapshots].some((resource) =>
+    cleanup.Resource.includes(resource)), false);
 });

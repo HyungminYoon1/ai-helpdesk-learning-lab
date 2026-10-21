@@ -241,7 +241,10 @@
       "Action": [
         "rds:DeleteDBInstance"
       ],
-      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+      "Resource": [
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261016",
+        "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning-restore-20261021"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestedRegion": "ap-northeast-2",
