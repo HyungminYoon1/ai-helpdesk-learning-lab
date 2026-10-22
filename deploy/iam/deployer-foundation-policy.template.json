@@ -35,7 +35,9 @@
         "route53:GetHostedZone",
         "route53:ListResourceRecordSets",
         "route53:ChangeResourceRecordSets",
-        "route53:GetChange"
+        "route53:GetChange",
+        "route53:GetDNSSEC",
+        "route53:DeleteHostedZone"
       ],
       "Resource": "*",
       "Condition": {

@@ -205,7 +205,7 @@ VPC Console의 `ec2:DescribeNetworkAcls` 조회는 Allow가 없어 거부됐다.
 
 Route 53의 글로벌 API는 `us-east-1`을 사용하므로 기존 서울 외 요청 거부와 충돌한다. Foundation의 `RestrictRegionalOperationsToSeoul`에서 필요한 Route 53 Action만 `NotAction` 예외로 분리하고, `RequireMfaExceptSelfEnrollment`와 나머지 문장은 보존한다. 예외는 그 거부 문장의 적용 대상에서 빼는 것이며 그 자체로 허용을 부여하지 않는다. 별도 `helpdesk-deployer-dns-lab` 정책의 모든 Allow에 MFA `true`·글로벌 API의 `us-east-1` 조건을 명시한다. ECS·RDS·ALB 등 기존 Regional 서비스의 서울 제한은 유지한다. [AWS 글로벌 서비스 예외](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_examples_aws_deny-requested-region.html)
 
-Foundation Template은 **생성 권한 회수 뒤의 최종 상태**다. 최종 DNS 예외는 `GetHostedZoneCount`, `ListHostedZones`, `ListHostedZonesByName`, `GetHostedZone`, `ListResourceRecordSets`, `ChangeResourceRecordSets`, `GetChange` 일곱 개다. 1단계 생성 동안만 여기에 `route53:CreateHostedZone` 한 개를 추가하며 `route53:*`는 사용하지 않는다.
+10/21 생성 권한 회수 뒤의 DNS 예외는 `GetHostedZoneCount`, `ListHostedZones`, `ListHostedZonesByName`, `GetHostedZone`, `ListResourceRecordSets`, `ChangeResourceRecordSets`, `GetChange` 일곱 개였다. 1단계 생성 동안만 여기에 `route53:CreateHostedZone` 한 개를 추가했으며 `route53:*`는 사용하지 않는다. 10/22 정리 권한 준비 Template에는 아래의 두 예외만 추가하며, 10/21 적용 기록과 새 준비 상태를 구분한다.
 
 ### 생성과 회수 순서
 
@@ -254,6 +254,10 @@ node --test src/test/js/iam-dns-lab-policy.test.mjs src/test/js/iam-deployer-pol
 ```
 
 ## 로컬 구조 검사
+
+### 2026-10-22 정리 권한 준비
+
+지정 원본 DB·ALB·실습 Zone만 대상으로 하는 [정리 전용 최소 정책과 승인 절차](./closeout.md)를 준비하고 승인 후 적용했다. 새 정책 Version 1은 정확한 ARN·MFA·지역 조건의 다섯 Action을 여섯 문장으로 제한하며 `helpdesk-deployer` 한 명에게만 연결했다. Foundation의 새 기본 Version 4에는 글로벌 Route 53의 `GetDNSSEC`·`DeleteHostedZone` 두 예외만 추가했다. MFA 거부·서울 조건·다른 14개 문장과 Version 1~3은 보존했다. 기존 DNS 생성·복원 정책과 Role은 편집하지 않았다. 비Root에서 DNSSEC 미서명·원본 DB·두 Snapshot 보존을 조회했다. 같은 최종 점검에서 새 실행 Task 1개도 발견해 중지하거나 이전의 0개 상태로 기록하지 않았다. 실제 리소스 삭제는 미실행이며 직전에 다시 확인한다.
 
 Private RDS의 최초 계정 설정에는 [별도의 임시 관리 통로](./db-bootstrap.md)를 사용한다. 기존 세 정책은 유지하고, CloudShell의 환경 생성·지정 환경 사용과 한정된 정리 권한을 Bootstrap 정책 하나로 분리한다. DB 관리자 Credential을 App에 전달하거나 배포 사용자에게 Secret 조회·자기 권한 수정 권한을 주지 않는다.
 

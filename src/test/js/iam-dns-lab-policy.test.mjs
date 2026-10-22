@@ -16,6 +16,7 @@ const finalExceptions = [
   ...metadataActions, "route53:GetHostedZone", "route53:ListResourceRecordSets",
   "route53:ChangeResourceRecordSets", "route53:GetChange",
 ];
+const closeoutExceptions = ["route53:GetDNSSEC", "route53:DeleteHostedZone"];
 const zoneArn = "arn:aws:route53:::hostedzone/<DNS_LAB_ZONE_ID>";
 const regionAndMfa = {
   StringEquals: { "aws:RequestedRegion": "us-east-1" },
@@ -57,11 +58,14 @@ test("bootstrap grants only account metadata, public zone creation and change st
   });
 });
 
-test("the final Foundation adds exactly seven global DNS exceptions but no creation exception", () => {
+test("Foundation keeps seven DNS record exceptions and adds only two closeout exceptions", () => {
   const regional = foundation.Statement.find((rule) => rule.Sid === "RestrictRegionalOperationsToSeoul");
   assert.deepEqual(regional, {
     Sid: "RestrictRegionalOperationsToSeoul", Effect: "Deny",
-    NotAction: ["iam:*", "sts:GetCallerIdentity", "sts:GetSessionToken", ...finalExceptions],
+    NotAction: [
+      "iam:*", "sts:GetCallerIdentity", "sts:GetSessionToken",
+      ...finalExceptions, ...closeoutExceptions,
+    ],
     Resource: "*", Condition: { StringNotEquals: { "aws:RequestedRegion": "ap-northeast-2" } },
   });
   assert.ok(!regional.NotAction.includes("route53:CreateHostedZone"));

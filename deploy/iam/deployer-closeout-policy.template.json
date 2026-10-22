@@ -1,0 +1,91 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DeleteOnlySourceDb",
+      "Effect": "Allow",
+      "Action": ["rds:DeleteDBInstance"],
+      "Resource": "arn:aws:rds:ap-northeast-2:<AWS_ACCOUNT_ID>:db:helpdesk-learning",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" }
+      }
+    },
+    {
+      "Sid": "DeleteOnlyLearningAlb",
+      "Effect": "Allow",
+      "Action": ["elasticloadbalancing:DeleteLoadBalancer"],
+      "Resource": "arn:aws:elasticloadbalancing:ap-northeast-2:<AWS_ACCOUNT_ID>:loadbalancer/app/helpdesk-learning/<LEARNING_ALB_ID>",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2",
+          "aws:ResourceTag/Project": "helpdesk-learning"
+        },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" }
+      }
+    },
+    {
+      "Sid": "ReadOnlyDnsLabDnssec",
+      "Effect": "Allow",
+      "Action": ["route53:GetDNSSEC"],
+      "Resource": "arn:aws:route53:::hostedzone/<DNS_LAB_ZONE_ID>",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "us-east-1" },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" }
+      }
+    },
+    {
+      "Sid": "DeleteOnlyDnsLabProofTxt",
+      "Effect": "Allow",
+      "Action": ["route53:ChangeResourceRecordSets"],
+      "Resource": "arn:aws:route53:::hostedzone/<DNS_LAB_ZONE_ID>",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "us-east-1" },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" },
+        "ForAllValues:StringEquals": {
+          "route53:ChangeResourceRecordSetsNormalizedRecordNames": ["proof.dns-lab.hmyoon.com"],
+          "route53:ChangeResourceRecordSetsRecordTypes": ["TXT"],
+          "route53:ChangeResourceRecordSetsActions": ["DELETE"]
+        },
+        "Null": {
+          "route53:ChangeResourceRecordSetsNormalizedRecordNames": "false",
+          "route53:ChangeResourceRecordSetsRecordTypes": "false",
+          "route53:ChangeResourceRecordSetsActions": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DeleteOnlyDnsLabAliasA",
+      "Effect": "Allow",
+      "Action": ["route53:ChangeResourceRecordSets"],
+      "Resource": "arn:aws:route53:::hostedzone/<DNS_LAB_ZONE_ID>",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "us-east-1" },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" },
+        "ForAllValues:StringEquals": {
+          "route53:ChangeResourceRecordSetsNormalizedRecordNames": ["dns-lab.hmyoon.com"],
+          "route53:ChangeResourceRecordSetsRecordTypes": ["A"],
+          "route53:ChangeResourceRecordSetsActions": ["DELETE"]
+        },
+        "Null": {
+          "route53:ChangeResourceRecordSetsNormalizedRecordNames": "false",
+          "route53:ChangeResourceRecordSetsRecordTypes": "false",
+          "route53:ChangeResourceRecordSetsActions": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DeleteOnlyDnsLabZone",
+      "Effect": "Allow",
+      "Action": ["route53:DeleteHostedZone"],
+      "Resource": "arn:aws:route53:::hostedzone/<DNS_LAB_ZONE_ID>",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "us-east-1" },
+        "Bool": { "aws:MultiFactorAuthPresent": "true" }
+      }
+    }
+  ]
+}
