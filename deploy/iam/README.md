@@ -255,9 +255,11 @@ node --test src/test/js/iam-dns-lab-policy.test.mjs src/test/js/iam-deployer-pol
 
 ## 로컬 구조 검사
 
-### 2026-10-22 정리 권한 준비
+### 2026-10-22 정리 권한 준비와 실행
 
-지정 원본 DB·ALB·실습 Zone만 대상으로 하는 [정리 전용 최소 정책과 승인 절차](./closeout.md)를 준비하고 승인 후 적용했다. 새 정책 Version 1은 정확한 ARN·MFA·지역 조건의 다섯 Action을 여섯 문장으로 제한하며 `helpdesk-deployer` 한 명에게만 연결했다. Foundation의 새 기본 Version 4에는 글로벌 Route 53의 `GetDNSSEC`·`DeleteHostedZone` 두 예외만 추가했다. MFA 거부·서울 조건·다른 14개 문장과 Version 1~3은 보존했다. 기존 DNS 생성·복원 정책과 Role은 편집하지 않았다. 비Root에서 DNSSEC 미서명·원본 DB·두 Snapshot 보존을 조회했다. 같은 최종 점검에서 새 실행 Task 1개도 발견해 중지하거나 이전의 0개 상태로 기록하지 않았다. 실제 리소스 삭제는 미실행이며 직전에 다시 확인한다.
+지정 원본 DB·ALB·실습 Zone만 대상으로 하는 [정리 전용 최소 정책과 승인 절차](./closeout.md)를 준비하고 승인 후 적용했다. 새 정책 Version 1은 정확한 ARN·MFA·지역 조건의 다섯 Action을 여섯 문장으로 제한하며 `helpdesk-deployer` 한 명에게만 연결했다. Foundation의 새 기본 Version 4에는 글로벌 Route 53의 `GetDNSSEC`·`DeleteHostedZone` 두 예외만 추가했다. MFA 거부·서울 조건·다른 14개 문장과 Version 1~3은 보존했다. 기존 DNS 생성·복원 정책과 Role은 편집하지 않았다.
+
+이후 별도의 최종 실행 승인을 받아 원본 RDS·ALB/리스너·실습 Zone/두 Record와 Cloudflare 서비스 CNAME을 삭제했다. 원본 데이터는 최신 검증 Snapshot의 기준과 일치했고 두 수동 Snapshot은 삭제 뒤 개별 상세에서 Available을 확인했다. Secret·Log·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 실제 삭제 중 추가 IAM 변경은 없었으며 정리 정책 연결 해제·두 지역 예외 회수는 후속 검토로 남긴다. [실제 실행 결과와 재배포 조건](./closeout.md#2026-10-22-실제-정리-결과)을 따른다.
 
 Private RDS의 최초 계정 설정에는 [별도의 임시 관리 통로](./db-bootstrap.md)를 사용한다. 기존 세 정책은 유지하고, CloudShell의 환경 생성·지정 환경 사용과 한정된 정리 권한을 Bootstrap 정책 하나로 분리한다. DB 관리자 Credential을 App에 전달하거나 배포 사용자에게 Secret 조회·자기 권한 수정 권한을 주지 않는다.
 

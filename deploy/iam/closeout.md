@@ -1,6 +1,6 @@
 # 배포 실습 종료를 위한 최소 권한
 
-> 2026-10-22: 지정 DB·ALB·실습 Zone의 정리 권한 준비를 승인받아 Foundation Version 4와 정리 정책 Version 1을 적용했다. 비Root에서 지정 Zone의 DNSSEC 조회와 원본 DB·두 Snapshot 보존 상태를 확인했다. 새 실행 Task 한 개도 관찰해 중지 상태로 단정하지 않았다. 실제 삭제는 미실행이며 권한 준비 승인을 삭제 실행 승인으로 해석하지 않는다.
+> 2026-10-22: 정리 권한 준비 뒤 별도의 최종 승인을 받아 지정 원본 RDS·ALB/리스너·실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. App Task·Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 아래 권한 준비와 실제 실행 결과를 구분한다.
 
 ## 대상과 보존 범위
 
@@ -60,7 +60,7 @@ node --test src/test/js/iam-closeout-policy.test.mjs src/test/js/iam-dns-lab-pol
 - 여섯 변경 파일의 UTF-8 BOM 없음·LF 확인. Java·PostgreSQL 회귀, Image Build·Push·CI·AWS IAM 평가는 이번 준비 검증에 포함하지 않는다.
 - 비Root 세션은 로그아웃하고 Root 로그인 화면을 준비했다. 사용자 로그인·MFA 완료 후에만 승인한 AWS 정책 변경으로 이어간다.
 
-## 2026-10-22 AWS 적용 결과
+## 2026-10-22 권한 준비 적용 결과
 
 - Root 로그인·MFA는 사용자가 직접 완료했다. 기존 Foundation **Version 3**의 화면에 표시된 전체 JSON을 읽어 기존 기준과 일치함을 확인했고, 지정 사용자 한 명의 연결·기존 Version 1~3도 확인했다. 변경 전 JSON은 Git 제외 경로에 보관했다.
 - Foundation의 **새 기본 Version 4**를 저장했다. 저장된 전체 JSON은 두 예외만 추가한 승인안과 일치하며 **15문장·5,509자**다. Version 1~3을 삭제하지 않았고 다른 14개 문장·MFA 거부·서울 조건을 보존했다.
@@ -69,13 +69,35 @@ node --test src/test/js/iam-closeout-policy.test.mjs src/test/js/iam-dns-lab-pol
 - 정리 정책과 Foundation 적용본 JSON은 Git 제외 경로에만 보관했다. 공개 Template에는 자리표시자를 유지한다. 별도 정책으로 분리했으므로 기존 Runtime·Edge·복원·DNS 생성 정책을 편집하지 않았다.
 - Root를 로그아웃한 뒤 사용자가 `helpdesk-deployer` 로그인·MFA를 직접 완료했다. 비Root 신원을 확인하고 지정 Zone의 DNSSEC 조회에 성공했다. 상태는 **서명하지 않음**, KSK는 없었다. DNSSEC 설정은 변경하지 않았다.
 - 같은 비Root 세션에서 원본 RDS와 두 수동 Snapshot이 계속 `사용 가능`이며 자동 백업은 7일임을 확인했다. 정책 저장·연결·읽기 성공을 실제 삭제 Action의 실행 검증으로 기록하지 않는다.
-- DB·ALB·Zone·Record 삭제 요청은 **0회**다. 두 수동 Snapshot·Secret·Log·실행 설정·DB Row·Cloudflare DNS는 이 적용 작업에서 변경하지 않았다. 원본 자동 백업 보존 옵션도 아직 결정·실행하지 않았다.
+- 이 권한 준비 단계의 DB·ALB·Zone·Record 삭제 요청은 **0회**였다. 두 수동 Snapshot·Secret·Log·실행 설정·DB Row·Cloudflare DNS는 권한 준비 중 변경하지 않았다. 이후 별도로 승인한 실제 삭제 결과는 다음 절에 기록한다.
 
-### 최종 조회에서 발견한 실행 상태 변화
+## 2026-10-22 실제 정리 결과
 
-최초 조회에서는 App Task·Service가 0개였으나, 권한 적용 후 재조회에서는 **`helpdesk-learning:6`의 실행 Task 1개·Service 0개**를 관찰했다. 상세에 표시된 새 Task의 생성·시작은 **2026-10-22 15:45 KST**, 시작 주체는 `-`였다. 이 정보만으로 누가 시작했는지 확정하지 않는다. 이번 권한 준비 작업에서는 `RunTask`·Task 중지·Target 변경을 요청하지 않았다.
+사용자가 지정 대상·삭제 옵션·보존 범위를 확인하고 실제 정리를 승인했다. `helpdesk-deployer`의 기존 MFA 세션으로 실행했으며 삭제 중 IAM·보안 조건·Secret은 변경하지 않았다. 마지막 실행 상태는 Task 실행/보류 0개·활성 Service 0개다.
 
-현재 Task를 임의로 중지하거나 앞선 중지 상태가 유지된다고 기록하지 않았다. 별도 실행 요청 여부를 사용자에게 확인했고, 실제 삭제 전에는 최신 실행 상태·접속·DB 데이터와 Snapshot의 차이를 다시 확인한다. 기존 Task 중지 요청을 이 새 Task의 중지 승인으로 전용하지 않는다.
+### 삭제 전 데이터 확인
+
+psql 17.11·`verify-full`·TLS 1.3으로 원본에 접속해 `deploy/rds/recovery-verification.sql`을 읽기 전용 Repeatable Read Transaction에서 실행하고 COMMIT했다. 10/21 최신 Snapshot의 복원 검증 기준과 일곱 Table의 건수/전체 Row Hash, Job 집계·참조·V1~V8·Sequence가 모두 일치했다. Ticket·Message·Job·Attempt는 각각 5건, Suggestion·Category는 각각 1건이었다. 추가 재접속 시도는 CloudShell 유휴 종료로 SQL을 실행하지 못했으며, 이미 완료한 대조 결과를 사용했다. 원문·작성자·암호 값은 기록하지 않았다.
+
+### 삭제와 보존 확인
+
+| 대상 | 실행과 최종 확인 |
+|---|---|
+| 원본 RDS `helpdesk-learning` | 추가 최종 Snapshot·자동 Backup 보존을 선택하지 않고 삭제. 삭제 요청은 한 번만 제출했고 상세의 Not Found·DB 목록 0개 확인 |
+| Cloudflare 서비스 CNAME `helpdesk.hmyoon.com` | 해당 Record 한 개만 삭제. 권한 DNS에서 CNAME 부재를 확인한 뒤 기존 TTL 300초 이상 대기 |
+| ALB `helpdesk-learning` | CNAME 부재 확인 후 560초 이상 지난 시점에 삭제 절차 시작. 삭제 완료 안내·ALB 목록 0개 확인. 두 Listener도 함께 삭제 |
+| Route 53 실습 Record·Zone | TXT와 Alias A를 한 건씩 삭제한 뒤 기본 NS·SOA만 남았음을 확인하고 Zone 삭제. 호스팅 영역 목록 0개 확인 |
+| 두 수동 Snapshot | `helpdesk-learning-20261016-recovery`·`helpdesk-learning-20261021-final`의 개별 상세에서 manual·Available 확인 |
+
+자동 Backup 미보존은 RDS 삭제 옵션으로 확인했으며 보존 Backup 목록을 별도로 조회하지는 않았다. Snapshot 목록은 0개로 표시됐지만 두 개별 상세는 모두 Available이었다. 목록과 상세의 차이 원인은 확정하지 않았으며, 이를 해결하려고 권한을 넓히지 않았다. CloudShell의 직접 조회도 임시 인증정보 발급 오류로 완료하지 못했으므로 보존 확인 근거는 두 Snapshot의 개별 상세다.
+
+Secret·CloudWatch Log와 365일 보존 설정·ECR Image·ACM 인증서/검증 CNAME·Target Group·VPC/보안 그룹·Task Definition·Role은 변경하지 않았다. 부모 Cloudflare NS와 다른 서비스 Record도 유지했다. 실행 리소스 정리 뒤에도 Snapshot·Image·Log 보관 비용은 남을 수 있으며 실제 청구액은 조회하지 않았다.
+
+### 재개와 후속 점검
+
+다음 개발·Test는 로컬에서 진행한다. 삭제한 DB에 Start를 요청하거나 기존 Task Definition을 그대로 실행하지 않는다. Cloud 배포를 다시 할 때는 최신 검증 Snapshot에서 새 Private DB를 복원하고 TLS·계정·데이터를 확인한 뒤 JDBC Endpoint·ALB·서비스 DNS·새 Task/Target을 맞춘다. Target Group은 보존했으므로 재사용 조건부터 확인한다. 처음에는 Provider·Worker를 끄고 기존 Row·재로그인·Role·CSRF를 검증한다. [ECS 재배포 순서](../ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
+
+정리 정책 연결 해제와 Foundation의 두 Route 53 예외 회수는 후속 보안 점검으로 남긴다. 이번 실행에서는 IAM을 변경하지 않았다. 실행 근거 JSON·화면은 WIL 저장소의 Git 제외 `local/evidence/2026-10-22-closeout-inventory/`에 보관했다.
 
 ## 공식 근거
 

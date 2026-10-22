@@ -1,6 +1,20 @@
 # ECS 실행 명세와 첫 Cloud 기동
 
-> 상태: 같은 검증 Image·명세에서 Private RDS·Migration 7개·HTTPS 접수/SQL Row·Cookie/CSRF·HTTP 301·Cloud Log/ALB Metric을 확인했다. 10/16 환경 재개 뒤 별도 Snapshot·RDS의 SQL/App 복원, 단일 App 전환·Session 비교·원본 복귀·재로그인 조회 완료. 임시 DB·해당 자동 Backup은 별도 최종 승인으로 삭제했고 원본 DB·검증 Snapshot 유지. 전체 AI·이전 Image Rollback은 미완료다. 공개 Template·AI 기본 비활성은 유지한다.
+> 상태: 2026-10-22 장기 휴지기 정리 완료. 실제 HTTPS·합성 AI·관측·Snapshot 복원·Image Rollback 결과를 보존하고 원본 RDS·ALB/리스너·실습 Zone·서비스 CNAME을 삭제했다. 실행 App Task·Service는 0개이며 두 수동 Snapshot·Secret·Log·Image·ACM·Target Group·네트워크는 유지했다. 공개 Template·AI 기본 비활성은 그대로다. 아래 일자별 실행 기록은 당시의 상태이며 현재 재개 절차는 다음 절을 따른다.
+
+## 2026-10-22 장기 휴지기와 다음 배포
+
+[정리 결과](../iam/closeout.md#2026-10-22-실제-정리-결과)의 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. 실행 리소스를 삭제한 상태이므로 예전 RDS Start·예전 Endpoint를 참조하는 Task 실행만으로 서비스를 재개할 수 없다. 다음 기능 개발과 회귀는 로컬에서 진행하고 Cloud 배포가 필요해질 때 다음 순서를 확인한다.
+
+1. 최신 검증 Snapshot `helpdesk-learning-20261021-final`에서 새 Private RDS를 복원한다. 기존 Subnet/보안 그룹·암호화·최소 사양·TLS 조건을 대조하고 DB 계정·V8·업무 Row를 확인한다.
+2. 새 DB Endpoint를 Task Definition에 반영한다. 기존 Parameter와 DB 계정의 일치를 확인하되 값을 문서·명령 인자·Log에 넣지 않는다. 새 Code가 있으면 Local/CI 검증 뒤 새 Image Digest를 사용하고 설정만 바뀌면 같은 Image를 사용할 수 있다.
+3. 새 ALB·HTTPS/Redirect Listener를 준비한다. 보존 Target Group·ACM의 재사용 조건을 확인하고 Cloudflare 서비스 CNAME을 새 ALB 주소로 연결한다. 부모 NS·ACM 검증 CNAME은 그대로 둔다.
+4. Provider·Worker를 끈 단일 Task를 실행해 새 Private IP:8080을 등록하고 Healthy·HTTPS·재로그인·기존 문의/제안·Role·CSRF를 확인한다. 이전 JVM의 Session은 복원되지 않는다.
+5. AI가 필요하면 현재 Job·예약·기한과 승인한 입력/호출 범위를 먼저 확인한다. 과거 활성 명세를 그대로 실행해 미완료 작업을 자동 재호출하지 않는다.
+
+새 배포·비용·DNS 변경은 실행 전에 범위를 확인한다. Snapshot·Image·365일 Log의 보관 비용은 남을 수 있으며 이번 정리로 모든 비용이 0원이 됐다고 보지 않는다. 기존 Task Definition은 배포 이력이며 삭제한 Endpoint를 현재 접속 대상으로 사용하지 않는다.
+
+## 실행 명세 초안의 범위
 
 [task-definition.template.json](./task-definition.template.json)은 첫 Cloud 연결에서 사용할 Helpdesk 실행 명세다. PostgreSQL과 배포용 USER·AGENT를 연결하되 Provider·Worker는 명시적으로 끈다. 먼저 서버·DB·로그인·HTTPS를 확인한 뒤 전체 AI 조립과 실행을 별도로 이어간다.
 
@@ -66,7 +80,7 @@ AI Key는 별도 Standard SecureString `/helpdesk/learning/ai/provider-key`에 �
 
 실행 수를 0으로 내린 뒤 Service Task뿐 아니라 단독 실행 Task도 남지 않았는지 확인한다. ALB는 Task가 없어도 과금되고, RDS Stop은 Storage·Backup 비용을 중단하지 않으며 7일 후 자동 재시작된다. 장기 휴지기의 기본 절차는 **쓰기·Worker 중단 → 마지막 Snapshot → 별도 복원 검증 → 승인된 ALB·DB Instance 정리 → 필요한 Image·Snapshot·Parameter 보관**이다. 실제 삭제 명령이나 자동 정리는 이 초안에 넣지 않았다.
 
-재개할 때는 Snapshot에서 새 RDS를 복원하고 Endpoint·DB Password·TLS를 확인한다. ALB·Target Group을 다시 구성해 DNS 대상·Task 설정을 맞춘 뒤 같은 검증 Image를 실행한다. 처음에는 AI를 꺼서 미완료 Job의 추가 호출을 막고 기존 Row·로그인·CSRF를 확인한 다음 승인된 AI 실험을 이어간다. Snapshot·Image 보관료는 남으므로 휴지기를 비용 0원으로 표현하지 않는다. [RDS 중지](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_StopInstance.html), [RDS 복원](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_RestoreFromSnapshot.html)
+재개할 때는 Snapshot에서 새 RDS를 복원하고 Endpoint·DB Password·TLS를 확인한다. ALB를 다시 만들고 보존 Target Group의 재사용 조건과 DNS 대상·Task 설정을 맞춘 뒤 검증 Image를 실행한다. 처음에는 AI를 꺼서 미완료 Job의 추가 호출을 막고 기존 Row·로그인·CSRF를 확인한 다음 승인된 AI 실험을 이어간다. Snapshot·Image 보관료는 남으므로 휴지기를 비용 0원으로 표현하지 않는다. [RDS 중지](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_StopInstance.html), [RDS 복원](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_RestoreFromSnapshot.html)
 
 NAT Gateway·상시 유료 Endpoint·고정 Elastic IP는 첫 구성에 추가하지 않는다. CloudWatch Log는 요청한 1년(365일)을 보존하며 필요한 비밀값 없는 근거는 별도 기록한다. 각 Log Event의 보존 기간이지 Group을 생성 후 1년 만에 삭제하는 설정은 아니다. 보관량이 누적될 때의 비용도 확인한다. 이전 정상 Image와 현재 배포 Image는 Rollback용으로 유지하며 승인 없이 자동 삭제하지 않는다.
 

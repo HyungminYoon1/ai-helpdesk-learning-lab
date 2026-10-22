@@ -1,7 +1,7 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8–9 진행 — 10/19 Process Transport 추가 후 전체 Java 754개 통과 기록 유지. Python 정책·Decoder Test는 28개 통과, 실제 모델 후보 비교는 아래 별도 결과. 10/17 JavaScript 전체 262개·ESLint 통과 기록 유지. 현재 Cloud는 읽기 준비 P Image이며 main의 최신 Source 전체를 배포한 상태는 아님
-> 현재 학습 영역: Week 8 배포 — AI 비활성 ECS·RDS·HTTPS 접수/SQL Row·HTTP 301·Cloud Log/ALB Metric, 별도 Snapshot/RDS 복원·원본 복귀와 A→P→B→P Image 전환 완료. 같은 원본 RDS의 V8·업무 데이터 Hash·원래 실패 코드와 새 JVM의 재로그인 조회를 확인했다. 임시 DB는 삭제했고 원본 DB·검증 Snapshot 유지. 10/17에는 RDS를 바꾸지 않고 Private CloudShell의 psql만 17.11로 맞춰 TLS·SQL 조회를 확인했다. [Client 준비 안내](./deploy/cloudshell/README.md). 원본 RDS·App·ALB 과금은 계속되며 전체 AI·남은 관측·최종 회귀/WIL은 미완료. Week 7은 2026-10-07 WIL·블로그·포럼 등록 완료
+> 상태: Week 6·7 회귀 유지, Week 8–9 마감 중 — Docker·CI·HTTPS·합성 입력의 실제 AI·관측·복원·Image Rollback, 최종 복습·로컬 회귀와 리소스 정리를 확인했다. 최신 로컬 변경의 원격 CI와 통합 WIL 검토·게시는 남아 있다. 일반 입력의 AI 활성화·개인정보 모델 고도화는 후속 과업이다.
+> 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
 ## 프로젝트 목적
