@@ -27,6 +27,7 @@ export default [
             globals: {
                 AbortController: "readonly",
                 Element: "readonly",
+                Option: "readonly",
                 document: "readonly",
                 window: "readonly"
             }

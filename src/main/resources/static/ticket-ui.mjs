@@ -27,7 +27,7 @@ function isCsrfInfo(value) {
 
 // Java String.strip()/isBlank()의 edge whitespace와 같은 범위를 사용한다.
 // JS trim()은 NBSP 등을 추가로 제거하므로 서버의 문자 수 계산과 섞지 않는다.
-function measuredMessage(value) {
+export function measuredMessage(value) {
     return value.replace(/^[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+$/gu, "");
 }
 

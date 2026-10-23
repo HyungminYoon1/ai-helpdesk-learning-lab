@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 8–9 실습과 공개 마감 완료. Week 10은 합의한 공식 답변 및 대화 조회를 로컬에서 단계적으로 구현 중이다. 고정 ID와 V9, 답변 API의 집중 Test를 확인했으며 전체 회귀와 Browser 검증은 별도 기록한다. 일반 입력의 AI 활성화와 개인정보 모델 고도화는 후속 과업이다.
+> 상태: Week 8–9 실습과 공개 마감 완료. Week 10의 고정 ID·V9, 공식 답변·정정 및 대화 조회를 로컬 PostgreSQL과 Browser에서 검증했다. 전체 Java 1,042개·패키징 후 2개, JavaScript 316개와 Lint 통과. 새 코드의 작성자 복습과 운영 적용은 별도이며 일반 입력의 AI 활성화와 개인정보 모델 고도화는 후속 과업이다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
@@ -16,7 +16,19 @@
 
 로컬 및 향후 배포 계정에는 `helpdesk.local.user.account-key`와 `helpdesk.local.agent.account-key` 또는 대응하는 `helpdesk.deployment.*.account-key`를 명시한다. 같은 사람은 이름 변경 후에도 키를 유지하며 다른 사람에게 계정을 재사용할 때는 새 키를 등록한다. 키가 없으면 기존 로그인은 가능하지만 신규 접수 및 답변의 신원 검사는 거부된다. 실제 설정값과 암호를 공개 문서나 Log에 넣지 않는다.
 
-2026-10-23 첫 집중 검증은 계정 및 Migration/기존 Security 설정 31개, 접수 및 신규 API의 집중 묶음 54개가 통과했다. 이후 입력 형식과 Commit 실패를 보강한 대화 HTTP Test는 23개가 통과했다. 서로 겹치는 실행 개수를 합산해 전체 Test 수로 표현하지 않는다. 아직 이 기록만으로 전체 회귀나 실제 Browser 완료를 주장하지 않는다.
+2026-10-23 첫 집중 검증은 계정 및 Migration/기존 Security 설정 31개, 접수 및 신규 API 묶음 54개가 통과했다. 이후 입력 형식·Commit 실패·기존 AI 제안 보존을 보강한 대화 HTTP Test는 24개, 전체 Java는 1,042개와 패키징 후 2개가 통과했다. 최종 화면의 JavaScript 316개 및 Lint도 통과했다. 서로 겹치는 집중 실행을 전체 수에 더하지 않는다.
+
+`/conversation.html`에서 대화 조회와 AGENT의 답변 및 정정을 확인할 수 있다. 명시적 `ConversationBrowserExperiment`는 별도 USER 두 명과 AGENT, 합성 문의 및 PostgreSQL을 준비해 실제 로그인·CSRF·다른 USER 거부·정정·문자 표시·재로그인과 DB Row를 확인한다. Provider와 Worker는 비활성이며 호출은 0회다. 마지막 화면 정리 뒤 Browser와 패키징 후 2개도 다시 통과했다. 이 로컬 결과를 원격 CI나 운영 배포 증거로 바꾸지 않는다.
+
+```powershell
+.\mvnw.cmd -B -ntp verify
+node --test --test-reporter=dot 'src/test/js/*.test.mjs'
+npx --yes --package 'eslint@10.11.0' eslint 'src/main/resources/static/*.mjs' 'src/test/js/*.mjs'
+# PowerShell 7, Node 및 Chrome을 사용하는 명시적 로컬 Browser 실험
+.\mvnw.cmd -B -ntp '-Dtest=ConversationBrowserExperiment' verify
+```
+
+Browser 실험은 일반 Java Test 수에 포함하지 않는다. 실제 계정이나 API Key를 요구하지 않으며 별도 생성한 Browser Session만 닫는다. 첫 회귀의 V8 전용 validation 범위와 Browser 설치 경로 환경 누락은 수정 후 재검증했다. 기존 Surefire 종료 지연/Hikari 경고의 원인 진단과 운영 자원 재측정은 후속이며 이 기능의 구현으로 해결했다고 주장하지 않는다.
 
 ## 프로젝트 목적
 

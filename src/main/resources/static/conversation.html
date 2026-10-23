@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>문의 대화와 공식 답변</title>
+    <link rel="icon" href="data:,">
+    <style>.message-body { white-space: pre-wrap; overflow-wrap: anywhere; } textarea { display: block; width: min(95%, 48rem); }</style>
+    <script type="module" src="/conversation-page.mjs"></script>
+</head>
+<body>
+<main>
+    <h1>문의 대화와 공식 답변</h1>
+    <p><a href="/login">로그인</a> 후 이 화면으로 돌아오세요. USER는 자신의 문의를 읽고 AGENT는 전체 조회와 답변 작성을 할 수 있습니다.</p>
+    <p><a href="/tickets.html">문의 접수</a> | <a href="/ai-suggestions.html">담당자 AI 제안 조회</a></p>
+    <form id="conversation-read">
+        <label for="conversation-ticket-id">Ticket ID</label>
+        <input id="conversation-ticket-id" type="number" min="1" step="1" required>
+        <button type="submit">대화 조회</button>
+    </form>
+    <p id="conversation-status" role="status" aria-live="polite">대기 중</p>
+    <h2 id="conversation-heading">대화 내역</h2>
+    <ol id="conversation-messages"></ol>
+    <button id="conversation-more" type="button" hidden>다음 대화 읽기</button>
+    <form id="official-reply" hidden>
+        <h2>공식 답변 작성</h2>
+        <p>저장하면 즉시 고객에게 공개됩니다. Ticket 상태는 바뀌지 않습니다. 정정은 기존 답변을 삭제하지 않고 새 답변으로 남습니다.</p>
+        <p>저장 여부가 미확인일 때는 이 화면에서 같은 제출을 다시 확인하세요. 페이지를 떠나면 작성 중 내용과 제출 ID는 지워집니다.</p>
+        <label for="reply-correction">안내 종류</label>
+        <select id="reply-correction"><option value="">일반 추가 안내</option></select>
+        <label for="reply-body">답변 본문 (앞뒤 공백 제외 최대 2,000자)</label>
+        <textarea id="reply-body" rows="6" required></textarea>
+        <button id="reply-send" type="submit">공식 답변 저장 / 같은 제출 재확인</button>
+    </form>
+</main>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # Official replies and conversation contract
 
-Status: implementation started on 2026-10-23. The agreed P1-P8 policies are implemented incrementally; this document is not evidence that tests have passed.
+Status: implemented and locally verified on 2026-10-23 under the agreed P1-P8 policies. This contract is not evidence of remote CI, deployment or production readiness.
 
 ## Scope and decisions
 
@@ -32,7 +32,7 @@ Receipt validates identity before writes, then stores Ticket + original INQUIRY 
 
 ## UI and verification
 
-Use textContent, bounded pages and same-origin Session/CSRF. Preserve a submission ID when the POST outcome is unknown; do not generate a fresh ID and automatically retry. Changing Ticket/account invalidates pending views and submission state. A new or edited submission gets a new ID. No bodies in localStorage or logs.
+Use textContent, bounded pages and same-origin Session/CSRF. Preserve a submission ID when the POST outcome is unknown; do not generate a fresh ID and automatically retry. Changing Ticket or navigating away invalidates pending views and submission state. Clear the conversation and draft on pagehide so history-cache restoration cannot reveal the previous account's view. Cross-tab authentication changes are not an instant logout signal; the next server request still enforces the current identity. A new or edited submission gets a new ID. No bodies in localStorage or logs. The UI warns that leaving the page discards its in-memory submission ID; cross-session deduplication is not promised.
 
 Use synthetic accounts and an isolated PostgreSQL Testcontainer for migration, identity rename/name reuse/restart, ownership, CSRF, replay/conflict, correction boundaries, concurrent inserts, rollback/commit failure, and unchanged Job/Attempt/Suggestion tests. Keep Provider/Worker off. Use Node tests and a local Browser run for the UI. No AWS changes, paid AI calls, push, or deployment are authorized by this implementation request.
 
@@ -48,3 +48,5 @@ Follow-up: persistent authentication/account management, customer follow-ups, de
 | Adding V9 changes current test-schema expectations | Edit old SQL; skip migration validation; scope the historical V8 validator and update the current runtime probe | Keep V1-V8 immutable. The V8-specific test validates its intended target; the current isolated resource probe expects nine successful migrations | AiPrivacyScanFailureMigrationIntegrationTest, SyntheticRuntimeResourceExperiment. Existing historical measurements are not rerun or relabeled |
 
 Focused verification passed: 29 Java cases including the explicit Browser experiment, the 24-case conversation HTTP suite, identity configuration and historical V8 validation. Browser assertions used USER A, USER B and AGENT against an isolated PostgreSQL database; stored original/replies, CSRF/Session presence, owner isolation, correction and text-only rendering were checked. Provider calls were zero. Full regression results are recorded separately after their final run.
+
+Final local verification: `mvnw verify` passed 1,042 Surefire tests and 2 packaged Failsafe tests; Node passed 316 tests and ESLint passed. After the final pagehide cleanup, the explicit `-Dtest=ConversationBrowserExperiment verify` passed the Browser experiment and reran both packaged tests. These repeated tests are not added to the general-suite count. A forced new-reply failure also preserved an already committed suggestion, its categories, Job and Attempt rows. The first failed full run exposed a historical V8 validation boundary, not a need to edit V1-V8. Existing shutdown/pool warnings remain separate follow-ups; no AWS, paid AI call or push occurred.
