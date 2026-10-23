@@ -19,7 +19,8 @@ public class JdbcAiSuggestionQueryRepository implements AiSuggestionQueryReposit
             FROM tickets t
             LEFT JOIN ticket_messages m ON m.id = (
                 SELECT first_message.id FROM ticket_messages first_message
-                WHERE first_message.ticket_id = t.id ORDER BY first_message.id LIMIT 1
+                WHERE first_message.ticket_id = t.id AND first_message.message_type = 'INQUIRY'
+                ORDER BY first_message.id LIMIT 1
             )
             LEFT JOIN ai_suggestion_jobs j ON j.input_message_id = m.id
             LEFT JOIN ticket_suggestions s ON s.job_id = j.id

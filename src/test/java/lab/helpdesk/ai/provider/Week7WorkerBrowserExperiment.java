@@ -192,6 +192,8 @@ final class Week7WorkerBrowserExperiment {
         properties.put("helpdesk.local.user.password", credentials.get("HELPDESK_BROWSER_USER_PASSWORD"));
         properties.put("helpdesk.local.agent.username", credentials.get("HELPDESK_BROWSER_AGENT_NAME"));
         properties.put("helpdesk.local.agent.password", credentials.get("HELPDESK_BROWSER_AGENT_PASSWORD"));
+        properties.put("helpdesk.local.user.account-key", lab.helpdesk.identity.IdentityFixtures.key(credentials.get("HELPDESK_BROWSER_USER_NAME")).toString());
+        properties.put("helpdesk.local.agent.account-key", lab.helpdesk.identity.IdentityFixtures.key(credentials.get("HELPDESK_BROWSER_AGENT_NAME")).toString());
         return new SpringApplicationBuilder(HelpdeskApplication.class).profiles("postgres", "local-browser")
                 .initializers(context -> {
                     context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("worker-browser-fixture", properties));

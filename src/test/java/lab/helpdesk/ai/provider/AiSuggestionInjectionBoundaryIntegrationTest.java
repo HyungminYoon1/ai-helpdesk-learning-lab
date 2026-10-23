@@ -41,6 +41,7 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Real Spring AI/SDK/HTTP and PostgreSQL; the loopback response is not live AI inference. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = "helpdesk.ai.worker.enabled=false")
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -101,7 +102,7 @@ class AiSuggestionInjectionBoundaryIntegrationTest {
         otherTicketId = jdbc.queryForObject("""
                 INSERT INTO tickets (title, status) VALUES (?, 'OPEN') RETURNING id
                 """, Long.class, "변경하면 안 되는 다른 문의");
-        receipt = receipts.receive(ORIGINAL_TITLE, ORIGINAL_BODY, AUTHOR);
+        receipt = receipts.receive(ORIGINAL_TITLE, ORIGINAL_BODY, lab.helpdesk.identity.IdentityFixtures.actor(AUTHOR));
         fixtureEnvelope = envelope(MAPPER.createObjectNode().put("role", "assistant")
                 .put("content", VALID_OUTPUT).putNull("refusal"));
 

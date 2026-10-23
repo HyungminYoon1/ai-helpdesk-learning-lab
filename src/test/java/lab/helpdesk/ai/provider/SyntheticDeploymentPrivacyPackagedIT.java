@@ -43,6 +43,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Opt-in after package: real child JAR + Spring privacy Beans + PostgreSQL, loopback AI only. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = {"logging.level.root=WARN", "spring.main.banner-mode=off",
         "helpdesk.ai.worker.enabled=false", "helpdesk.ai.provider.enabled=false",
         "helpdesk.ai.synthetic-scan.enabled=true", "helpdesk.ai.synthetic-scan.timeout-ms=20000",
@@ -134,7 +135,7 @@ class SyntheticDeploymentPrivacyPackagedIT {
 
     @Test
     void packagedChildMasksTheAllowedCaseBeforeHttpAndStoresOneProposal() {
-        var receipt = receipts.receive(SyntheticDeploymentPrivacyScanner.TITLE, SyntheticDeploymentPrivacyScanner.BODY, "synthetic-author");
+        var receipt = receipts.receive(SyntheticDeploymentPrivacyScanner.TITLE, SyntheticDeploymentPrivacyScanner.BODY, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
         assertThat(worker.runOnce().outcome()).isEqualTo(Outcome.STORED);
         assertThat(providerInvocations).hasValue(1);
         assertThat(httpRequests).hasValue(1);
@@ -148,7 +149,7 @@ class SyntheticDeploymentPrivacyPackagedIT {
     @Test
     void outOfScopeInputFailsWithoutHttpWhileCommittedReceiptAndReservationRemain() {
         String body = SyntheticDeploymentPrivacyScanner.BODY + " 허용 목록 밖의 추가 문장";
-        var receipt = receipts.receive(SyntheticDeploymentPrivacyScanner.TITLE, body, "synthetic-author");
+        var receipt = receipts.receive(SyntheticDeploymentPrivacyScanner.TITLE, body, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
         assertThat(worker.runOnce().outcome()).isEqualTo(Outcome.FAILED);
         assertThat(providerInvocations).hasValue(0);
         assertThat(httpRequests).hasValue(0);

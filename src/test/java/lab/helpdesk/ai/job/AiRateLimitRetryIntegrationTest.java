@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Real PostgreSQL retry control; no AI Provider is constructed or called. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = {"logging.level.root=WARN", "spring.main.banner-mode=off"})
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -207,7 +208,7 @@ class AiRateLimitRetryIntegrationTest {
     }
 
     private TicketReceiptResult receive() {
-        return receipts.receive("Synthetic retry question", "Original message must remain.", "synthetic-author");
+        return receipts.receive("Synthetic retry question", "Original message must remain.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private OffsetDateTime databaseNow() {

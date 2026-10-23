@@ -67,7 +67,8 @@ public final class SyntheticRuntimeResourceExperiment {
         boolean passed = false;
         long started = System.nanoTime();
         try {
-            var application = new SpringApplication(HelpdeskApplication.class, ControlledAiConfiguration.class);
+            var application = new SpringApplication(HelpdeskApplication.class, ControlledAiConfiguration.class,
+                    lab.helpdesk.identity.IdentityFixtures.Configuration.class);
             application.setBannerMode(Banner.Mode.OFF);
             application.setLogStartupInfo(false);
             try (var context = application.run()) {
@@ -94,7 +95,7 @@ public final class SyntheticRuntimeResourceExperiment {
                 stage = "HEALTH_AND_DATABASE";
                 var jdbc = context.getBean(JdbcTemplate.class);
                 require(Boolean.TRUE.equals(jdbc.queryForObject("SELECT count(*) = 8 AND bool_and(success) "
-                        + "AND max(version::integer) = 8 FROM flyway_schema_history", Boolean.class)));
+                        + "AND max(version::integer) = 9 FROM flyway_schema_history", Boolean.class)));
                 require(Boolean.TRUE.equals(jdbc.queryForObject("SELECT current_database() = 'helpdesk_local' "
                         + "AND current_user = 'helpdesk_app'", Boolean.class)));
                 int port = environment.getRequiredProperty("local.server.port", Integer.class);
@@ -113,7 +114,7 @@ public final class SyntheticRuntimeResourceExperiment {
                     var snapshots = new ArrayList<Map<String, Object>>();
                     for (int index = 0; index < 3; index++) {
                         long jobStarted = System.nanoTime();
-                        var receipt = receipts.receive(TITLE, BODY, AUTHOR);
+                        var receipt = receipts.receive(TITLE, BODY, lab.helpdesk.identity.IdentityFixtures.actor(AUTHOR));
                         awaitTerminal(jdbc, receipt.jobId(), "SUCCEEDED");
                         assertReceipt(jdbc, receipt, BODY);
                         require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions WHERE job_id = ?", Integer.class,
@@ -124,7 +125,7 @@ public final class SyntheticRuntimeResourceExperiment {
                         snapshot.put("receiptToObservedTerminalSeconds", seconds(jobStarted));
                         snapshots.add(snapshot);
                     }
-                    var rejected = receipts.receive(TITLE, OUTSIDE, AUTHOR);
+                    var rejected = receipts.receive(TITLE, OUTSIDE, lab.helpdesk.identity.IdentityFixtures.actor(AUTHOR));
                     awaitTerminal(jdbc, rejected.jobId(), "FAILED");
                     assertReceipt(jdbc, rejected, OUTSIDE);
                     require("ADAPTER_CONFIGURATION_ERROR".equals(jdbc.queryForObject(
@@ -171,7 +172,7 @@ public final class SyntheticRuntimeResourceExperiment {
             LoopbackAi fixture, ScanMode mode, Map<String, Object> report) throws Exception {
         require(!Files.exists(CHILD_WITNESS));
         long started = System.nanoTime();
-        var receipt = receipts.receive(TITLE, BODY, AUTHOR);
+        var receipt = receipts.receive(TITLE, BODY, lab.helpdesk.identity.IdentityFixtures.actor(AUTHOR));
         awaitTerminal(jdbc, receipt.jobId(), "FAILED");
         assertReceipt(jdbc, receipt, BODY);
         String expectedCode = mode == ScanMode.TIMEOUT ? "PRIVACY_SCAN_TIMEOUT" : "ADAPTER_CONFIGURATION_ERROR";
@@ -189,7 +190,7 @@ public final class SyntheticRuntimeResourceExperiment {
         require(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions", Integer.class) == 0);
         require(fixture.requests.get() == 0);
 
-        var rejected = receipts.receive(TITLE, OUTSIDE, AUTHOR);
+        var rejected = receipts.receive(TITLE, OUTSIDE, lab.helpdesk.identity.IdentityFixtures.actor(AUTHOR));
         awaitTerminal(jdbc, rejected.jobId(), "FAILED");
         assertReceipt(jdbc, rejected, OUTSIDE);
         require("ADAPTER_CONFIGURATION_ERROR".equals(jdbc.queryForObject(

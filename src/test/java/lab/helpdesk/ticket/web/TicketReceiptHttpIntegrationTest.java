@@ -59,6 +59,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = {
         "helpdesk.ai.provider.enabled=false",
         "helpdesk.ai.worker.enabled=false"
@@ -122,7 +123,7 @@ class TicketReceiptHttpIntegrationTest {
                 SELECT j.status FROM ai_suggestion_jobs j
                 JOIN ticket_messages m ON m.id = j.input_message_id WHERE m.ticket_id = ?
                 """, String.class, ticketId)).isEqualTo("PENDING");
-        verify(receipts).receive("접수 문의", original, username);
+        verify(receipts).receive("접수 문의", original, lab.helpdesk.identity.IdentityFixtures.actor(username));
     }
 
     @Test
@@ -184,7 +185,7 @@ class TicketReceiptHttpIntegrationTest {
         assertRowCounts(1);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT author_username FROM ticket_messages", String.class)).isEqualTo(USER_NAME);
-        verify(receipts).receive("접수 문의", "작성자 신뢰 경계 실험", USER_NAME);
+        verify(receipts).receive("접수 문의", "작성자 신뢰 경계 실험", lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
     }
 
     @Test
@@ -280,7 +281,7 @@ class TicketReceiptHttpIntegrationTest {
             create(sessionFor(USER_NAME), payload(original))
                     .andExpect(status().isInternalServerError())
                     .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
-            verify(receipts).receive("접수 문의", original, USER_NAME);
+            verify(receipts).receive("접수 문의", original, lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
             assertRowCounts(0);
             assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
                     "event=TICKET_RECEIPT_COMMITTED");
@@ -302,7 +303,7 @@ class TicketReceiptHttpIntegrationTest {
                     .andExpect(status().isInternalServerError())
                     .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
                     .andExpect(jsonPath("$.detail").value("an unexpected server error occurred"));
-            verify(receipts).receive("접수 문의", original, USER_NAME);
+            verify(receipts).receive("접수 문의", original, lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
             assertRowCounts(0);
             assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
                     "event=TICKET_RECEIPT_COMMITTED");
@@ -327,7 +328,7 @@ class TicketReceiptHttpIntegrationTest {
                     .andExpect(status().isInternalServerError())
                     .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
                     .andExpect(jsonPath("$.detail").value("an unexpected server error occurred"));
-            verify(receipts).receive("접수 문의", original, USER_NAME);
+            verify(receipts).receive("접수 문의", original, lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
             assertRowCounts(0);
             assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
                     "event=TICKET_RECEIPT_COMMITTED");
@@ -360,7 +361,7 @@ class TicketReceiptHttpIntegrationTest {
     }
 
     private void assertNoReceipt() {
-        verify(receipts, never()).receive(anyString(), anyString(), anyString());
+        verify(receipts, never()).receive(anyString(), anyString(), org.mockito.ArgumentMatchers.any(lab.helpdesk.identity.AuthenticatedActor.class));
         assertRowCounts(0);
     }
 
@@ -374,9 +375,9 @@ class TicketReceiptHttpIntegrationTest {
     static class TestUsers {
         @Bean
         UserDetailsService receiptTestUsers(PasswordEncoder encoder) {
-            return new InMemoryUserDetailsManager(
-                    User.withUsername(USER_NAME).password(encoder.encode(LOGIN_SECRET)).roles("USER").build(),
-                    User.withUsername(AGENT_NAME).password(encoder.encode(LOGIN_SECRET)).roles("USER", "AGENT").build());
+            return new lab.helpdesk.identity.IdentityAwareInMemoryUserDetailsManager(
+                    lab.helpdesk.identity.IdentityFixtures.user(User.withUsername(USER_NAME).password(encoder.encode(LOGIN_SECRET)).roles("USER").build()),
+                    lab.helpdesk.identity.IdentityFixtures.user(User.withUsername(AGENT_NAME).password(encoder.encode(LOGIN_SECRET)).roles("USER", "AGENT").build()));
         }
     }
 }

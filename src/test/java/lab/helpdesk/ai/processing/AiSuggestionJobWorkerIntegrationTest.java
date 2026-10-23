@@ -42,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Real PostgreSQL and controlled failures. Not a live AI or Browser experiment. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = {"logging.level.root=WARN", "spring.main.banner-mode=off"})
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -240,7 +241,7 @@ class AiSuggestionJobWorkerIntegrationTest {
     }
 
     private TicketReceiptResult receive() {
-        return receipts.receive("Synthetic login question", "Original customer message.", "synthetic-author");
+        return receipts.receive("Synthetic login question", "Original customer message.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private void makeDue(TicketReceiptResult receipt) {

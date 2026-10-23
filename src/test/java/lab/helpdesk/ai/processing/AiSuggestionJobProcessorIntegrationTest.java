@@ -42,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Controlled Provider responses + real PostgreSQL; not a live AI quality evaluation. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -428,7 +429,7 @@ class AiSuggestionJobProcessorIntegrationTest {
     }
 
     private TicketReceiptResult receive() {
-        return receipts.receive("로그인 문의", ORIGINAL_BODY, "synthetic-author");
+        return receipts.receive("로그인 문의", ORIGINAL_BODY, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private void makeRepairDue(TicketReceiptResult receipt) {

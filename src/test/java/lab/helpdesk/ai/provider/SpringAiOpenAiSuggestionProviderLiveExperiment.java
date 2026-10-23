@@ -37,6 +37,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Opt-in one-call experiment, excluded from Surefire's default *Test naming patterns. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = {"logging.level.root=WARN", "spring.main.banner-mode=off"})
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -81,7 +82,7 @@ class SpringAiOpenAiSuggestionProviderLiveExperiment {
         TicketReceiptResult receipt = null;
         try (var provider = new SpringAiOpenAiSuggestionProvider(key, privacy, 200)) {
             try {
-                receipt = receipts.receive("로그인 링크 만료 이유 문의", BODY, "synthetic-live-author");
+                receipt = receipts.receive("로그인 링크 만료 이유 문의", BODY, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-live-author"));
                 var processor = new AiSuggestionJobProcessor(claims, inputs, completedEmptyScan(privacy), provider,
                         new AiSuggestionOutputValidator(200), results, Clock.systemUTC());
                 AiSuggestionProcessingResult processed = processor.processNextPending();

@@ -57,6 +57,8 @@ public class SecurityConfiguration {
                         .hasRole("AGENT")
                         .requestMatchers(suggestionReadRequest)
                         .hasRole("AGENT")
+                        .requestMatchers("/api/tickets/{id}/replies").hasRole("AGENT")
+                        .requestMatchers("/api/tickets/{id}/messages").hasAnyRole("USER", "AGENT")
                         .requestMatchers(apiRequest).authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exceptions -> exceptions

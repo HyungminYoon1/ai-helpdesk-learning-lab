@@ -22,6 +22,21 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 public class TicketApiExceptionHandler
         extends ResponseEntityExceptionHandler {
 
+    @ExceptionHandler(lab.helpdesk.identity.IdentityNotLinkedException.class)
+    public ProblemDetail handleMissingIdentity() {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, "account identity is not linked");
+        problem.setProperty("code", "IDENTITY_UNLINKED");
+        return problem;
+    }
+
+    @ExceptionHandler(lab.helpdesk.ticket.application.ConversationException.class)
+    public ProblemDetail handleConversation(lab.helpdesk.ticket.application.ConversationException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.valueOf(exception.code().status()),
+                "conversation request could not be completed");
+        problem.setProperty("code", exception.code().name());
+        return problem;
+    }
+
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(
             MethodArgumentNotValidException exception,

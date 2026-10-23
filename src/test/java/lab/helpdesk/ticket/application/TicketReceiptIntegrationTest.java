@@ -34,6 +34,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -80,7 +81,7 @@ class TicketReceiptIntegrationTest {
         String originalBody = "  로그인 링크가 만료됐습니다.\n새 링크를 요청합니다.  ";
 
         TicketReceiptResult result = receipts.receive(
-                "로그인 문의", originalBody, "synthetic-author");
+                "로그인 문의", originalBody, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
 
         assertThat(result.ticket().id()).isPositive();
         assertThat(result.messageId()).isPositive();
@@ -109,7 +110,7 @@ class TicketReceiptIntegrationTest {
     @ValueSource(strings = {"   ", "\t\n"})
     void blank_message_is_rejected_before_any_insert(String body) {
         assertThatThrownBy(() -> receipts.receive(
-                "로그인 문의", body, "synthetic-author"))
+                "로그인 문의", body, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author")))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(tickets.successfulSaves.get()).isZero();
@@ -121,7 +122,7 @@ class TicketReceiptIntegrationTest {
     @ValueSource(strings = {"   ", "\t\n"})
     void missing_author_is_rejected_before_any_insert(String author) {
         assertThatThrownBy(() -> receipts.receive(
-                "로그인 문의", "새 로그인 링크를 요청합니다.", author))
+                "로그인 문의", "새 로그인 링크를 요청합니다.", lab.helpdesk.identity.IdentityFixtures.actor(author)))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(tickets.successfulSaves.get()).isZero();
@@ -136,7 +137,7 @@ class TicketReceiptIntegrationTest {
                 """);
         try {
             assertThatThrownBy(() -> receipts.receive(
-                    "로그인 문의", "새 로그인 링크를 요청합니다.", "synthetic-author"))
+                    "로그인 문의", "새 로그인 링크를 요청합니다.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author")))
                     .isInstanceOf(DataIntegrityViolationException.class);
 
             // 실제 JDBC INSERT가 ID를 반환한 뒤 두 번째 저장에서 실패했다.
@@ -159,7 +160,7 @@ class TicketReceiptIntegrationTest {
                 """);
         try {
             assertThatThrownBy(() -> receipts.receive(
-                    "로그인 문의", "새 로그인 링크를 요청합니다.", "synthetic-author"))
+                    "로그인 문의", "새 로그인 링크를 요청합니다.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author")))
                     .isInstanceOf(DataIntegrityViolationException.class);
 
             assertThat(tickets.successfulSaves.get()).isOne();
@@ -176,7 +177,7 @@ class TicketReceiptIntegrationTest {
     @Test
     void same_message_cannot_have_a_second_initial_job() {
         TicketReceiptResult result = receipts.receive(
-                "로그인 문의", "새 로그인 링크를 요청합니다.", "synthetic-author");
+                "로그인 문의", "새 로그인 링크를 요청합니다.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
 
         assertThatThrownBy(() -> jobs.enqueue(result.messageId()))
                 .isInstanceOf(DataIntegrityViolationException.class);

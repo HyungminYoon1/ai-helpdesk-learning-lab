@@ -234,7 +234,7 @@ class AiSuggestionWorkerContextIntegrationTest {
 
     private ConfigurableApplicationContext start(boolean enabled, AiSuggestionProvider provider) {
         // Highest-priority test-only properties prevent a process environment from selecting another DB.
-        return new SpringApplicationBuilder(HelpdeskApplication.class)
+        return new SpringApplicationBuilder(HelpdeskApplication.class, lab.helpdesk.identity.IdentityFixtures.Configuration.class)
                 .web(WebApplicationType.SERVLET)
                 .profiles("postgres")
                 .initializers(context -> {
@@ -268,7 +268,7 @@ class AiSuggestionWorkerContextIntegrationTest {
 
     private TicketReceiptResult receive(ConfigurableApplicationContext context) {
         return context.getBean(TicketReceiptApplicationService.class)
-                .receive("Synthetic saved question", "Original message survives context restart.", "synthetic-author");
+                .receive("Synthetic saved question", "Original message survives context restart.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private java.time.OffsetDateTime time(String column, long jobId) {

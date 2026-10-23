@@ -49,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Real PostgreSQL and controlled Provider responses, not live AI or a JVM restart. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = {"logging.level.root=WARN", "spring.main.banner-mode=off"})
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -457,7 +458,7 @@ class AiSuggestionRecoveryIntegrationTest {
     }
 
     private TicketReceiptResult receive() {
-        return receipts.receive("Synthetic restored question", ORIGINAL, "synthetic-author");
+        return receipts.receive("Synthetic restored question", ORIGINAL, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private void expireLease(long jobId) {

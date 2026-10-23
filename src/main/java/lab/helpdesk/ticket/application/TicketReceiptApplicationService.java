@@ -5,6 +5,9 @@ import lab.helpdesk.ticket.Ticket;
 import lab.helpdesk.ticket.TicketMessage;
 import lab.helpdesk.ticket.repository.TicketMessageRepository;
 import lab.helpdesk.ticket.repository.TicketRepository;
+import lab.helpdesk.ticket.repository.TicketConversationRepository;
+import lab.helpdesk.identity.AuthenticatedActor;
+import lab.helpdesk.identity.UserIdentityRepository;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,14 +19,19 @@ public class TicketReceiptApplicationService {
     private final TicketRepository tickets;
     private final TicketMessageRepository messages;
     private final AiSuggestionJobRepository jobs;
+    private final UserIdentityRepository identities;
+    private final TicketConversationRepository conversations;
 
     public TicketReceiptApplicationService(
             TicketRepository tickets,
             TicketMessageRepository messages,
-            AiSuggestionJobRepository jobs) {
+            AiSuggestionJobRepository jobs, UserIdentityRepository identities,
+            TicketConversationRepository conversations) {
         this.tickets = tickets;
         this.messages = messages;
         this.jobs = jobs;
+        this.identities = identities;
+        this.conversations = conversations;
     }
 
     // HTTP 연결 단계에서는 인증 결과에서 얻은 작성자만 전달해야 한다.
@@ -31,13 +39,16 @@ public class TicketReceiptApplicationService {
     public TicketReceiptResult receive(
             String title,
             String body,
-            String authenticatedAuthorUsername) {
+            AuthenticatedActor actor) {
 
         Ticket ticket = new Ticket(title);
-        TicketMessage message = new TicketMessage(body, authenticatedAuthorUsername);
+        if (actor == null) throw new lab.helpdesk.identity.IdentityNotLinkedException();
+        TicketMessage message = new TicketMessage(body, actor.username());
+        long authorId = identities.requireId(actor);
 
         long ticketId = tickets.save(ticket);
         long messageId = messages.save(ticketId, message);
+        conversations.attachReceiptOwner(ticketId, messageId, authorId);
         long jobId = jobs.enqueue(messageId);
 
         return new TicketReceiptResult(

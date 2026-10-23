@@ -61,6 +61,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Real PostgreSQL, Processor, Spring AI and loopback HTTP; scanner/model output is controlled. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = {"logging.level.root=WARN", "spring.main.banner-mode=off",
         "helpdesk.ai.worker.enabled=false", "helpdesk.ai.provider.enabled=false"})
 @ActiveProfiles("postgres")
@@ -104,7 +105,7 @@ class AiPrivacyScanPipelineIntegrationTest {
         if (!Boolean.TRUE.equals(isolated)) throw new IllegalStateException("AI_PRIVACY_TEST_DATABASE_REQUIRED");
         for (String table : TABLES.reversed()) jdbc.update("DELETE FROM " + table);
         scans.set(0); requests.set(0); providerInvocations.set(0); providerBudget.set(null); checkedRequest.set(false);
-        receipt = receipts.receive(TITLE, BODY, "synthetic-author");
+        receipt = receipts.receive(TITLE, BODY, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/chat/completions", exchange -> {
             requests.incrementAndGet();

@@ -1,8 +1,22 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 6·7 회귀 유지, Week 8–9 마감 중 — Docker·CI·HTTPS·합성 입력의 실제 AI·관측·복원·Image Rollback, 최종 복습·로컬 회귀와 리소스 정리를 확인했다. 최신 로컬 변경의 원격 CI와 통합 WIL 검토·게시는 남아 있다. 일반 입력의 AI 활성화·개인정보 모델 고도화는 후속 과업이다.
+> 상태: Week 8–9 실습과 공개 마감 완료. Week 10은 합의한 공식 답변 및 대화 조회를 로컬에서 단계적으로 구현 중이다. 고정 ID와 V9, 답변 API의 집중 Test를 확인했으며 전체 회귀와 Browser 검증은 별도 기록한다. 일반 입력의 AI 활성화와 개인정보 모델 고도화는 후속 과업이다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
+
+## Week 10 공식 답변과 대화 조회
+
+[기술 계약과 결정 기록](./docs/official-replies.md)을 따른다. 기존 Session 로그인을 유지하고 명시적으로 등록한 계정 키를 Principal에 담아 고정 사용자 ID로 연결한다. 로그인 이름만으로 기존 문의 소유자를 추정하지 않는다. V9는 기존 원문과 상태를 유지하며 구형 문의의 소유자는 미확인으로 남긴다.
+
+- USER는 자기 문의의 대화를 조회하고 AGENT는 전체 조회와 공식 답변 작성을 한다.
+- 답변은 Commit 뒤 공개된다. RESOLVED에서도 추가 안내를 허용하며 상태를 자동 변경하지 않는다.
+- 정정은 같은 Ticket의 공식 답변을 참조하는 새 Row다. 기존 답변을 덮어쓰지 않는다.
+- 같은 제출 ID와 같은 본문 및 정정 대상은 기존 결과 200, 변경된 내용은 409다.
+- 접수는 고정 ID와 Ticket, 최초 Message, Job을 함께 Commit한다. 답변 및 대화 조회는 새 AI Job이나 Provider 호출을 만들지 않는다.
+
+로컬 및 향후 배포 계정에는 `helpdesk.local.user.account-key`와 `helpdesk.local.agent.account-key` 또는 대응하는 `helpdesk.deployment.*.account-key`를 명시한다. 같은 사람은 이름 변경 후에도 키를 유지하며 다른 사람에게 계정을 재사용할 때는 새 키를 등록한다. 키가 없으면 기존 로그인은 가능하지만 신규 접수 및 답변의 신원 검사는 거부된다. 실제 설정값과 암호를 공개 문서나 Log에 넣지 않는다.
+
+2026-10-23 첫 집중 검증은 계정 및 Migration/기존 Security 설정 31개, 접수 및 신규 API의 집중 묶음 54개가 통과했다. 이후 입력 형식과 Commit 실패를 보강한 대화 HTTP Test는 23개가 통과했다. 서로 겹치는 실행 개수를 합산해 전체 Test 수로 표현하지 않는다. 아직 이 기록만으로 전체 회귀나 실제 Browser 완료를 주장하지 않는다.
 
 ## 프로젝트 목적
 
@@ -1144,8 +1158,8 @@ node .\scripts\week7-worker-browser-live.mjs --live --confirm-helpdesk-key --con
 - 외부 운영 Database 구성과 Backup·복구
 - Production용 인증·사용자 권한 검사와 운영 Credential 관리
 - 원격 Provider 결과 조회·응답 객체 영속 보관과 운영 Application의 유료 AI 자동 조립. 통제된 Provider의 실제 JVM 재시작 Test와 구분한다.
-- 담당자 할당, Comment와 이력 조회
-- Ticket 전체 CRUD와 검색·정렬·Pagination
+- 담당자 할당, 고객 후속 Comment와 운영 이력 관리. 공식 답변과 개별 문의의 대화 조회는 Week 10 범위다.
+- Ticket 전체 CRUD와 전역 검색·정렬·Pagination. 개별 대화의 제한된 ID Cursor 조회는 Week 10 범위다.
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현
 - WebFlux, GraphQL과 다른 Backend Framework 비교
 - 비동기 Dispatch, 분산 Trace와 Production Monitoring

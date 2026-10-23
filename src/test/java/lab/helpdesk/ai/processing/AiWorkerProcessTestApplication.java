@@ -86,7 +86,7 @@ public final class AiWorkerProcessTestApplication {
             Ids ids;
             if (firstProcess) {
                 TicketReceiptResult receipt = context.getBean(TicketReceiptApplicationService.class)
-                        .receive("Synthetic saved question", ORIGINAL, "synthetic-author");
+                        .receive("Synthetic saved question", ORIGINAL, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
                 ids = new Ids(receipt.ticket().id(), receipt.messageId(), receipt.jobId());
                 switch (mode) {
                     case PREPARE_PENDING -> require(calls.get() == 0);
@@ -136,7 +136,7 @@ public final class AiWorkerProcessTestApplication {
 
     private static ConfigurableApplicationContext start(
             boolean firstProcess, boolean workerEnabled, AiSuggestionProvider provider) {
-        return new SpringApplicationBuilder(HelpdeskApplication.class)
+        return new SpringApplicationBuilder(HelpdeskApplication.class, lab.helpdesk.identity.IdentityFixtures.Configuration.class)
                 .web(WebApplicationType.SERVLET)
                 .profiles("postgres")
                 .initializers(context -> {

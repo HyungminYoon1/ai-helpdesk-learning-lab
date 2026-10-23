@@ -51,6 +51,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Failure persistence and read/poll behavior, not a detector or live AI experiment. */
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest(properties = {
         "logging.level.root=WARN", "spring.main.banner-mode=off",
         "helpdesk.ai.provider.enabled=false", "helpdesk.ai.worker.enabled=false"})
@@ -213,7 +214,7 @@ class AiPrivacyScanFailureIntegrationTest {
     }
 
     private TicketReceiptResult receive() {
-        return receipts.receive("Synthetic privacy test", ORIGINAL, "synthetic-author");
+        return receipts.receive("Synthetic privacy test", ORIGINAL, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private List<String> snapshot() {

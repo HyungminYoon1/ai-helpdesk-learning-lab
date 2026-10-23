@@ -34,6 +34,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -381,7 +382,7 @@ class AiSuggestionResultIntegrationTest {
     }
 
     private TicketReceiptResult receive() {
-        return receipts.receive("원래 문의 제목", "  고객이 작성한 원문\n그대로 보존합니다.  ", "synthetic-author");
+        return receipts.receive("원래 문의 제목", "  고객이 작성한 원문\n그대로 보존합니다.  ", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private ContractValidatedOutput multipleCategories() {

@@ -31,6 +31,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest
 @ActiveProfiles("postgres")
 @Testcontainers
@@ -381,7 +382,7 @@ class AiSuggestionJobExecutionIntegrationTest {
     }
 
     private TicketReceiptResult receive() {
-        return receipts.receive("로그인 문의", "새 로그인 링크를 요청합니다.", "synthetic-author");
+        return receipts.receive("로그인 문의", "새 로그인 링크를 요청합니다.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private long enqueueWithPolicy(AiJobPolicy policy) {

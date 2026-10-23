@@ -82,6 +82,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+@lab.helpdesk.identity.WithIdentityFixtures
 @SpringBootTest
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE)
 @ActiveProfiles("postgres")
@@ -468,7 +469,7 @@ class AiSuggestionQueryHttpIntegrationTest {
     }
 
     private TicketReceiptResult receive() {
-        return receipts.receive("합성 문의", "고객 원문은 보존합니다.", "synthetic-author");
+        return receipts.receive("합성 문의", "고객 원문은 보존합니다.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
     private ContractValidatedOutput suggestion() {
