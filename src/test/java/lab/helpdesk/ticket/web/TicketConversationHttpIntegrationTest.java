@@ -53,6 +53,8 @@ class TicketConversationHttpIntegrationTest {
     @Autowired ObjectMapper mapper;
     @Autowired TicketReceiptApplicationService receipts;
     @Autowired TicketConversationService conversations;
+    @Autowired lab.helpdesk.ai.job.AiSuggestionJobClaimService claims;
+    @Autowired lab.helpdesk.ai.suggestion.AiSuggestionResultService results;
     @MockitoSpyBean JdbcTicketConversationRepository repository;
     @MockitoBean AiSuggestionProvider provider;
     long ticket;
@@ -221,6 +223,30 @@ class TicketConversationHttpIntegrationTest {
         }
         assertThat(messageCount()).isEqualTo(2);
         assertAiUnchanged();
+    }
+
+    @Test
+    void reply_failure_preserves_an_already_committed_suggestion_and_its_job() throws Exception {
+        var claim = claims.claimNextPending().orElseThrow();
+        var output = new lab.helpdesk.ai.validation.AiSuggestionOutputValidator(200).validate("""
+                {"decision":"SUGGEST","summary":"Original inquiry summary",
+                 "categories":["ACCOUNT"],"priority":"NORMAL"}
+                """);
+        assertThat(results.complete(claim, output)).isEqualTo(lab.helpdesk.ai.suggestion.AiSuggestionCompletion.STORED);
+        var originalResult = results.findStoredResult(claim.jobId()).orElseThrow();
+        var originalAttempts = jdbc.queryForList("SELECT * FROM ai_suggestion_attempts WHERE job_id=?", claim.jobId());
+        doAnswer(invocation -> { invocation.callRealMethod(); throw new IllegalStateException("controlled failure"); })
+                .when(repository).insertReply(anyLong(),anyLong(),anyString(),anyString(),any(UUID.class),nullable(Long.class));
+
+        reply(ticket, "rolled back", UUID.randomUUID(), null, AGENT, 500);
+
+        assertThat(messageCount()).isOne();
+        assertThat(results.findStoredResult(claim.jobId()).orElseThrow()).isEqualTo(originalResult);
+        assertThat(jdbc.queryForList("SELECT * FROM ai_suggestion_attempts WHERE job_id=?", claim.jobId()))
+                .isEqualTo(originalAttempts);
+        assertThat(jdbc.queryForObject("SELECT body FROM ticket_messages WHERE id=?", String.class, inquiry))
+                .isEqualTo("  original inquiry\nunchanged  ");
+        verifyNoInteractions(provider);
     }
 
     @Test

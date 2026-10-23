@@ -27,6 +27,15 @@ class AccountUserDetailsTest {
     }
 
     @Test
+    void distinct_configured_accounts_cannot_share_an_identity_key() {
+        UUID key = UUID.randomUUID();
+        var first = new AccountUserDetails(User.withUsername("synthetic-a").password("fixture").roles("USER").build(), key);
+        var second = new AccountUserDetails(User.withUsername("synthetic-b").password("fixture").roles("USER").build(), key);
+        assertThatThrownBy(() -> new IdentityAwareInMemoryUserDetailsManager(first, second))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("ACCOUNT_IDENTITY_KEY_REUSED");
+    }
+
+    @Test
     void plain_or_missing_principal_is_not_promoted_to_a_durable_identity() {
         var plain = User.withUsername("synthetic-agent").password("fixture").roles("AGENT").build();
         var auth = UsernamePasswordAuthenticationToken.authenticated(plain, null, plain.getAuthorities());

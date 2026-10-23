@@ -2,6 +2,7 @@ package lab.helpdesk.identity;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -16,8 +17,12 @@ public final class IdentityAwareInMemoryUserDetailsManager extends InMemoryUserD
     public IdentityAwareInMemoryUserDetailsManager(UserDetails... configuredUsers) {
         super(Arrays.stream(configuredUsers).map(user -> User.withUserDetails(user).build()).toList());
         Map<String, UUID> configuredKeys = new HashMap<>();
+        var distinctKeys = new HashSet<UUID>();
         for (UserDetails user : configuredUsers) {
             if (user instanceof AccountUserDetails account) {
+                if (!distinctKeys.add(account.accountKey())) {
+                    throw new IllegalArgumentException("ACCOUNT_IDENTITY_KEY_REUSED");
+                }
                 configuredKeys.put(user.getUsername().toLowerCase(Locale.ROOT), account.accountKey());
             }
         }

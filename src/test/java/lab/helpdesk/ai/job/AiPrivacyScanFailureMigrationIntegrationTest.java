@@ -56,7 +56,7 @@ class AiPrivacyScanFailureMigrationIntegrationTest {
         assertThat(snapshot(jdbc)).isEqualTo(before);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version = '8' AND success",
                 Long.class)).isOne();
-        Flyway.configure().dataSource(dataSource).load().validate();
+        Flyway.configure().dataSource(dataSource).target("8").load().validate();
         tx.executeWithoutResult(transaction -> assertThat(
                 execution.failIfCurrent(runningClaim, AiJobFailureCode.PRIVACY_SCAN_TIMEOUT)).isTrue());
         AiJobClaim pendingClaim = claim(tx, execution);
