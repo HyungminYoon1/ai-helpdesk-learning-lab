@@ -8,7 +8,8 @@ import org.springframework.core.env.Profiles;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import lab.helpdesk.identity.IdentityAwareInMemoryUserDetailsManager;
+import lab.helpdesk.identity.ConfiguredAccountIdentity;
 
 /** Explicit learning-deployment accounts; no registration or persistent user management. */
 @Configuration(proxyBeanMethods = false)
@@ -39,10 +40,13 @@ public class DeploymentSecurityConfiguration {
             throw new IllegalStateException("HELPDESK_DEPLOYMENT_USERNAMES_MUST_BE_DISTINCT");
         }
 
-        return new InMemoryUserDetailsManager(
-                User.withUsername(userName).password(encoder.encode(userPassword)).roles("USER").build(),
-                User.withUsername(agentName).password(encoder.encode(agentPassword))
-                        .roles("USER", "AGENT").build());
+        return new IdentityAwareInMemoryUserDetailsManager(
+                ConfiguredAccountIdentity.principal(
+                        User.withUsername(userName).password(encoder.encode(userPassword)).roles("USER").build(),
+                        environment, "helpdesk.deployment.user"),
+                ConfiguredAccountIdentity.principal(
+                        User.withUsername(agentName).password(encoder.encode(agentPassword))
+                                .roles("USER", "AGENT").build(), environment, "helpdesk.deployment.agent"));
     }
 
     private static String required(Environment environment, String property, String failureCode) {

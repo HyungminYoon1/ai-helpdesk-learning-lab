@@ -8,7 +8,8 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import lab.helpdesk.identity.IdentityAwareInMemoryUserDetailsManager;
+import lab.helpdesk.identity.ConfiguredAccountIdentity;
 
 @Configuration(proxyBeanMethods = false)
 @Profile("local-browser")
@@ -41,7 +42,9 @@ public class LocalBrowserSecurityConfiguration {
                 .roles("USER", "AGENT")
                 .build();
 
-        return new InMemoryUserDetailsManager(user, agent);
+        return new IdentityAwareInMemoryUserDetailsManager(
+                ConfiguredAccountIdentity.principal(user, environment, "helpdesk.local.user"),
+                ConfiguredAccountIdentity.principal(agent, environment, "helpdesk.local.agent"));
     }
 
     private static String getRequiredNonBlank(
