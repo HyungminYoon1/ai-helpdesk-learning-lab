@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 8–9 실습과 공개 마감 완료. Week 10의 고정 ID·V9, 공식 답변·정정 및 대화 조회를 로컬 PostgreSQL과 Browser에서 검증했다. 전체 Java 1,042개·패키징 후 2개, JavaScript 316개와 Lint 통과. 새 코드의 작성자 복습과 운영 적용은 별도이며 일반 입력의 AI 활성화와 개인정보 모델 고도화는 후속 과업이다.
+> 상태: Week 8–9 실습과 공개 마감 완료. Week 10의 고정 ID·V9, 공식 답변·정정 및 대화 조회를 로컬 PostgreSQL과 Browser에서 검증했다. 전체 Java 1,042개·패키징 후 2개, JavaScript 316개와 Lint 통과. 고정 ID·제출 UUID·Commit 경계와 화면의 실패 처리에 대한 학습 문답도 진행했다. 운영 적용과 일반 입력의 AI 활성화, 개인정보 모델 고도화는 후속 과업이다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
@@ -29,6 +29,8 @@ npx --yes --package 'eslint@10.11.0' eslint 'src/main/resources/static/*.mjs' 's
 ```
 
 Browser 실험은 일반 Java Test 수에 포함하지 않는다. 실제 계정이나 API Key를 요구하지 않으며 별도 생성한 Browser Session만 닫는다. 첫 회귀의 V8 전용 validation 범위와 Browser 설치 경로 환경 누락은 수정 후 재검증했다. 기존 Surefire 종료 지연/Hikari 경고의 원인 진단과 운영 자원 재측정은 후속이며 이 기능의 구현으로 해결했다고 주장하지 않는다.
+
+10월 23일 학습 문답에서는 고정 사용자 ID, 같은 제출의 재확인과 충돌, Commit 실패, 정정 답변, 페이지 조회와 늦은 응답, 저장 성공과 화면 갱신 실패의 차이를 확인했다. 코드 작성과 Test 실행은 Codex가 수행했고, 학습자는 제시한 코드와 상황을 바탕으로 판단을 설명했다. 직접 구현을 재현한 평가와는 구분한다. 학습 마감 요청으로 두 저장소의 Commit·Push가 승인됐으며 AWS 배포나 AI 호출 승인을 뜻하지 않는다.
 
 ## 프로젝트 목적
 
