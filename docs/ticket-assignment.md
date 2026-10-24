@@ -1,6 +1,6 @@
 # Service-scoped ticket assignment contract
 
-Status: accepted policies O1-O6, local implementation authorized 2026-10-24. Verification is recorded after execution, not inferred from this document. No push, Cloud or live AI execution is authorized by this request.
+Status: design complete for the O1-O6 assignment/handoff slice, implementation locally verified on 2026-10-24. Documentation review/publication is separate from runtime changes, Cloud deployment or live AI. Production readiness is separate.
 
 ## Responsibility and access
 
@@ -20,7 +20,9 @@ Trusted startup provisioning uses `helpdesk.support.bootstrap.enabled=true`, `he
 
 All assignment/reply writes lock the parent Ticket FOR UPDATE before allocating event/message IDs. Then lock referenced membership rows FOR SHARE in user-ID order, checking active/role from DB. Read operations use short transactions and a shared membership lock. Revocation updates a membership without subsequently acquiring Ticket locks: it waits for an already-authorized transaction, then future requests (including old Sessions) see inactive membership. This is transaction-order authorization, not cancellation of responses already in flight. No HTTP/AI operation runs inside these transactions.
 
-State and event commit together. An event INSERT or Commit failure rolls both back; previously committed inquiry/reply/AI rows survive. Limit lock waits to 2 seconds (SQLSTATE 55P03 -> safe 503 SUPPORT_BUSY). Do not continue querying an aborted transaction. Other storage/Commit failures return safe 500 without SQL, names, bodies or credentials.
+State and event commit together. A rejected INSERT or confirmed failed Commit with rollback cancels both new changes; previously committed inquiry/reply/AI rows survive. Do not infer rollback from a connection loss or generic 5xx: Commit may have completed before its acknowledgement or the HTTP response was lost. Retain the original submission and reconcile against DB state in a separate authorized request. Limit lock waits to 2 seconds (SQLSTATE 55P03 -> safe 503 SUPPORT_BUSY). Do not continue querying an aborted transaction. Other storage/Commit failures return safe 500 without SQL, names, bodies or credentials.
+
+An operation that already obtained the membership shared lock may finish before revocation obtains its conflicting lock and commits. If revocation gets the lock first, new staff authorization waits; after revocation commits it observes inactive membership and fails. A rolled-back revocation is not a completed revoke. Preserve the existing assignment/version/history; transfer remaining work explicitly. This does not cancel responses in flight or disable the entire login account.
 
 ## API
 
@@ -34,7 +36,7 @@ Staff endpoints require Session AGENT; writes also require CSRF. Application rec
 - POST /api/tickets/{id}/assignment/claim: `{clientRequestId, expectedAssignmentVersion}`.
 - POST /api/tickets/{id}/assignment/transfers: `{clientRequestId, expectedAssignmentVersion, toAgentId, reason}`. Reason is nonblank, original length <=500 Unicode code points. Target is another active member of the same service.
 
-IDs are positive signed 64-bit integers; version is a nonnegative integer; canonical UUID string required. Page limit 1..100. New committed event is 201; exact actor/ticket/UUID/operation/version/target/reason replay is 200. Return the original event separately from current assignment, since a later transfer may already exist. Same UUID with changed fields is 409 ASSIGNMENT_REQUEST_CONFLICT. Check current service read permission before replay, but replay before current owner/version checks. Replay does not restore new-write permission.
+IDs are positive signed 64-bit integers; an assignment expected version is nonnegative and less than Long.MAX_VALUE; canonical UUID string required. Browser clients reject numbers outside their safe integer range. Page limit 1..100. New committed event is 201; exact actor/ticket/UUID/operation/version/target/reason replay is 200. Return the original event separately from current assignment, since a later transfer may already exist. Same UUID with changed fields is 409 ASSIGNMENT_REQUEST_CONFLICT. Check current service read permission before replay, but replay before current owner/version checks. Replay does not restore new-write permission.
 
 New operations reject stale versions (409 ASSIGNMENT_VERSION_CONFLICT), assigned claims (409 ASSIGNMENT_NOT_UNASSIGNED), unassigned transfers (409 ASSIGNMENT_REQUIRED), unauthorized transfer (403 ASSIGNMENT_FORBIDDEN), invalid/inactive/out-of-service targets (400 INVALID_ASSIGNEE). Do not auto-retry with a new UUID or silently refresh expected version.
 
@@ -55,6 +57,15 @@ UI keeps exact pending UUID/body/target/version when outcome is unknown, ignores
 | UI-only owner check vs short row locks | Ticket first, ordered membership shared locks, same-TX event+state and bounded waits; revocation serializes on membership | Assignment/reply/access services and JDBC repository. No throughput improvement claimed |
 | Reject all old clients vs silently fill reply version | Legacy saved-result-only replay; new writes must supply expected version. Never invent historical assignment | Reply parser/service/repository and UI. Client/server must be released together |
 | Only guard new endpoints vs close old read bypasses | Recheck service scope on ticket/conversation/AI reads; keep customer own-message rights separate | Scoped query service/security tests. No credential database or Session replacement |
+| Documentation conflated rejected Commit with an unobserved outcome | Distinguish confirmed rollback from lost acknowledgement; preserve exact submission rather than assume failure or retry under a new UUID | Assignment/reply UI already retains unknown submissions. Documentation clarified; direct DB Commit-ACK fault injection remains unperformed |
+
+## Design closure and deferred work
+
+The schema, request/response contracts, authorization, lock order, replay, failure boundaries and minimal UI are settled for this slice. Receipt routing currently selects one explicitly configured service; multi-product authentication/routing and legacy service mapping are not silently completed. Configured authentication is not production account lifecycle management. Customer follow-ups, state APIs, notifications, retention/deletion, private internal-ticket ACLs and SaaS remain separate decisions.
+
+After confirmed POST success, retry a failed GET, not the POST. On an unknown POST retain the same UUID/version/body/target/reason for explicit reconciliation; a matching stored result returns 200, while no stored result still requires current eligibility/version checks. Clearing the in-memory submission on navigation limits recovery; persistent cross-session submission recovery is not implemented. An ignored late response never rolls back DB changes.
+
+Design review covered composite constraints, short transactions and consistent locking. No throughput or authorization latency was measured; an index definition is not an observed query plan. Do not weaken revocation semantics with a TTL-only permission cache. Commit-acknowledgement fault injection and load measurements remain follow-up verification. The documentation closeout does not rerun or enlarge the historical test counts below.
 
 Verification must distinguish DB constraints, HTTP tests, concurrency/Commit rollback, synthetic Browser behavior, and full regression. Preserve original title/body/requester/author/correction and Job input/attempts/results across assignment tests; Provider remains disabled. This feature alone is not production readiness.
 
@@ -68,4 +79,4 @@ The actual local Browser experiment used isolated USER A/B, AGENT A/B and a serv
 
 Regression initially exposed old test fixtures without durable staff identity/service settings and expectations for the formerly shared TicketController. Fixtures now explicitly provision synthetic membership and test the postgres-specific scoped query controller; no production authorization bypass was added. The old internal read-only AI query still exists, but its HTTP wrapper now holds a short membership shared lock and verifies that business rows remain unchanged. SQLSTATE 55P03 is mapped safely without exposing raw SQL.
 
-The runtime test probe now expects V10 and its explicit synthetic receipt service; historic measurements are not rerun or relabeled. Existing tests that deliberately use pre-V10 data remain distinct from new V10 migration/storage checks. No push, remote CI, image publish, Cloud resource or real-secret changes were performed.
+The runtime test probe now expects V10 and its explicit synthetic receipt service; historic measurements are not rerun or relabeled. Existing tests that deliberately use pre-V10 data remain distinct from new V10 migration/storage checks. At this local verification stage, no push, remote CI, image publish, Cloud resource or real-secret changes were performed. Subsequent publication and exact-commit remote CI results are separate evidence.

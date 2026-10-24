@@ -12,7 +12,7 @@
 - 같은 서비스의 활성 직원만 Ticket·대화·AI 제안과 이력을 조회한다. 이전 Session도 DB 권한 검사를 생략하지 않는다. 고객은 자기 대화만 읽는다.
 - 배정과 이력은 같은 Transaction으로 Commit한다. 답변과 인계는 같은 Ticket을 짧게 잠근다. 지원권한 회수는 구성원 잠금으로 직렬화하고 배정 이력은 보존한다.
 - 답변 새 제출은 `expectedAssignmentVersion`이 필요하다. 구형 NULL 버전은 이미 저장된 동일 결과만 재확인할 수 있다. 화면에서 담당자가 다시 같아져도 오래된 초안 버전을 자동 갱신하지 않는다.
-- 이번 요청은 로컬 구현·Test·단위별 Commit까지다. Push·새 CI·ECR·AWS·Secret 변경이나 실제 AI 호출은 하지 않는다. 운영 인증과 고객 후속 메시지 및 실제 개인정보 입력은 후속 과업이다.
+- 구현과 Test는 로컬에서 마쳤으며, 후속 문서 검토·Commit·Push 및 원격 CI 확인은 별도 단계로 구분한다. 문서를 공개해도 ECR·AWS·Secret이나 AI 활성화 설정은 변경하지 않는다. 운영 인증과 고객 후속 메시지 및 실제 개인정보 입력은 후속 과업이다.
 
 ### 로컬 서비스 준비
 
@@ -1200,7 +1200,7 @@ node .\scripts\week7-worker-browser-live.mjs --live --confirm-helpdesk-key --con
 - 외부 운영 Database 구성과 Backup·복구
 - Production용 인증·사용자 권한 검사와 운영 Credential 관리
 - 원격 Provider 결과 조회·응답 객체 영속 보관과 운영 Application의 유료 AI 자동 조립. 통제된 Provider의 실제 JVM 재시작 Test와 구분한다.
-- 담당자 할당, 고객 후속 Comment와 운영 이력 관리. 공식 답변과 개별 문의의 대화 조회는 Week 10 범위다.
+- 고객 후속 Comment, 내부 메모, 알림과 전체 운영 이력 관리. 공식 답변·개별 대화 조회와 서비스별 담당자 배정·인계 이력은 Week 10에서 로컬 구현 및 검증했다.
 - Ticket 전체 CRUD와 전역 검색·정렬·Pagination. 개별 대화의 제한된 ID Cursor 조회는 Week 10 범위다.
 - Production에 고의 실패 Endpoint를 추가하는 방식의 `500` 재현
 - WebFlux, GraphQL과 다른 Backend Framework 비교
