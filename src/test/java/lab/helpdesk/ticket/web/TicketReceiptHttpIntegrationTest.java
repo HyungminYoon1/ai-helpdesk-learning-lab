@@ -265,7 +265,7 @@ class TicketReceiptHttpIntegrationTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/tickets/{id}", id).session(sessionFor(AGENT_NAME)))
                 .andExpect(status().isOk())
-                .andExpect(handler().handlerType(TicketController.class));
+                .andExpect(handler().handlerType(PostgresTicketQueryController.class));
         assertRowCounts(1);
     }
 

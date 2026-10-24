@@ -47,6 +47,9 @@ class TicketAssignmentHttpIntegrationTest {
     @Autowired TicketConversationService conversations;
     @Autowired TicketAssignmentService assignments;
     @Autowired PlatformTransactionManager manager;
+    @Autowired org.springframework.core.env.ConfigurableEnvironment environment;
+    @Autowired lab.helpdesk.ai.job.AiSuggestionJobClaimService claims;
+    @Autowired lab.helpdesk.ai.suggestion.AiSuggestionResultService results;
     @MockitoSpyBean JdbcSupportRepository repository;
     @MockitoBean AiSuggestionProvider provider;
     long ticket,service,a,b,s,other;
@@ -130,10 +133,14 @@ class TicketAssignmentHttpIntegrationTest {
     }
     @Test void revocation_blocks_old_session_new_reads_writes_and_replays_without_erasing_assignment() throws Exception {
         UUID key=UUID.randomUUID();claim(A,key,0,201);
-        var sameSession=as(A);
+        var principal=IdentityFixtures.user(User.withUsername(A).password("unused-synthetic").roles("USER","AGENT").build());
+        var authentication=org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated(principal,null,principal.getAuthorities());
+        var sameSession=new org.springframework.mock.web.MockHttpSession();
+        sameSession.setAttribute(org.springframework.security.web.context.HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY,
+                new org.springframework.security.core.context.SecurityContextImpl(authentication));
         jdbc.update("UPDATE support_service_memberships SET active=false WHERE service_id=? AND user_id=?",service,a);
         for(String suffix:List.of("","/messages","/ai-suggestion","/assignment","/assignment-events"))
-            mvc.perform(get("/api/tickets/"+ticket+suffix).with(sameSession)).andExpect(status().isNotFound());
+            mvc.perform(get("/api/tickets/"+ticket+suffix).session(sameSession)).andExpect(status().isNotFound());
         claim(A,key,0,404);reply(A,1L,UUID.randomUUID(),404);
         assertThat(assignments.read(ticket,IdentityFixtures.actor(S)).assigneeAgentId()).isEqualTo(a);
         transfer(S,UUID.randomUUID(),1,b,"revoked agent work",201);
@@ -192,7 +199,8 @@ class TicketAssignmentHttpIntegrationTest {
             var first=pool.submit(() -> assertThatThrownBy(() -> assignments.claim(ticket,UUID.randomUUID(),0,IdentityFixtures.actor(A))).isInstanceOf(IllegalStateException.class));
             await(inserted);
             var second=pool.submit(() -> assignments.claim(ticket,UUID.randomUUID(),0,IdentityFixtures.actor(B)));
-            release.countDown();first.get(10,TimeUnit.SECONDS);assertThat(second.get(10,TimeUnit.SECONDS).created()).isTrue();
+            try { awaitDatabaseWaiter(); } finally { release.countDown(); }
+            first.get(10,TimeUnit.SECONDS);assertThat(second.get(10,TimeUnit.SECONDS).created()).isTrue();
         } finally { release.countDown(); }
         assertThat(assignments.read(ticket,IdentityFixtures.actor(S)).assigneeAgentId()).isEqualTo(b);assertThat(events()).isOne();
     }
@@ -259,7 +267,8 @@ class TicketAssignmentHttpIntegrationTest {
             await(changed);
             // The same service membership is locked by revocation. The request is not authorized from Session alone.
             var reader=pool.submit(() -> assignments.read(ticket,IdentityFixtures.actor(A)));
-            release.countDown();writer.get(10,TimeUnit.SECONDS);
+            try { awaitDatabaseWaiter(); } finally { release.countDown(); }
+            writer.get(10,TimeUnit.SECONDS);
             assertThatThrownBy(() -> reader.get(10,TimeUnit.SECONDS)).hasCauseInstanceOf(SupportException.class);
         } finally { release.countDown(); }
     }
@@ -273,6 +282,31 @@ class TicketAssignmentHttpIntegrationTest {
             try { claim(A,UUID.randomUUID(),0,503);assertThat(events()).isZero(); }
             finally { release.countDown();writer.get(10,TimeUnit.SECONDS); }
         } finally { release.countDown(); }
+    }
+    @Test void assignment_and_rollback_preserve_a_nonempty_stored_ai_result_and_its_attempts() throws Exception {
+        var ai=claims.claimNextPending().orElseThrow();
+        var output=new lab.helpdesk.ai.validation.AiSuggestionOutputValidator(200).validate("""
+                {"decision":"SUGGEST","summary":"Original inquiry summary","categories":["ACCOUNT"],"priority":"NORMAL"}
+                """);
+        assertThat(results.complete(ai,output)).isEqualTo(lab.helpdesk.ai.suggestion.AiSuggestionCompletion.STORED);
+        original=preserved();
+        claim(A,UUID.randomUUID(),0,201);transfer(A,UUID.randomUUID(),1,b,"handoff",201);
+        doAnswer(invocation -> { invocation.callRealMethod();throw new IllegalStateException("controlled storage failure"); })
+                .when(repository).append(any(),anyLong(),any(),anyString(),anyLong(),nullable(String.class));
+        transfer(B,UUID.randomUUID(),2,s,"rolled back handoff",500);
+        assertThat(assignments.read(ticket,IdentityFixtures.actor(S)).assigneeAgentId()).isEqualTo(b);
+        assertThat(events()).isEqualTo(2);
+    }
+    @Test void missing_receipt_service_rejects_before_creating_ticket_message_or_job() throws Exception {
+        String source="missing-receipt-service-test";
+        environment.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource(source,
+                Map.of("helpdesk.support.receipt-service-code","")));
+        try {
+            mvc.perform(post("/api/tickets").with(as(C)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"title\":\"not stored\",\"body\":\"not stored\"}"))
+                    .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("SUPPORT_NOT_CONFIGURED"));
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets",Long.class)).isOne();
+        } finally { environment.getPropertySources().remove(source); }
     }
     private String raceClaim(String name,CountDownLatch start) {
         await(start);try { assignments.claim(ticket,UUID.randomUUID(),0,IdentityFixtures.actor(name));return "CREATED"; }
@@ -302,7 +336,8 @@ class TicketAssignmentHttpIntegrationTest {
         return List.of(jdbc.queryForList("SELECT title,status,requester_user_id FROM tickets WHERE id=?",ticket),
                 jdbc.queryForList("SELECT * FROM ticket_messages WHERE ticket_id=? AND message_type='INQUIRY'",ticket),
                 jdbc.queryForList("SELECT * FROM ai_suggestion_jobs ORDER BY id"),jdbc.queryForList("SELECT * FROM ai_suggestion_attempts ORDER BY job_id,attempt_number"),
-                jdbc.queryForList("SELECT * FROM ticket_suggestions ORDER BY id"));
+                jdbc.queryForList("SELECT * FROM ticket_suggestions ORDER BY id"),
+                jdbc.queryForList("SELECT * FROM ticket_suggestion_categories ORDER BY suggestion_id,category"));
     }
     private static void await(CountDownLatch latch) {
         try { if(!latch.await(8,TimeUnit.SECONDS)) throw new IllegalStateException("test barrier timeout"); }

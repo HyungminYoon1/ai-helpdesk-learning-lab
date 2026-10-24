@@ -7,7 +7,7 @@ import lab.helpdesk.ai.processing.AiSuggestionJobWorker;
 import lab.helpdesk.ai.provider.AiSuggestionProvider;
 import lab.helpdesk.ticket.repository.JdbcTicketRepository;
 import lab.helpdesk.ticket.repository.TicketRepository;
-import lab.helpdesk.ticket.web.TicketController;
+import lab.helpdesk.ticket.web.PostgresTicketQueryController;
 import lab.helpdesk.ticket.web.TicketReceiptController;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -112,7 +112,7 @@ class DeploymentSecurityHttpIntegrationTest {
 
         MockHttpSession agentSession = login(AGENT_NAME, AGENT_SECRET);
         mockMvc.perform(get("/api/tickets/{id}", id).session(agentSession))
-                .andExpect(status().isOk()).andExpect(handler().handlerType(TicketController.class))
+                .andExpect(status().isOk()).andExpect(handler().handlerType(PostgresTicketQueryController.class))
                 .andExpect(jsonPath("$.title").value("배포 설정 접수"));
         mockMvc.perform(get("/api/tickets/{id}/ai-suggestion", id).session(agentSession))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.job.status").value("PENDING"));

@@ -87,6 +87,7 @@ class AiPrivacyScanFailureIntegrationTest {
         jdbc.update("DELETE FROM ai_suggestion_jobs");
         jdbc.update("DELETE FROM ticket_messages");
         jdbc.update("DELETE FROM tickets");
+        lab.helpdesk.identity.IdentityFixtures.bind(jdbc,"privacy-boundary-agent");
     }
 
     @ParameterizedTest
@@ -121,7 +122,9 @@ class AiPrivacyScanFailureIntegrationTest {
         for (int i = 0; i < 3; i++) {
             assertThat(worker.runOnce().outcome()).isEqualTo(Outcome.NO_JOB);
             mvc.perform(get("/api/tickets/{id}/ai-suggestion", receipt.ticket().id())
-                            .with(user("synthetic-agent").roles("AGENT")))
+                            .with(user(lab.helpdesk.identity.IdentityFixtures.user(
+                                    org.springframework.security.core.userdetails.User.withUsername("privacy-boundary-agent")
+                                            .password("unused-synthetic").roles("AGENT").build()))))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.job.status").value("FAILED"))
                     .andExpect(jsonPath("$.job.failureCode").value(code.name()))

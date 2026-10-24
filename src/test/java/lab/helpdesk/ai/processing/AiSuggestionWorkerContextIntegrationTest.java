@@ -240,6 +240,7 @@ class AiSuggestionWorkerContextIntegrationTest {
                 .initializers(context -> {
                     context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("isolated-worker-test", Map.of(
                             "server.port", "0",
+                            "helpdesk.support.receipt-service-code", "synthetic-support",
                             "spring.datasource.url", POSTGRES.getJdbcUrl(),
                             "spring.datasource.username", POSTGRES.getUsername(),
                             "spring.datasource.password", POSTGRES.getPassword(),
