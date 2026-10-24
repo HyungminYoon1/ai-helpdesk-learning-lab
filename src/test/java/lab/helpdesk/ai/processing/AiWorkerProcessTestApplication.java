@@ -144,6 +144,7 @@ public final class AiWorkerProcessTestApplication {
                             "isolated-jvm-worker-test", Map.ofEntries(
                                     Map.entry("server.address", "127.0.0.1"),
                                     Map.entry("server.port", "0"),
+                                    Map.entry("helpdesk.support.receipt-service-code", "synthetic-support"),
                                     Map.entry("spring.datasource.url", required("JDBC_URL")),
                                     Map.entry("spring.datasource.username", required("DB_USERNAME")),
                                     Map.entry("spring.datasource.password", required("DB_PASSWORD")),

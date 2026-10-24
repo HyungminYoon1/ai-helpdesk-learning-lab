@@ -34,12 +34,14 @@ import static org.mockito.Mockito.verifyNoInteractions;
 /** Explicit local CLI experiment, not included in the default *Test suite. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "server.address=127.0.0.1", "helpdesk.ai.provider.enabled=false", "helpdesk.ai.worker.enabled=false",
+        "helpdesk.support.receipt-service-code=synthetic-support",
         "logging.level.root=WARN"})
 @ActiveProfiles("postgres")
 @Import(ConversationBrowserExperiment.Users.class)
 @Testcontainers
 class ConversationBrowserExperiment {
-    private static final String A="browser-user-a", B="browser-user-b", AGENT="browser-agent";
+    private static final String A="browser-user-a", B="browser-user-b", AGENT="browser-agent",
+            AGENT_B="browser-agent-b", SUPERVISOR="browser-agent-supervisor";
     private static final String SECRET=UUID.randomUUID().toString();
     @Container @ServiceConnection static final PostgreSQLContainer POSTGRES=new PostgreSQLContainer("postgres:17.6-alpine");
     @Autowired Environment environment;
@@ -53,7 +55,8 @@ class ConversationBrowserExperiment {
         port=environment.getRequiredProperty("local.server.port",Integer.class);
         assertThat(jdbc.execute((ConnectionCallback<Boolean>) connection -> connection.getMetaData().getURL()
                 .split("\\?",2)[0].equals(POSTGRES.getJdbcUrl().split("\\?",2)[0]))).isTrue();
-        for(String name:List.of(A,B,AGENT)) IdentityFixtures.bind(jdbc,name);
+        for(String name:List.of(A,B,AGENT,AGENT_B,SUPERVISOR)) IdentityFixtures.bind(jdbc,name);
+        jdbc.update("UPDATE support_service_memberships SET support_role='SUPERVISOR' WHERE user_id=?",identity(SUPERVISOR));
     }
 
     @Test
@@ -78,6 +81,9 @@ class ConversationBrowserExperiment {
         environment.put("PLAYWRIGHT_CLI_SESSIONS_ROOT",run.resolve("sessions").toString());
         environment.put("HELPDESK_BROWSER_A_NAME",A); environment.put("HELPDESK_BROWSER_B_NAME",B);
         environment.put("HELPDESK_BROWSER_AGENT_NAME",AGENT); environment.put("HELPDESK_BROWSER_SECRET",SECRET);
+        environment.put("HELPDESK_BROWSER_AGENT_B_NAME",AGENT_B);environment.put("HELPDESK_BROWSER_SUPERVISOR_NAME",SUPERVISOR);
+        environment.put("HELPDESK_BROWSER_AGENT_B_ID",Long.toString(identity(AGENT_B)));
+        environment.put("HELPDESK_BROWSER_SUPERVISOR_ID",Long.toString(identity(SUPERVISOR)));
         builder.redirectErrorStream(true);
         Process child=builder.start();
         var output=new java.io.ByteArrayOutputStream();
@@ -94,20 +100,24 @@ class ConversationBrowserExperiment {
             long ticket=evidence.path("ticketId").asLong(),reply=evidence.path("replyId").asLong();
             assertThat(jdbc.queryForObject("SELECT title FROM tickets WHERE id=?",String.class,ticket)).isEqualTo("Conversation Browser synthetic");
             assertThat(jdbc.queryForObject("SELECT status FROM tickets WHERE id=?",String.class,ticket)).isEqualTo("OPEN");
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_messages WHERE ticket_id=?",Long.class,ticket)).isEqualTo(3);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_messages WHERE ticket_id=?",Long.class,ticket)).isEqualTo(5);
             assertThat(jdbc.queryForObject("SELECT body FROM ticket_messages WHERE ticket_id=? AND message_type='INQUIRY'",String.class,ticket)).isEqualTo("Original inquiry preserved.");
             assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_messages WHERE ticket_id=? AND corrects_message_id=?",Long.class,ticket,reply)).isOne();
             assertThat(jdbc.queryForObject("SELECT status FROM ai_suggestion_jobs",String.class)).isEqualTo("PENDING");
             assertThat(jdbc.queryForObject("SELECT reserved_generation_count FROM ai_suggestion_jobs",Integer.class)).isZero();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions",Long.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_assignment_events WHERE ticket_id=?",Long.class,ticket)).isEqualTo(3);
+            assertThat(jdbc.queryForObject("SELECT assignee_user_id FROM tickets WHERE id=?",Long.class,ticket)).isEqualTo(identity(SUPERVISOR));
+            assertThat(jdbc.queryForList("SELECT reply_assignment_version FROM ticket_messages WHERE ticket_id=? AND message_type='OFFICIAL_REPLY' ORDER BY id",Long.class,ticket)).containsExactly(1L,1L,2L,3L);
             assertThat(Files.exists(run.resolve("conversation-agent.png"))).isTrue();
             verifyNoInteractions(provider);
-            System.out.println("LOCAL_CONVERSATION_BROWSER_POSTGRES completed=true messages=3 providerCalls=0");
+            System.out.println("LOCAL_ASSIGNMENT_CONVERSATION_BROWSER_POSTGRES completed=true messages=5 assignmentEvents=3 providerCalls=0");
         } finally {
             if(child.isAlive()){child.descendants().forEach(ProcessHandle::destroyForcibly);child.destroyForcibly();}
             reader.join(2000);
         }
     }
+    private long identity(String name) { return new JdbcUserIdentityRepository(jdbc).findId(IdentityFixtures.key(name)).orElseThrow(); }
 
     @TestConfiguration(proxyBeanMethods=false)
     static class Users {
@@ -115,7 +125,9 @@ class ConversationBrowserExperiment {
             return new IdentityAwareInMemoryUserDetailsManager(
                     IdentityFixtures.user(User.withUsername(A).password(encoder.encode(SECRET)).roles("USER").build()),
                     IdentityFixtures.user(User.withUsername(B).password(encoder.encode(SECRET)).roles("USER").build()),
-                    IdentityFixtures.user(User.withUsername(AGENT).password(encoder.encode(SECRET)).roles("USER","AGENT").build()));
+                    IdentityFixtures.user(User.withUsername(AGENT).password(encoder.encode(SECRET)).roles("USER","AGENT").build()),
+                    IdentityFixtures.user(User.withUsername(AGENT_B).password(encoder.encode(SECRET)).roles("USER","AGENT").build()),
+                    IdentityFixtures.user(User.withUsername(SUPERVISOR).password(encoder.encode(SECRET)).roles("USER","AGENT").build()));
         }
     }
 }

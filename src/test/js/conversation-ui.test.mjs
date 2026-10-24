@@ -8,7 +8,7 @@ import {createConversationClient, isConversation, isConversationMessage} from ".
 
 const key = "11111111-1111-4111-8111-111111111111";
 const message = (id = 2, body = "reply", correction = null) => ({id, type: "OFFICIAL_REPLY", body, correctsMessageId: correction, createdAt: "2026-10-23T01:00:00Z"});
-const page = (id = 1, canReply = true) => ({ticket: {id, title: "synthetic ticket", status: "OPEN"}, capabilities: {canReply},
+const page = (id = 1, canReply = true) => ({ticket: {id, title: "synthetic ticket", status: "OPEN"}, capabilities: {canReply, expectedAssignmentVersion: canReply ? 1 : null},
     messages: [{...message(1, "inquiry"), type: "INQUIRY"}], page: {nextAfterId: null, hasMore: false}});
 const response = (body, status = 200) => new Response(JSON.stringify(body), {status, headers: {"Content-Type": "application/json"}});
 const csrf = () => response({headerName: "X-CSRF-TOKEN", token: "synthetic-test-token"});
@@ -88,7 +88,7 @@ test("CSRF and same-origin credentials precede POST; success refreshes", async (
     const post = calls.find((call) => call.options.method === "POST").options;
     assert.equal(post.credentials, "same-origin");
     assert.equal(post.headers["X-CSRF-TOKEN"], "synthetic-test-token");
-    assert.deepEqual(JSON.parse(post.body), {body: "  <strong>hello</strong>  ", clientRequestId: key, correctsMessageId: null});
+    assert.deepEqual(JSON.parse(post.body), {body: "  <strong>hello</strong>  ", clientRequestId: key, correctsMessageId: null, expectedAssignmentVersion: 1});
     assert.equal(h.states.at(-1).kind, "reply-saved");
     assert.deepEqual(h.busy, [false]);
 });
@@ -121,6 +121,28 @@ test("unconfirmed correction target cannot be silently changed", async () => {
     });
     await h.client.read(1); await h.client.reply("reply", 5); await h.client.reply("reply", 6);
     assert.equal(h.states.at(-1).kind, "unconfirmed-submission");
+});
+
+test("a draft retains its read version across A to B to A and does not silently refresh it", async () => {
+    let version = 1; const posts = [];
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") { posts.push(JSON.parse(options.body)); return response({}, 409); }
+        const data = page(); data.capabilities.expectedAssignmentVersion = version; return response(data);
+    });
+    await h.client.read(1); version = 3; await h.client.read(1); await h.client.reply("old draft");
+    assert.equal(posts[0].expectedAssignmentVersion, 1);
+});
+
+test("unknown saved reply can be reconfirmed after handoff without changing version", async () => {
+    let canReply = true; const posts = [];
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") { posts.push(JSON.parse(options.body)); throw new Error("synthetic loss"); }
+        return response(page(1, canReply));
+    });
+    await h.client.read(1); await h.client.reply("reply"); canReply = false; await h.client.read(1); await h.client.reply("reply");
+    assert.equal(posts.length, 2); assert.deepEqual(posts[0], posts[1]);
 });
 
 test("double submit cannot issue a second POST while first is in flight", async () => {

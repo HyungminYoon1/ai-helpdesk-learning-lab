@@ -38,6 +38,19 @@ function Open-Conversation([long]$TicketId, [int]$ExpectedStatus) {
     [void](Invoke-Cli @('snapshot'))
     [void](Run-Code "await page.locator('#conversation-ticket-id').fill('$TicketId'); const received = page.waitForResponse(r => r.url().includes('/api/tickets/$TicketId/messages')); await page.locator('#conversation-read button').click(); if ((await received).status() !== $ExpectedStatus) throw new Error('QUERY_FAILED'); return true;")
 }
+function Open-Assignment([long]$TicketId) {
+    [void](Invoke-Cli @('goto', "$base/assignments.html"))
+    [void](Invoke-Cli @('snapshot'))
+    [void](Run-Code "await page.locator('#assignment-ticket-id').fill('$TicketId'); const received=page.waitForResponse(r=>r.url().endsWith('/api/tickets/$TicketId/assignment')); await page.locator('#assignment-read button').click(); if ((await received).status() !== 200) throw new Error('ASSIGNMENT_READ_FAILED'); return true;")
+}
+function Transfer([long]$TicketId,[long]$To,[long]$Version) {
+    Open-Assignment $TicketId
+    [void](Run-Code "await page.waitForFunction((id)=>[...document.querySelector('#transfer-agent').options].some(o=>o.value===id),'$To'); await page.locator('#transfer-agent').selectOption('$To'); await page.locator('#transfer-reason').fill('<img src=x onerror=window.__assignment_xss=true> Synthetic handoff.'); const received=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/assignment/transfers')); await page.locator('#transfer-send').click(); const response=await received; if (response.status()!==201 || (await response.json()).assignment.version!==$Version) throw new Error('TRANSFER_FAILED'); await page.waitForFunction(()=>document.querySelectorAll('#assignment-events li').length===$Version); if (await page.locator('#assignment-events img').count()!==0) throw new Error('ASSIGNMENT_RENDER_FAILED'); return true;")
+}
+function Publish-Extra([long]$TicketId,[string]$Body,[int]$Count) {
+    Open-Conversation $TicketId 200
+    [void](Run-Code "await page.waitForFunction(()=>!document.querySelector('#official-reply').hidden); await page.locator('#reply-body').fill('$Body'); const received=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/replies')); await page.locator('#reply-send').click(); if ((await received).status()!==201) throw new Error('EXTRA_REPLY_FAILED'); await page.waitForFunction(()=>document.querySelectorAll('#conversation-messages li').length===$Count); return true;")
+}
 
 Push-Location -LiteralPath $RunDirectory
 try {
@@ -65,6 +78,8 @@ return {ticketId: (await response.json()).id};
     Logout
     $stage = 'AGENT_REPLY'
     Login 'AGENT'
+    Open-Assignment $ticketId
+    [void](Run-Code "await page.locator('#assignment-claim').waitFor({state:'visible'}); const received=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/assignment/claim')); await page.locator('#assignment-claim').click(); if ((await received).status()!==201) throw new Error('CLAIM_FAILED'); return true;")
     Open-Conversation $ticketId 200
     $replyCode = @'
 await page.waitForFunction(() => !document.querySelector('#official-reply').hidden);
@@ -88,6 +103,24 @@ return {replyId:(await response.json()).id, sessionCookieObserved:(headers.cooki
     [void](Run-Code "await page.locator('#reply-correction').selectOption('$firstReplyId'); await page.locator('#reply-body').fill('Corrected guidance.'); const received = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/replies')); await page.locator('#reply-send').click(); const response = await received; if (response.status() !== 201 || (await response.json()).correctsMessageId !== $firstReplyId) throw new Error('CORRECTION_FAILED'); await page.waitForFunction(() => document.querySelectorAll('#conversation-messages li').length === 3 && !document.querySelector('#reply-send').disabled); return true;")
     $screenshotJson = ConvertTo-Json -InputObject (Join-Path $RunDirectory 'conversation-agent.png') -Compress
     [void](Run-Code "await page.screenshot({path:$screenshotJson,fullPage:true}); return true;")
+    $stage = 'HANDOFF_TO_AGENT_B'
+    $agentBId = [long][System.Environment]::GetEnvironmentVariable('HELPDESK_BROWSER_AGENT_B_ID', 'Process')
+    $supervisorId = [long][System.Environment]::GetEnvironmentVariable('HELPDESK_BROWSER_SUPERVISOR_ID', 'Process')
+    Transfer $ticketId $agentBId 2
+    Open-Conversation $ticketId 200
+    [void](Run-Code "await page.waitForFunction(()=>document.querySelector('#official-reply').hidden); return true;")
+    Logout
+    Login 'AGENT_B'
+    Publish-Extra $ticketId 'Agent B guidance.' 4
+    Logout
+    $stage = 'SUPERVISOR_EXPLICIT_TAKEOVER'
+    Login 'SUPERVISOR'
+    Open-Conversation $ticketId 200
+    [void](Run-Code "await page.waitForFunction(()=>document.querySelector('#official-reply').hidden); return true;")
+    Transfer $ticketId $supervisorId 3
+    $assignmentScreenshot = ConvertTo-Json -InputObject (Join-Path $RunDirectory 'assignment-history.png') -Compress
+    [void](Run-Code "await page.screenshot({path:$assignmentScreenshot,fullPage:true}); return true;")
+    Publish-Extra $ticketId 'Supervisor guidance after takeover.' 5
     Logout
     $stage = 'OTHER_USER_DENIED'
     Login 'B'
@@ -97,7 +130,7 @@ return {replyId:(await response.json()).id, sessionCookieObserved:(headers.cooki
     $stage = 'OWNER_RELOGIN'
     Login 'A'
     Open-Conversation $ticketId 200
-    [void](Run-Code "await page.waitForFunction(() => document.querySelectorAll('#conversation-messages li').length === 3); if (!(await page.locator('#official-reply').isHidden())) throw new Error('ROLE_FAILED'); if (await page.locator('#conversation-messages img').count() !== 0) throw new Error('RENDER_FAILED'); return true;")
+    [void](Run-Code "await page.waitForFunction(() => document.querySelectorAll('#conversation-messages li').length === 5); if (!(await page.locator('#official-reply').isHidden())) throw new Error('ROLE_FAILED'); if (await page.locator('#conversation-messages img').count() !== 0) throw new Error('RENDER_FAILED'); return true;")
     [ordered]@{evidence='LOCAL_CONVERSATION_BROWSER_POSTGRES';completed=$true;ticketId=$ticketId;replyId=$firstReplyId;
         originalPreserved=$true;ownerIsolation=$true;correctionVisible=$true;textOnlyRendering=$true;
         sessionCookieObserved=$true;csrfHeaderObserved=$true;reloginVerified=$true} | ConvertTo-Json -Compress

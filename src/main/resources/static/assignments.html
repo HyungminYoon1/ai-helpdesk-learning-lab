@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>담당 업무와 인계</title>
+    <link rel="icon" href="data:,">
+    <style>label { display: block; margin-top: .6rem; } textarea { display: block; width: min(95%, 40rem); } li { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }</style>
+    <script type="module" src="/assignment-page.mjs"></script>
+</head>
+<body><main>
+    <h1>담당 업무와 인계</h1>
+    <p>권한 있는 서비스의 직원용 화면입니다. 담당하기와 인계는 문의 상태나 AI 작업을 바꾸지 않습니다.</p>
+    <p><a href="/login">로그인</a> | <a href="/tickets.html">문의 접수</a> | <a href="/conversation.html">대화와 공식 답변</a></p>
+    <p id="assignment-status" role="status" aria-live="polite">서비스를 조회하고 있습니다.</p>
+    <section>
+        <h2>업무 목록</h2>
+        <button id="services-refresh" type="button">서비스 새로고침</button>
+        <label for="support-service">서비스</label><select id="support-service"></select>
+        <label for="queue-view">범위</label><select id="queue-view"><option value="UNASSIGNED">미배정</option><option value="MINE">내 담당</option></select>
+        <button id="queue-refresh" type="button">목록 새로고침</button>
+        <p>50건씩 ID 순으로 읽습니다. 새로 접수된 문의는 새로고침으로 다시 확인하세요. 자동 분배 순서가 아닙니다.</p>
+        <ol id="assignment-queue"></ol><button id="queue-more" type="button" hidden>다음 업무 읽기</button>
+    </section>
+    <section>
+        <h2>문의 담당자</h2>
+        <form id="assignment-read"><label for="assignment-ticket-id">Ticket ID</label><input id="assignment-ticket-id" type="number" min="1" required><button type="submit">배정 조회</button></form>
+        <p id="assignment-current">문의 선택 대기</p>
+        <button id="assignment-claim" type="button" hidden>담당하기 / 같은 제출 재확인</button>
+        <form id="assignment-transfer" hidden>
+            <label for="transfer-agent">새 담당자</label><select id="transfer-agent" required></select><button id="agents-more" type="button" hidden>직원 더 읽기</button>
+            <label for="transfer-reason">인계 사유 (최대 500자)</label><textarea id="transfer-reason" required rows="3"></textarea>
+            <p>저장 즉시 인계됩니다. 결과 미확인 시 대상과 사유를 바꾸지 말고 같은 제출로 확인하세요. 페이지를 떠나면 메모리의 제출 ID가 지워집니다.</p>
+            <button id="transfer-send" type="submit">인계 / 같은 제출 재확인</button>
+        </form>
+        <h3>배정 이력</h3><ol id="assignment-events"></ol><button id="events-more" type="button" hidden>이력 더 읽기</button>
+    </section>
+</main></body>
+</html>

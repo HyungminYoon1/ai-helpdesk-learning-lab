@@ -51,7 +51,7 @@ const view = {
         const data = state.conversation;
         if (!state.append) clearConversation();
         heading.textContent = `${data.ticket.id}: ${data.ticket.title} (${data.ticket.status})`;
-        replyForm.hidden = !data.capabilities.canReply;
+        replyForm.hidden = !data.capabilities.canReply && !state.canReconfirm;
         for (const message of data.messages) {
             if (displayed.has(message.id)) continue;
             displayed.add(message.id);

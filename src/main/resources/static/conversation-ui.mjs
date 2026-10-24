@@ -17,7 +17,8 @@ export function isConversationMessage(message) {
 export function isConversation(value, ticketId, afterId = 0) {
     if (!fields(value, ["ticket", "capabilities", "messages", "page"])
             || !isTicket(value.ticket) || value.ticket.id !== ticketId
-            || !fields(value.capabilities, ["canReply"]) || typeof value.capabilities.canReply !== "boolean"
+            || !fields(value.capabilities, ["canReply", "expectedAssignmentVersion"]) || typeof value.capabilities.canReply !== "boolean"
+            || (value.capabilities.canReply ? !isId(value.capabilities.expectedAssignmentVersion) : value.capabilities.expectedAssignmentVersion !== null)
             || !Array.isArray(value.messages) || value.messages.length > 50
             || !fields(value.page, ["nextAfterId", "hasMore"]) || typeof value.page.hasMore !== "boolean") return false;
     let previous = afterId;
@@ -39,11 +40,12 @@ function failure(status) {
 export function createConversationClient({fetchImpl, view, newRequestId}) {
     let selected = null, selection = 0, latestRead = 0, readController = null;
     let canReply = false, posting = false, pending = null, uncertain = false;
+    let draftVersion = null;
 
     async function read(ticketId, afterId = 0) {
         readController?.abort();
         const request = ++latestRead;
-        if (selected !== ticketId) { selected = ticketId; selection++; pending = null; uncertain = false; canReply = false; }
+        if (selected !== ticketId) { selected = ticketId; selection++; pending = null; uncertain = false; canReply = false; draftVersion = null; }
         const current = () => request === latestRead && selected === ticketId;
         if (!isId(ticketId) || !Number.isSafeInteger(afterId) || afterId < 0) {
             canReply = false;
@@ -64,7 +66,8 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
                 canReply = false; view.render({kind: "invalid-response"}); return false;
             }
             canReply = body.capabilities.canReply;
-            view.render({kind: "conversation", conversation: body, append: afterId > 0});
+            if (canReply && draftVersion === null) draftVersion = body.capabilities.expectedAssignmentVersion;
+            view.render({kind: "conversation", conversation: body, append: afterId > 0, canReconfirm: pending !== null});
             return true;
         } catch (error) {
             if (current() && error?.name !== "AbortError") { canReply = false; view.render({kind: "request-unavailable"}); }
@@ -74,7 +77,7 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
 
     async function reply(body, correction = null) {
         if (posting) return;
-        if (!isId(selected) || !canReply) { view.render({kind: "forbidden"}); return; }
+        if (!isId(selected) || !canReply && pending === null) { view.render({kind: "forbidden"}); return; }
         if (typeof body !== "string" || measuredMessage(body).length === 0
                 || [...measuredMessage(body)].length > 2000 || correction !== null && !isId(correction)) {
             view.render({kind: "bad-request"}); return;
@@ -102,7 +105,7 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
             if (!pending) {
                 const id = newRequestId();
                 if (typeof id !== "string" || !uuid.test(id)) { view.render({kind: "invalid-response"}); return; }
-                pending = {body, clientRequestId: id, correctsMessageId: correction};
+                pending = {body, clientRequestId: id, correctsMessageId: correction, expectedAssignmentVersion: draftVersion};
             }
             let response;
             try {
@@ -130,6 +133,7 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
             }
             pending = null;
             uncertain = false;
+            draftVersion = null;
             const refreshed = await read(ticketId);
             if (current()) view.render({kind: refreshed ? "reply-saved" : "reply-saved-refresh-failed"});
         } finally {
@@ -140,7 +144,7 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
 
     function clear() {
         readController?.abort();
-        latestRead++; selection++; selected = null; pending = null; uncertain = false; canReply = false;
+        latestRead++; selection++; selected = null; pending = null; uncertain = false; canReply = false; draftVersion = null;
         view.render({kind: "selection-changed"});
     }
 

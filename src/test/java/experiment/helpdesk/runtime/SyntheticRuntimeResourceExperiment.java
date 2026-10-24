@@ -70,6 +70,7 @@ public final class SyntheticRuntimeResourceExperiment {
             var application = new SpringApplication(HelpdeskApplication.class, ControlledAiConfiguration.class,
                     lab.helpdesk.identity.IdentityFixtures.Configuration.class);
             application.setBannerMode(Banner.Mode.OFF);
+            application.setDefaultProperties(java.util.Map.of("helpdesk.support.receipt-service-code","synthetic-support"));
             application.setLogStartupInfo(false);
             try (var context = application.run()) {
                 var environment = context.getEnvironment();
