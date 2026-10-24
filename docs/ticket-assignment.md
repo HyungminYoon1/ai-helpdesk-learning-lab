@@ -57,3 +57,15 @@ UI keeps exact pending UUID/body/target/version when outcome is unknown, ignores
 | Only guard new endpoints vs close old read bypasses | Recheck service scope on ticket/conversation/AI reads; keep customer own-message rights separate | Scoped query service/security tests. No credential database or Session replacement |
 
 Verification must distinguish DB constraints, HTTP tests, concurrency/Commit rollback, synthetic Browser behavior, and full regression. Preserve original title/body/requester/author/correction and Job input/attempts/results across assignment tests; Provider remains disabled. This feature alone is not production readiness.
+
+## Verification 2026-10-24
+
+Local `mvnw -B -ntp verify` passed 1,068 Surefire tests and 2 packaged Failsafe tests with zero failures/errors/skips. Node passed 331 tests; ESLint passed. Focused runs overlap with full regression and are not added to that total.
+
+After final test hardening, `-Dtest=ConversationBrowserExperiment,TicketAssignmentHttpIntegrationTest test` passed the 25-case assignment suite plus one explicit Browser experiment again. This includes an actual retained MockHttpSession after membership revocation and a nonempty previously stored AI suggestion/category/attempt snapshot across successful handoff and rolled-back handoff. The Browser screenshot from this final run was inspected; test artifacts remain ignored under output/playwright.
+
+The actual local Browser experiment used isolated USER A/B, AGENT A/B and a service supervisor against a PostgreSQL Testcontainer. It verified receipt, claim, reply/correction, handoff, supervisor takeover before replying, customer isolation/relogin and text-only rendering. Database checks found five messages (one inquiry, four official replies), three assignment events and reply assignment versions 1/1/2/3. Provider/Worker were disabled and real Provider calls were zero. An assignment screenshot was inspected. This does not test production credentials or real AI.
+
+Regression initially exposed old test fixtures without durable staff identity/service settings and expectations for the formerly shared TicketController. Fixtures now explicitly provision synthetic membership and test the postgres-specific scoped query controller; no production authorization bypass was added. The old internal read-only AI query still exists, but its HTTP wrapper now holds a short membership shared lock and verifies that business rows remain unchanged. SQLSTATE 55P03 is mapped safely without exposing raw SQL.
+
+The runtime test probe now expects V10 and its explicit synthetic receipt service; historic measurements are not rerun or relabeled. Existing tests that deliberately use pre-V10 data remain distinct from new V10 migration/storage checks. No push, remote CI, image publish, Cloud resource or real-secret changes were performed.

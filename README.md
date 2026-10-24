@@ -1,14 +1,42 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 8–9 실습과 공개 마감 완료. Week 10의 고정 ID·V9, 공식 답변·정정 및 대화 조회를 로컬 PostgreSQL과 Browser에서 검증했다. 전체 Java 1,042개·패키징 후 2개, JavaScript 316개와 Lint 통과. 고정 ID·제출 UUID·Commit 경계와 화면의 실패 처리에 대한 학습 문답도 진행했다. 운영 적용과 일반 입력의 AI 활성화, 개인정보 모델 고도화는 후속 과업이다.
+> 상태: Week 8–9 실습과 공개 마감 완료. Week 10의 고정 ID·공식 답변·대화 조회에 이어 V10의 서비스 권한·담당하기·인계 및 담당자 전용 답변을 로컬 PostgreSQL과 Browser에서 검증했다. 전체 Java 1,068개·패키징 후 2개, JavaScript 331개와 Lint 통과. 학습 문답과 Codex 구현/Test 근거를 구분한다. 실제 계정 운영과 Cloud 적용, 일반 입력 AI 활성화는 후속 과업이다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
-## Week 10 공식 답변과 대화 조회
+## Week 10 배정과 인계 (10/24 후속)
+
+[배정 기술 계약](./docs/ticket-assignment.md)에 O1~O6과 결정 이유를 기록했다. V10은 서비스와 직원 권한, 현재 담당자와 배정 버전 및 변경 이력을 추가한다. V1~V9는 수정하지 않았으며 기존 서비스 미확인 문의를 임의로 매핑하지 않는다. 직원의 직접 담당하기, 현재 담당자 또는 같은 서비스 지원관리자의 인계, 현재 담당자만 새 공식 답변 작성하는 흐름이다. 인계는 Commit 즉시 적용한다.
+
+- `/assignments.html`: 권한 있는 서비스의 미배정/내 담당 목록, 담당하기, 인계와 변경 이력. 공개 고객 목록이나 자동 분배 기능은 아니다.
+- 같은 서비스의 활성 직원만 Ticket·대화·AI 제안과 이력을 조회한다. 이전 Session도 DB 권한 검사를 생략하지 않는다. 고객은 자기 대화만 읽는다.
+- 배정과 이력은 같은 Transaction으로 Commit한다. 답변과 인계는 같은 Ticket을 짧게 잠근다. 지원권한 회수는 구성원 잠금으로 직렬화하고 배정 이력은 보존한다.
+- 답변 새 제출은 `expectedAssignmentVersion`이 필요하다. 구형 NULL 버전은 이미 저장된 동일 결과만 재확인할 수 있다. 화면에서 담당자가 다시 같아져도 오래된 초안 버전을 자동 갱신하지 않는다.
+- 이번 요청은 로컬 구현·Test·단위별 Commit까지다. Push·새 CI·ECR·AWS·Secret 변경이나 실제 AI 호출은 하지 않는다. 운영 인증과 고객 후속 메시지 및 실제 개인정보 입력은 후속 과업이다.
+
+### 로컬 서비스 준비
+
+기존의 `postgres,local-browser` 로그인 설정과 고정 계정 키에 더해, 신뢰한 서버 설정에서 접수 서비스와 초기 권한을 명시한다. 아래는 설정 형식이며 `<...>`는 기존의 확인된 직원 계정 키로 직접 바꾸는 자리다. 키나 Password를 응답 본문으로 받거나 공개 저장소에 넣지 않는다. 전역 AGENT 로그인 Role과 서비스 구성원 권한이 모두 필요하다.
+
+```properties
+helpdesk.support.receipt-service-code=local-support
+helpdesk.support.bootstrap.enabled=true
+helpdesk.support.bootstrap.service-code=local-support
+helpdesk.support.bootstrap.service-name=로컬 고객지원
+helpdesk.support.bootstrap.members[0].account-key=<기존 AGENT account-key>
+helpdesk.support.bootstrap.members[0].display-name=로컬 지원담당자
+helpdesk.support.bootstrap.members[0].role=SUPERVISOR
+```
+
+Bootstrap은 최초 INSERT만 수행한다. DB에서 비활성화한 권한이나 바꾼 Role을 재시작 시 복구하지 않는다. 신규 접수 서비스 설정이 없거나 등록되지 않았으면 Ticket·Message·Job을 쓰기 전에 503으로 거부한다. 과거 문의의 서비스 연결, 구성원 변경 및 계정 전체 폐기는 별도 검토한 관리 절차가 필요하며 공개 관리 API는 추가하지 않았다. 실사용 공개 전에는 실제 개인 계정 수명과 권한 운영을 완성해야 한다.
+
+새 API·잠금/Commit 실패·동시성 및 Browser 검증 결과는 [기술 계약의 검증 기록](./docs/ticket-assignment.md#verification-2026-10-24)을 따른다. 아래 10/23 결과와 새 실행을 합산하거나 원격 CI 근거로 사용하지 않는다.
+
+## Week 10 공식 답변과 대화 조회 (10/23 기준과 후속 개정)
 
 [기술 계약과 결정 기록](./docs/official-replies.md)을 따른다. 기존 Session 로그인을 유지하고 명시적으로 등록한 계정 키를 Principal에 담아 고정 사용자 ID로 연결한다. 로그인 이름만으로 기존 문의 소유자를 추정하지 않는다. V9는 기존 원문과 상태를 유지하며 구형 문의의 소유자는 미확인으로 남긴다.
 
-- USER는 자기 문의의 대화를 조회하고 AGENT는 전체 조회와 공식 답변 작성을 한다.
+- USER는 자기 문의의 대화를 조회한다. 10/23의 모든 AGENT 허용은 10/24에 위 서비스 조회 및 현재 담당자 쓰기로 개정했다.
 - 답변은 Commit 뒤 공개된다. RESOLVED에서도 추가 안내를 허용하며 상태를 자동 변경하지 않는다.
 - 정정은 같은 Ticket의 공식 답변을 참조하는 새 Row다. 기존 답변을 덮어쓰지 않는다.
 - 같은 제출 ID와 같은 본문 및 정정 대상은 기존 결과 200, 변경된 내용은 409다.
@@ -850,7 +878,7 @@ node --test src/test/js/week7-tool-calling-spike.test.mjs
 
 Message의 `author_username`은 작성자 이름의 Snapshot이며 영속 User ID나 권한 판정 근거가 아니다. HTTP에서는 `Authentication.getName()`만 Service에 전달한다. 서로 다른 USER·AGENT로 실제 Form Login을 수행한 MockMvc Session을 재사용해 작성자를 검증하고, Browser의 다른 작성자·Role 주장이 저장 작성자를 바꾸지 않는 것을 확인했다. 인증 계정은 In-memory이고 Ticket·Message·Job은 PostgreSQL에 저장된다.
 
-생성 Controller는 Profile별로 분리했다. `InMemoryTicketCreationController`는 기존 제목 전용 학습 경로를 보존하며 Message·Job을 저장하지 않는다. `TicketReceiptController`는 PostgreSQL 접수를 수행하고 `TicketController`는 두 모드의 공통 조회를 담당한다. 저장 Profile은 `in-memory` 또는 `postgres` 중 하나를 선택한다. 새 UI는 본문을 함께 보내므로 접수 검증은 `postgres,local-browser` 실행에서 진행한다. JavaScript 함수의 본문 생략 호출은 이전 In-memory 실험에만 사용한다.
+생성 Controller는 Profile별로 분리했다. `InMemoryTicketCreationController`는 기존 제목 전용 학습 경로를 보존하며 Message·Job을 저장하지 않는다. `TicketReceiptController`는 PostgreSQL 접수를 수행한다. 10/24부터 PostgreSQL 단건 조회는 `PostgresTicketQueryController`가 서비스 권한 검사를 Application에 위임하며 `TicketController`는 PostgreSQL 외 학습 모드에 남긴다. 저장 Profile은 `in-memory` 또는 `postgres` 중 하나를 선택한다. 새 UI는 본문을 함께 보내므로 접수 검증은 `postgres,local-browser` 실행에서 진행한다. JavaScript 함수의 본문 생략 호출은 이전 In-memory 실험에만 사용한다.
 
 [HTTP 접수 Integration Test](./src/test/java/lab/helpdesk/ticket/web/TicketReceiptHttpIntegrationTest.java)는 실제 Security Filter Chain·MVC·Service·JDBC·PostgreSQL을 사용한다. 본문 검증의 `400`과 CSRF의 `403`은 Service 미호출·세 Table의 Row 0건으로 확인하며, Message·Job 저장 실패의 `500`은 접수 전체 Rollback과 안전한 Log를 확인한다. Testcontainer 연결을 확인한 뒤에만 Test DB를 비운다. 새 Test 17개, Domain 길이 Test 4개를 포함한 전체 Java 207개·JavaScript 79개와 ESLint가 통과했다. 변경한 본문 UI의 실제 Browser E2E와 AI 호출은 이번 검증에 포함하지 않았다.
 
