@@ -2,6 +2,10 @@
 
 Status: implemented and locally verified on 2026-10-23 under the agreed P1-P8 policies. This contract is not evidence of remote CI, deployment or production readiness.
 
+## 2026-10-24 contract revision
+
+The accepted O1-O6 [service-scoped assignment contract](ticket-assignment.md) supersedes the all-AGENT read/new-reply policy below. New replies require current ownership and expectedAssignmentVersion. V9 and the following verification record describe the prior implementation, not verification of V10. The new request authorizes local implementation, tests and grouped commits, not push, deployment or live AI.
+
 ## Scope and decisions
 
 Keep Controller / Application / Domain / Repository responsibilities and the existing Session login. USER reads their own conversation. AGENT reads all conversations and writes replies. A committed reply is immediately visible to the requester. Replies never change Ticket status, including RESOLVED. Corrections append an OFFICIAL_REPLY referencing an existing official reply on the same Ticket. They never overwrite history. Neither replies nor reads create AI Jobs or invoke a Provider.
