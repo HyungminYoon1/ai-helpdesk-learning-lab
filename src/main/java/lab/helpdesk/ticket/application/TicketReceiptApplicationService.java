@@ -21,17 +21,19 @@ public class TicketReceiptApplicationService {
     private final AiSuggestionJobRepository jobs;
     private final UserIdentityRepository identities;
     private final TicketConversationRepository conversations;
+    private final lab.helpdesk.support.SupportReceiptRouting routing;
 
     public TicketReceiptApplicationService(
             TicketRepository tickets,
             TicketMessageRepository messages,
             AiSuggestionJobRepository jobs, UserIdentityRepository identities,
-            TicketConversationRepository conversations) {
+            TicketConversationRepository conversations, lab.helpdesk.support.SupportReceiptRouting routing) {
         this.tickets = tickets;
         this.messages = messages;
         this.jobs = jobs;
         this.identities = identities;
         this.conversations = conversations;
+        this.routing = routing;
     }
 
     // HTTP 연결 단계에서는 인증 결과에서 얻은 작성자만 전달해야 한다.
@@ -45,10 +47,12 @@ public class TicketReceiptApplicationService {
         if (actor == null) throw new lab.helpdesk.identity.IdentityNotLinkedException();
         TicketMessage message = new TicketMessage(body, actor.username());
         long authorId = identities.requireId(actor);
+        long serviceId = routing.serviceId();
 
         long ticketId = tickets.save(ticket);
         long messageId = messages.save(ticketId, message);
         conversations.attachReceiptOwner(ticketId, messageId, authorId);
+        routing.attach(ticketId,serviceId);
         long jobId = jobs.enqueue(messageId);
 
         return new TicketReceiptResult(

@@ -56,9 +56,9 @@ public class JdbcSupportRepository implements SupportRepository {
                 assignee == null ? new Object[]{service,after,count} : new Object[]{service,assignee,after,count});
     }
     public Optional<TicketScope> ticket(long id, boolean lock) {
-        return jdbc.query("SELECT id,service_id,assignee_user_id,assignment_version FROM tickets WHERE id=?"
+        return jdbc.query("SELECT id,service_id,assignee_user_id,assignment_version,requester_user_id FROM tickets WHERE id=?"
                 + (lock ? " FOR UPDATE" : ""), (r,i) -> new TicketScope(r.getLong(1),
-                        r.getObject(2,Long.class),r.getObject(3,Long.class),r.getLong(4)),id).stream().findFirst();
+                        r.getObject(2,Long.class),r.getObject(3,Long.class),r.getLong(4),r.getObject(5,Long.class)),id).stream().findFirst();
     }
     public Optional<Event> submission(long ticket, long actor, UUID request) {
         return jdbc.query("SELECT " + EVENT_FIELDS + " FROM ticket_assignment_events WHERE ticket_id=? AND actor_user_id=? AND client_request_id=?",

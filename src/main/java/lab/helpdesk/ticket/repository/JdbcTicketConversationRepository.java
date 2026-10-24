@@ -16,7 +16,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 @Profile("postgres")
 public class JdbcTicketConversationRepository implements TicketConversationRepository {
-    private static final String FIELDS = "id, message_type, body, created_at, corrects_message_id";
+    private static final String FIELDS = "id, message_type, body, created_at, corrects_message_id, reply_assignment_version";
     private final JdbcTemplate jdbc;
 
     public JdbcTicketConversationRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
@@ -58,20 +58,21 @@ public class JdbcTicketConversationRepository implements TicketConversationRepos
 
     @Override
     public Optional<ConversationMessage> insertReply(long ticket, long author, String authorName,
-            String body, UUID request, Long correction) {
+            String body, UUID request, Long correction, long assignmentVersion) {
+        if (assignmentVersion<=0) throw new IllegalArgumentException("reply assignment version is required");
         return jdbc.query("""
                 INSERT INTO ticket_messages
-                    (ticket_id,body,author_username,author_user_id,message_type,client_request_id,corrects_message_id)
-                VALUES (?, ?, ?, ?, 'OFFICIAL_REPLY', ?, ?)
+                    (ticket_id,body,author_username,author_user_id,message_type,client_request_id,corrects_message_id,reply_assignment_version)
+                VALUES (?, ?, ?, ?, 'OFFICIAL_REPLY', ?, ?, ?)
                 ON CONFLICT (ticket_id,author_user_id,client_request_id) WHERE client_request_id IS NOT NULL
                 DO NOTHING RETURNING
-                """ + FIELDS, this::readMessage, ticket, body, authorName, author, request, correction)
+                """ + FIELDS, this::readMessage, ticket, body, authorName, author, request, correction, assignmentVersion)
                 .stream().findFirst();
     }
 
     private ConversationMessage readMessage(ResultSet row, int index) throws SQLException {
         return new ConversationMessage(row.getLong("id"), MessageType.valueOf(row.getString("message_type")),
                 row.getString("body"), row.getObject("created_at", OffsetDateTime.class).toInstant(),
-                row.getObject("corrects_message_id", Long.class));
+                row.getObject("corrects_message_id", Long.class),row.getObject("reply_assignment_version",Long.class));
     }
 }

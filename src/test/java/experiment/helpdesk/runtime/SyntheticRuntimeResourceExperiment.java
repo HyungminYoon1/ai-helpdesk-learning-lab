@@ -94,8 +94,8 @@ public final class SyntheticRuntimeResourceExperiment {
 
                 stage = "HEALTH_AND_DATABASE";
                 var jdbc = context.getBean(JdbcTemplate.class);
-                require(Boolean.TRUE.equals(jdbc.queryForObject("SELECT count(*) = 9 AND bool_and(success) "
-                        + "AND max(version::integer) = 9 FROM flyway_schema_history", Boolean.class)));
+                require(Boolean.TRUE.equals(jdbc.queryForObject("SELECT count(*) = 10 AND bool_and(success) "
+                        + "AND max(version::integer) = 10 FROM flyway_schema_history", Boolean.class)));
                 require(Boolean.TRUE.equals(jdbc.queryForObject("SELECT current_database() = 'helpdesk_local' "
                         + "AND current_user = 'helpdesk_app'", Boolean.class)));
                 int port = environment.getRequiredProperty("local.server.port", Integer.class);

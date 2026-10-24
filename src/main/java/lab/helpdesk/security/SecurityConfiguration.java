@@ -36,7 +36,6 @@ public class SecurityConfiguration {
                         "/api/tickets");
         RequestMatcher ticketReadRequest =
                 PathPatternRequestMatcher.pathPattern(
-                        HttpMethod.GET,
                         "/api/tickets/{id}");
         // GET Mapping이 HEAD도 처리하므로 일반 인증 규칙으로 우회하지 않게 URI를 보호한다.
         RequestMatcher suggestionReadRequest =
@@ -58,6 +57,9 @@ public class SecurityConfiguration {
                         .requestMatchers(suggestionReadRequest)
                         .hasRole("AGENT")
                         .requestMatchers("/api/tickets/{id}/replies").hasRole("AGENT")
+                        .requestMatchers("/api/services", "/api/services/**").hasRole("AGENT")
+                        .requestMatchers("/api/tickets/{id}/assignment", "/api/tickets/{id}/assignment/**",
+                                "/api/tickets/{id}/assignment-events").hasRole("AGENT")
                         .requestMatchers("/api/tickets/{id}/messages").hasAnyRole("USER", "AGENT")
                         .requestMatchers(apiRequest).authenticated()
                         .anyRequest().permitAll())

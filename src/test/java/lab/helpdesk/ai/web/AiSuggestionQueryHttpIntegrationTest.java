@@ -213,6 +213,7 @@ class AiSuggestionQueryHttpIntegrationTest {
     @Test
     void old_ticket_without_message_or_job_returns_explicit_null_without_creation() throws Exception {
         long id = tickets.save(new Ticket("기존 제목 전용 Ticket"));
+        mapSyntheticTicketService(id);
         var before = databaseSnapshot();
         MvcResult result = read(id, sessionFor(AGENT_NAME)).andExpect(status().isOk()).andReturn();
         var body = objectMapper.readTree(result.getResponse().getContentAsString());
@@ -228,7 +229,7 @@ class AiSuggestionQueryHttpIntegrationTest {
     @Test
     void agent_missing_ticket_is_404_not_normal_null() throws Exception {
         read(Long.MAX_VALUE, sessionFor(AGENT_NAME)).andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.detail").value("ticket not found"));
+                .andExpect(jsonPath("$.code").value("SUPPORT_NOT_FOUND"));
         verifyNoInteractions(claims, results, provider);
     }
 
@@ -344,6 +345,7 @@ class AiSuggestionQueryHttpIntegrationTest {
     @Test
     void an_initial_message_without_a_job_is_not_replaced_by_a_later_job() throws Exception {
         long ticketId = tickets.save(new Ticket("Job 없는 최초 메시지"));
+        mapSyntheticTicketService(ticketId);
         jdbcTemplate.update("""
                 INSERT INTO ticket_messages (ticket_id, body, author_username)
                 VALUES (?, '최초 메시지', 'synthetic-author')
@@ -362,15 +364,19 @@ class AiSuggestionQueryHttpIntegrationTest {
     }
 
     @Test
-    void http_query_runs_inside_a_read_only_postgres_transaction() throws Exception {
+    void http_query_holds_a_short_membership_lock_without_mutating_business_rows() throws Exception {
         TicketReceiptResult receipt = receive();
         doAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
-            assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isTrue();
-            assertThat(jdbcTemplate.queryForObject("SHOW transaction_read_only", String.class)).isEqualTo("on");
+            // PostgreSQL READ ONLY disallows FOR SHARE; the outer authorization TX is writable
+            // solely to serialize membership revocation, not to change Ticket/AI state.
+            assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isFalse();
+            assertThat(jdbcTemplate.queryForObject("SHOW transaction_read_only", String.class)).isEqualTo("off");
             return invocation.callRealMethod();
         }).when(queryRepository).findByTicketId(receipt.ticket().id());
+        var before=databaseSnapshot();
         read(receipt.ticket().id(), sessionFor(AGENT_NAME)).andExpect(status().isOk());
+        assertThat(databaseSnapshot()).isEqualTo(before);
         assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
         verifyNoInteractions(claims, results, provider);
     }
@@ -472,6 +478,10 @@ class AiSuggestionQueryHttpIntegrationTest {
         return receipts.receive("합성 문의", "고객 원문은 보존합니다.", lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
     }
 
+    private void mapSyntheticTicketService(long ticket) {
+        jdbcTemplate.update("UPDATE tickets SET service_id=(SELECT id FROM support_services WHERE code='synthetic-support') WHERE id=?",ticket);
+    }
+
     private ContractValidatedOutput suggestion() {
         return validator.validate("""
                 {"decision":"SUGGEST","summary":"<strong>합성 로그인·결제 문의</strong>",
@@ -510,9 +520,9 @@ class AiSuggestionQueryHttpIntegrationTest {
     static class TestUsers {
         @Bean
         UserDetailsService queryTestUsers(PasswordEncoder encoder) {
-            return new InMemoryUserDetailsManager(
-                    User.withUsername(USER_NAME).password(encoder.encode(LOGIN_SECRET)).roles("USER").build(),
-                    User.withUsername(AGENT_NAME).password(encoder.encode(LOGIN_SECRET)).roles("AGENT").build());
+            return new lab.helpdesk.identity.IdentityAwareInMemoryUserDetailsManager(
+                    lab.helpdesk.identity.IdentityFixtures.user(User.withUsername(USER_NAME).password(encoder.encode(LOGIN_SECRET)).roles("USER").build()),
+                    lab.helpdesk.identity.IdentityFixtures.user(User.withUsername(AGENT_NAME).password(encoder.encode(LOGIN_SECRET)).roles("AGENT").build()));
         }
     }
 }

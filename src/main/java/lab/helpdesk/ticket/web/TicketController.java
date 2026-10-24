@@ -10,6 +10,7 @@ import lab.helpdesk.ticket.application.TicketResult;
 import lab.helpdesk.ticket.application.TicketApplicationService;
 
 @RestController
+@org.springframework.context.annotation.Profile("!postgres")
 @RequestMapping("/api/tickets")
 public class TicketController {
 

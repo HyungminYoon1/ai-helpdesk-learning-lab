@@ -53,6 +53,7 @@ class TicketConversationHttpIntegrationTest {
     @Autowired ObjectMapper mapper;
     @Autowired TicketReceiptApplicationService receipts;
     @Autowired TicketConversationService conversations;
+    @Autowired lab.helpdesk.support.TicketAssignmentService assignments;
     @Autowired lab.helpdesk.ai.job.AiSuggestionJobClaimService claims;
     @Autowired lab.helpdesk.ai.suggestion.AiSuggestionResultService results;
     @MockitoSpyBean JdbcTicketConversationRepository repository;
@@ -65,10 +66,11 @@ class TicketConversationHttpIntegrationTest {
         assertThat(jdbc.execute((ConnectionCallback<Boolean>) connection -> connection.getMetaData().getURL()
                 .split("\\?", 2)[0].equals(POSTGRES.getJdbcUrl().split("\\?", 2)[0]))).isTrue();
         for (String table : List.of("ticket_suggestion_categories", "ticket_suggestions", "ai_suggestion_attempts",
-                "ai_suggestion_jobs", "ticket_messages", "tickets")) jdbc.update("DELETE FROM " + table);
+                "ai_suggestion_jobs", "ticket_messages", "ticket_assignment_events", "tickets")) jdbc.update("DELETE FROM " + table);
         for (String name : List.of(A, B, AGENT)) IdentityFixtures.bind(jdbc, name);
         var receipt = receipts.receive("original title", "  original inquiry\nunchanged  ", IdentityFixtures.actor(A));
         ticket = receipt.ticket().id(); inquiry = receipt.messageId();
+        assignments.claim(ticket,UUID.randomUUID(),0,IdentityFixtures.actor(AGENT));
         clearInvocations(provider, repository);
     }
 
@@ -124,6 +126,7 @@ class TicketConversationHttpIntegrationTest {
         reply(ticket, "bad", UUID.randomUUID(), inquiry, AGENT, 400);
         reply(ticket, "bad", UUID.randomUUID(), Long.MAX_VALUE, AGENT, 400);
         var other = receipts.receive("other", "other body", IdentityFixtures.actor(B));
+        assignments.claim(other.ticket().id(),UUID.randomUUID(),0,IdentityFixtures.actor(AGENT));
         reply(other.ticket().id(), "bad", UUID.randomUUID(), original, AGENT, 400);
         assertThat(jdbc.queryForObject("SELECT body FROM ticket_messages WHERE id=?", String.class, original)).isEqualTo("first reply");
         mvc.perform(get("/api/tickets/{id}/messages", ticket).with(as(A)))
@@ -214,8 +217,8 @@ class TicketConversationHttpIntegrationTest {
         UUID request = UUID.randomUUID();
         CountDownLatch start = new CountDownLatch(1);
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var one = executor.submit(() -> { start.await(); return conversations.reply(ticket,"concurrent",request,null,IdentityFixtures.actor(AGENT)); });
-            var two = executor.submit(() -> { start.await(); return conversations.reply(ticket,"concurrent",request,null,IdentityFixtures.actor(AGENT)); });
+            var one = executor.submit(() -> { start.await(); return conversations.reply(ticket,"concurrent",request,null,1L,IdentityFixtures.actor(AGENT)); });
+            var two = executor.submit(() -> { start.await(); return conversations.reply(ticket,"concurrent",request,null,1L,IdentityFixtures.actor(AGENT)); });
             start.countDown();
             var a = one.get(10, TimeUnit.SECONDS); var b = two.get(10, TimeUnit.SECONDS);
             assertThat(a.message().id()).isEqualTo(b.message().id());
@@ -236,7 +239,7 @@ class TicketConversationHttpIntegrationTest {
         var originalResult = results.findStoredResult(claim.jobId()).orElseThrow();
         var originalAttempts = jdbc.queryForList("SELECT * FROM ai_suggestion_attempts WHERE job_id=?", claim.jobId());
         doAnswer(invocation -> { invocation.callRealMethod(); throw new IllegalStateException("controlled failure"); })
-                .when(repository).insertReply(anyLong(),anyLong(),anyString(),anyString(),any(UUID.class),nullable(Long.class));
+                .when(repository).insertReply(anyLong(),anyLong(),anyString(),anyString(),any(UUID.class),nullable(Long.class),anyLong());
 
         reply(ticket, "rolled back", UUID.randomUUID(), null, AGENT, 500);
 
@@ -252,7 +255,7 @@ class TicketConversationHttpIntegrationTest {
     @Test
     void failure_after_insert_rolls_back_only_new_reply() throws Exception {
         doAnswer(invocation -> { invocation.callRealMethod(); throw new IllegalStateException("controlled failure"); })
-                .when(repository).insertReply(anyLong(),anyLong(),anyString(),anyString(),any(UUID.class),nullable(Long.class));
+                .when(repository).insertReply(anyLong(),anyLong(),anyString(),anyString(),any(UUID.class),nullable(Long.class),anyLong());
         reply(ticket, "rolled back", UUID.randomUUID(), null, AGENT, 500);
         assertThat(messageCount()).isOne();
         assertAiUnchanged();
@@ -291,6 +294,7 @@ class TicketConversationHttpIntegrationTest {
     private String payload(String body, UUID key, Long correction) {
         var map = new java.util.LinkedHashMap<String,Object>();
         map.put("body",body);map.put("clientRequestId",key);map.put("correctsMessageId",correction);
+        map.put("expectedAssignmentVersion",1);
         return mapper.writeValueAsString(map);
     }
     private JsonNode getPage(long after, int limit) throws Exception {

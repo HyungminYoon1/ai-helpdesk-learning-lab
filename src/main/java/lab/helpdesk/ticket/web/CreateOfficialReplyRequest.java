@@ -5,13 +5,13 @@ import tools.jackson.databind.JsonNode;
 import lab.helpdesk.ticket.application.ConversationException;
 import static lab.helpdesk.ticket.application.ConversationException.Code.INVALID_REQUEST;
 
-public record CreateOfficialReplyRequest(String body, UUID clientRequestId, Long correctsMessageId) {
+public record CreateOfficialReplyRequest(String body, UUID clientRequestId, Long correctsMessageId, Long expectedAssignmentVersion) {
     /** Strict input conversion for this endpoint only; no global Jackson coercion change. */
     static CreateOfficialReplyRequest parse(JsonNode json) {
         if (json == null || !json.isObject() || !json.path("body").isString()
                 || !json.path("clientRequestId").isString()) throw new ConversationException(INVALID_REQUEST);
         for (String field : json.propertyNames()) {
-            if (!java.util.Set.of("body", "clientRequestId", "correctsMessageId").contains(field)) {
+            if (!java.util.Set.of("body", "clientRequestId", "correctsMessageId", "expectedAssignmentVersion").contains(field)) {
                 throw new ConversationException(INVALID_REQUEST);
             }
         }
@@ -29,6 +29,13 @@ public record CreateOfficialReplyRequest(String body, UUID clientRequestId, Long
             }
             target = correction.asLong();
         }
-        return new CreateOfficialReplyRequest(json.path("body").asString(), request, target);
+        JsonNode version=json.path("expectedAssignmentVersion");
+        Long expected=null;
+        if (!version.isMissingNode() && !version.isNull()) {
+            if (!version.isIntegralNumber() || !version.canConvertToLong() || version.asLong()<=0)
+                throw new ConversationException(INVALID_REQUEST);
+            expected=version.asLong();
+        }
+        return new CreateOfficialReplyRequest(json.path("body").asString(), request, target, expected);
     }
 }

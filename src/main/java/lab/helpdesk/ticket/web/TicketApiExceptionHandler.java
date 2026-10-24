@@ -22,6 +22,25 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 public class TicketApiExceptionHandler
         extends ResponseEntityExceptionHandler {
 
+    @ExceptionHandler(lab.helpdesk.support.SupportException.class)
+    public ProblemDetail handleSupport(lab.helpdesk.support.SupportException exception) {
+        ProblemDetail problem=ProblemDetail.forStatusAndDetail(HttpStatus.valueOf(exception.code().status()),
+                "support request could not be completed");
+        problem.setProperty("code",exception.code().name());return problem;
+    }
+
+    @ExceptionHandler(org.springframework.dao.CannotAcquireLockException.class)
+    public ProblemDetail handleLockTimeout() {
+        ProblemDetail problem=ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,"support request is busy");
+        problem.setProperty("code","SUPPORT_BUSY");return problem;
+    }
+
+    @ExceptionHandler(org.springframework.jdbc.UncategorizedSQLException.class)
+    public ProblemDetail handleUncategorizedSql(org.springframework.jdbc.UncategorizedSQLException exception) {
+        if ("55P03".equals(exception.getSQLException().getSQLState())) return handleLockTimeout();
+        return handleUnexpectedException(exception);
+    }
+
     @ExceptionHandler(lab.helpdesk.identity.IdentityNotLinkedException.class)
     public ProblemDetail handleMissingIdentity() {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, "account identity is not linked");
