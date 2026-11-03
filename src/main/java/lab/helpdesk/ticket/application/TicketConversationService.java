@@ -23,6 +23,7 @@ public class TicketConversationService {
     public record Conversation(TicketResult ticket, boolean canReply, Long expectedAssignmentVersion, List<ConversationMessage> messages,
             Long nextAfterId, boolean hasMore) { }
     public record ReplyResult(ConversationMessage message, boolean created) { }
+    public record FollowupResult(ConversationMessage message, boolean created) { }
     private final TicketConversationRepository repository;
     private final UserIdentityRepository identities;
     private final SupportAccess access;
@@ -79,7 +80,33 @@ public class TicketConversationService {
                 .orElseThrow(() -> new IllegalStateException("submission result unavailable")), body, correction, expectedVersion);
     }
 
+    @Transactional
+    public FollowupResult followUp(long ticketId, String body, UUID requestId, AuthenticatedActor actor) {
+        if (ticketId <= 0 || requestId == null) throw new ConversationException(INVALID_REQUEST);
+        if (actor == null) throw new ConversationException(FORBIDDEN);
+        try { new TicketMessage(body, actor.username()); }
+        catch (IllegalArgumentException invalid) { throw new ConversationException(INVALID_REQUEST); }
+        long author = identities.requireId(actor);
+        var ticket = access.ticket(ticketId, true);
+        if (!Objects.equals(ticket.requesterUserId(), author)) throw new ConversationException(NOT_FOUND);
+        var existing = repository.submission(ticketId, author, requestId);
+        if (existing.isPresent()) return replayFollowup(existing.get(), body);
+        var inserted = repository.insertCustomerFollowup(ticketId, author, actor.username(), body, requestId);
+        if (inserted.isPresent()) return new FollowupResult(inserted.get(), true);
+        return replayFollowup(repository.submission(ticketId, author, requestId)
+                .orElseThrow(() -> new IllegalStateException("submission result unavailable")), body);
+    }
+
+    private FollowupResult replayFollowup(ConversationMessage stored, String body) {
+        if (stored.type() != MessageType.CUSTOMER_FOLLOWUP || !stored.body().equals(body)
+                || stored.correctsMessageId() != null || stored.replyAssignmentVersion() != null) {
+            throw new ConversationException(FOLLOWUP_REQUEST_CONFLICT);
+        }
+        return new FollowupResult(stored, false);
+    }
+
     private ReplyResult replay(ConversationMessage stored, String body, Long correction, Long expectedVersion) {
+        if (stored.type() != MessageType.OFFICIAL_REPLY) throw new ConversationException(REPLY_REQUEST_CONFLICT);
         if (stored.replyAssignmentVersion()!=null && expectedVersion==null) throw new ConversationException(INVALID_REQUEST);
         if (!stored.body().equals(body) || !Objects.equals(stored.correctsMessageId(), correction)
                 || !Objects.equals(stored.replyAssignmentVersion(),expectedVersion)) {

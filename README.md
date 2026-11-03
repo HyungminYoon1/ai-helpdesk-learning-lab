@@ -1,8 +1,12 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 8–9 실습과 공개 마감 완료. Week 10의 고정 ID·공식 답변·대화 조회에 이어 V10의 서비스 권한·담당하기·인계 및 담당자 전용 답변을 로컬 PostgreSQL과 Browser에서 검증했다. 전체 Java 1,068개·패키징 후 2개, JavaScript 331개와 Lint 통과. 학습 문답과 Codex 구현/Test 근거를 구분한다. 실제 계정 운영과 Cloud 적용, 일반 입력 AI 활성화는 후속 과업이다.
+> 상태: Week 8–9 공개 마감과 Week 10의 V10 공식 답변/배정 검증에 이어, Week 12 첫 단위인 V11 고객 후속 저장을 구현했다. 실제 PostgreSQL/MockMvc와 전체 Java 1,095개·패키징 후 2개, JavaScript 333개와 Lint 통과. 고객 작성 화면/내 문의 목록과 명시적 확인은 다음 구현 단위다. 기존 Browser/Cloud 결과와 이번 로컬 검증 및 학습자 문답을 구분한다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
+
+## Week 12 고객 후속 저장 (11/3 첫 구현)
+
+현재 후속 구현은 [V11 고객 후속 저장 계약](./docs/customer-followups.md)을 따른다. `POST /api/tickets/{ticketId}/customer-messages`에서 본인 소유권, 원문 보존, `201/200/409`, 같은 UUID의 메시지 종류 구분과 32 KiB 입력 한도를 구현했다. 기존 세 상태와 문의/답변/배정/AI 데이터는 유지한다. 26개 HTTP 사례와 V10→V11 Migration, 전체 회귀를 로컬에서 확인했다. 고객 작성 화면/내 문의 목록과 명시적 확인은 다음 구현 단위이며 이번 변경의 실제 Browser 실험은 아직 없다. 아래 Week 10의 검증 개수와 Browser 결과는 당시 V10의 근거로 보존한다.
 
 ## Week 10 배정과 인계 (10/24 후속)
 

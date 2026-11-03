@@ -7,7 +7,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isConversationMessage(message) {
     return fields(message, ["id", "type", "body", "createdAt", "correctsMessageId"])
-        && isId(message.id) && ["INQUIRY", "OFFICIAL_REPLY"].includes(message.type)
+        && isId(message.id) && ["INQUIRY", "OFFICIAL_REPLY", "CUSTOMER_FOLLOWUP"].includes(message.type)
         && typeof message.body === "string" && measuredMessage(message.body).length > 0
         && typeof message.createdAt === "string" && Number.isFinite(Date.parse(message.createdAt))
         && (message.correctsMessageId === null || isId(message.correctsMessageId)

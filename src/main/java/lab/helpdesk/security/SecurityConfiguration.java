@@ -61,6 +61,7 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/tickets/{id}/assignment", "/api/tickets/{id}/assignment/**",
                                 "/api/tickets/{id}/assignment-events").hasRole("AGENT")
                         .requestMatchers("/api/tickets/{id}/messages").hasAnyRole("USER", "AGENT")
+                        .requestMatchers("/api/tickets/{id}/customer-messages").hasAnyRole("USER", "AGENT")
                         .requestMatchers(apiRequest).authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exceptions -> exceptions

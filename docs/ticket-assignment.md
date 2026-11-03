@@ -61,6 +61,8 @@ UI keeps exact pending UUID/body/target/version when outcome is unknown, ignores
 
 ## Design closure and deferred work
 
+The 2026-11-03 [customer follow-up storage slice](customer-followups.md) preserves O1-O6 and distinguishes requester ownership from staff membership. Customer follow-up UI/list, explicit confirmation, state APIs and production account lifecycle remain separate work. The V10 verification below is historical evidence, not a new V11 run.
+
 The schema, request/response contracts, authorization, lock order, replay, failure boundaries and minimal UI are settled for this slice. Receipt routing currently selects one explicitly configured service; multi-product authentication/routing and legacy service mapping are not silently completed. Configured authentication is not production account lifecycle management. Customer follow-ups, state APIs, notifications, retention/deletion, private internal-ticket ACLs and SaaS remain separate decisions.
 
 After confirmed POST success, retry a failed GET, not the POST. On an unknown POST retain the same UUID/version/body/target/reason for explicit reconciliation; a matching stored result returns 200, while no stored result still requires current eligibility/version checks. Clearing the in-memory submission on navigation limits recovery; persistent cross-session submission recovery is not implemented. An ignored late response never rolls back DB changes.

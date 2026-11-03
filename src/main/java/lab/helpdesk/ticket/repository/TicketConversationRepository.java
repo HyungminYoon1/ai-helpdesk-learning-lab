@@ -15,4 +15,6 @@ public interface TicketConversationRepository {
     Optional<ConversationMessage> message(long ticketId, long messageId);
     Optional<ConversationMessage> insertReply(long ticketId, long authorId, String authorName,
             String body, UUID requestId, Long correction, long assignmentVersion);
+    Optional<ConversationMessage> insertCustomerFollowup(long ticketId, long authorId, String authorName,
+            String body, UUID requestId);
 }

@@ -43,6 +43,27 @@ test("HTTP 200 with valid conversation is a read, not a new reply", async () => 
     assert.equal(h.states.at(-1).kind, "forbidden");
 });
 
+test("customer followups are valid conversation messages but cannot correct an official reply", () => {
+    const followup = {...message(2, "customer detail"), type: "CUSTOMER_FOLLOWUP"};
+    assert.equal(isConversationMessage(followup), true);
+    assert.equal(isConversationMessage({...followup, correctsMessageId: 1}), false);
+    const data = page(1, false);
+    data.messages.push(followup);
+    assert.equal(isConversation(data, 1), true);
+});
+
+test("a customer followup returned by the reply endpoint cannot be accepted as a saved official reply", async () => {
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") return response({...message(), type: "CUSTOMER_FOLLOWUP"}, 200);
+        return response(page());
+    });
+    await h.client.read(1);
+    await h.client.reply("reply");
+    assert.equal(h.states.at(-1).kind, "unknown-outcome");
+    assert.equal(h.states.some((state) => state.kind === "reply-saved"), false);
+});
+
 test("invalid ID and input prevent any unnecessary request", async () => {
     let calls = 0;
     const h = harness(async () => { calls++; return response(page()); });

@@ -3,7 +3,8 @@ package lab.helpdesk.ticket.application;
 public class ConversationException extends RuntimeException {
     public enum Code {
         INVALID_REQUEST(400), INVALID_CORRECTION_TARGET(400), FORBIDDEN(403), NOT_FOUND(404),
-        REQUESTER_UNCONFIRMED(409), REPLY_REQUEST_CONFLICT(409);
+        REQUESTER_UNCONFIRMED(409), REPLY_REQUEST_CONFLICT(409), FOLLOWUP_REQUEST_CONFLICT(409),
+        REQUEST_TOO_LARGE(413);
         private final int status;
         Code(int status) { this.status = status; }
         public int status() { return status; }

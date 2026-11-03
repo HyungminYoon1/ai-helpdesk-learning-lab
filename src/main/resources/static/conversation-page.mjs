@@ -57,7 +57,9 @@ const view = {
             displayed.add(message.id);
             const item = document.createElement("li");
             const label = document.createElement("p");
-            label.textContent = `#${message.id} ${message.type === "INQUIRY" ? "문의" : "공식 답변"} ${message.createdAt}`
+            const kind = message.type === "OFFICIAL_REPLY" ? "담당자 공식 답변"
+                : message.type === "CUSTOMER_FOLLOWUP" ? "고객 추가 문의" : "고객 문의";
+            label.textContent = `#${message.id} ${kind} ${message.createdAt}`
                 + (message.correctsMessageId === null ? "" : ` / #${message.correctsMessageId} 답변 정정`);
             const text = document.createElement("p");
             text.className = "message-body";

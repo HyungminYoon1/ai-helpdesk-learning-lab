@@ -1,3 +1,3 @@
 package lab.helpdesk.ticket;
 
-public enum MessageType { INQUIRY, OFFICIAL_REPLY }
+public enum MessageType { INQUIRY, OFFICIAL_REPLY, CUSTOMER_FOLLOWUP }

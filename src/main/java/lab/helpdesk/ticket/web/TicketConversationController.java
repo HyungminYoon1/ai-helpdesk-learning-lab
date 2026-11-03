@@ -1,6 +1,7 @@
 package lab.helpdesk.ticket.web;
 
 import java.time.Instant;
+import java.io.InputStream;
 import java.util.List;
 import tools.jackson.databind.JsonNode;
 import lab.helpdesk.identity.AuthenticatedActorFactory;
@@ -9,6 +10,7 @@ import lab.helpdesk.ticket.MessageType;
 import lab.helpdesk.ticket.application.TicketConversationService;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -38,6 +40,16 @@ public class TicketConversationController {
                 TicketResponse.from(conversation.ticket()), new Capabilities(conversation.canReply(),conversation.expectedAssignmentVersion()),
                 conversation.messages().stream().map(MessageResponse::from).toList(),
                 new Page(conversation.nextAfterId(), conversation.hasMore())));
+    }
+
+    @PostMapping(value = "/customer-messages", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<MessageResponse> followUp(@PathVariable long ticketId,
+            InputStream requestBody, Authentication authentication) {
+        var request = CreateCustomerFollowupRequest.read(requestBody);
+        var result = service.followUp(ticketId, request.body(), request.clientRequestId(),
+                AuthenticatedActorFactory.from(authentication));
+        return ResponseEntity.status(result.created() ? 201 : 200).cacheControl(CacheControl.noStore())
+                .body(MessageResponse.from(result.message()));
     }
 
     @PostMapping("/replies")

@@ -70,6 +70,19 @@ public class JdbcTicketConversationRepository implements TicketConversationRepos
                 .stream().findFirst();
     }
 
+    @Override
+    public Optional<ConversationMessage> insertCustomerFollowup(long ticket, long author, String authorName,
+            String body, UUID request) {
+        return jdbc.query("""
+                INSERT INTO ticket_messages
+                    (ticket_id,body,author_username,author_user_id,message_type,client_request_id)
+                VALUES (?, ?, ?, ?, 'CUSTOMER_FOLLOWUP', ?)
+                ON CONFLICT (ticket_id,author_user_id,client_request_id) WHERE client_request_id IS NOT NULL
+                DO NOTHING RETURNING
+                """ + FIELDS, this::readMessage, ticket, body, authorName, author, request)
+                .stream().findFirst();
+    }
+
     private ConversationMessage readMessage(ResultSet row, int index) throws SQLException {
         return new ConversationMessage(row.getLong("id"), MessageType.valueOf(row.getString("message_type")),
                 row.getString("body"), row.getObject("created_at", OffsetDateTime.class).toInstant(),
