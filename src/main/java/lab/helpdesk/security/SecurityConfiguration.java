@@ -57,6 +57,8 @@ public class SecurityConfiguration {
                         .requestMatchers(suggestionReadRequest)
                         .hasRole("AGENT")
                         .requestMatchers("/api/tickets/{id}/replies").hasRole("AGENT")
+                        .requestMatchers("/api/tickets/{id}/customer-message-confirmations",
+                                "/api/tickets/{id}/customer-message-confirmations/**").hasRole("AGENT")
                         .requestMatchers("/api/services", "/api/services/**").hasRole("AGENT")
                         .requestMatchers("/api/tickets/{id}/assignment", "/api/tickets/{id}/assignment/**",
                                 "/api/tickets/{id}/assignment-events").hasRole("AGENT")

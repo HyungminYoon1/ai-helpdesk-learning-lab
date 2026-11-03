@@ -1,6 +1,6 @@
 # Customer follow-up storage contract
 
-Status: V11 storage, My Tickets and the customer composer are implemented on 2026-11-03. Confirmation records and state APIs remain separate slices. The initial storage checks and subsequent Browser checks are recorded separately below.
+Status: V11 customer follow-ups/list/composer and the V12 explicit-confirmation backend are implemented on 2026-11-03. Confirmation UI/queue integration and state APIs remain separate slices. Storage, Browser and subsequent backend verification are recorded separately below.
 
 ## Scope
 
@@ -47,7 +47,7 @@ New decisions: derive canFollowUp from requester ownership rather than staff cap
 
 Focused tests use an isolated PostgreSQL Testcontainer and MockMvc, not a live Browser or external AI. The HTTP suite covers ownership/CSRF, all three states, original text, 201/200/409, mixed staff/customer identity, actual stream/character bounds, concurrent same-key submission and rollback. A deferred foreign-key trigger forces failure at actual Commit, and a nonempty AI result/assignment/reply snapshot is checked after a forced post-insert failure. Provider/Worker are disabled and the Provider mock must have no interactions.
 
-The migration test upgrades V10 data to V11 and checks original message/ticket/assignment rows, legacy reply versions, required follow-up fields and the shared key. JavaScript tests distinguish a valid follow-up in a conversation from an invalid saved-official-reply response. Current runtime probes expect V11; historical migration targets remain scoped to their own versions.
+The migration test upgrades V10 data to V11 and checks original message/ticket/assignment rows, legacy reply versions, required follow-up fields and the shared key. JavaScript tests distinguish a valid follow-up in a conversation from an invalid saved-official-reply response. At this slice runtime probes expected V11; the confirmation backend later updates that expectation to V12. Historical migration targets remain scoped to their own versions.
 
 Final `mvnw -B -ntp verify` passed 1,095 Surefire tests and 2 packaged Failsafe tests, zero failures/errors/skips. This includes the 26-case follow-up HTTP suite and one V10-to-V11 migration case; focused runs overlap and are not added to this total. All 333 JavaScript tests and ESLint passed. The initial focused run had one test-fixture membership-isolation error, corrected before the full run without weakening production authorization.
 
@@ -62,3 +62,7 @@ The Browser checked an empty other-customer list, the owner's one-Ticket list, r
 Final full regression passed 1,122 Surefire tests and 2 packaged Failsafe tests, zero failures/errors/skips, BUILD SUCCESS. All 345 Node tests and ESLint passed. Node scenarios cover nullable/microsecond activity, moving-page deduplication, stale reads, unknown POST kind/key preservation and saved-then-GET-failed recovery. Focused tests overlap with the full count; the explicit Browser experiment is separate. These simulations do not replace Browser or DB Commit tests.
 
 Surefire reported a fork-JVM exit timeout after tests in this final run. The initial storage log did not contain that exact message; earlier general shutdown/Hikari notes do not establish identical behavior or cause. Test outcomes and packaging passed, but clean test-process shutdown remains an unresolved follow-up. No remote CI/Push, Image, Cloud or real AI call was performed.
+
+## Explicit confirmation backend
+
+The [V12 confirmation contract and verification](./customer-message-confirmations.md) adds current-assignee confirmation records/API with assignment-scoped MAX, separate replay/current state and no implicit action on GET. Its focused 43 cases and full Java 1,165+2 passed locally. Staff queue/confirmation buttons and their Browser flow are still pending. This backend creates no new Message or AI work and does not change customer ownership, Ticket state, message content or original suggestions.

@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 12의 V11 고객 후속 저장, 본인 문의 목록과 고객 작성 화면을 구현했다. 실제 PostgreSQL/MockMvc와 합성 Browser에서 목록 선택/후속 저장/원문 및 AI 데이터 보존을 확인했고, 전체 Java 1,122개·패키징 후 2개, JavaScript 345개와 Lint가 통과했다. 이번 실행의 테스트 JVM 종료 제한 경고는 원인 미확정이다. 배정별 명시적 확인은 다음 구현 단위다. 기존 Cloud 결과와 이번 로컬 검증 및 학습자 문답을 구분한다.
+> 상태: Week 12의 V11 고객 대화/목록/작성 화면과 V12 배정별 명시적 확인 저장/API를 구현했다. 최신 전체 Java 1,165개·패키징 후 2개가 통과했다. 화면의 기존 JavaScript 345개/Lint/합성 Browser 근거와 이번 API의 PostgreSQL/MockMvc 근거는 구분한다. 테스트 JVM 종료 지연은 미해결이며 직원 확인 표시/버튼과 Browser 연결은 다음 단위다. 기존 Cloud 결과와 이번 로컬 검증 및 학습자 문답도 구분한다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
@@ -8,7 +8,9 @@
 
 현재 후속 구현은 [V11 고객 후속 대화 계약](./docs/customer-followups.md)을 따른다. `POST /api/tickets/{ticketId}/customer-messages`에서 본인 소유권, 원문 보존, `201/200/409`, 같은 UUID의 메시지 종류 구분과 32 KiB 입력 한도를 구현했다. 기존 세 상태와 문의/답변/배정/AI 데이터는 유지한다. 26개 HTTP 사례와 V10→V11 Migration을 검증했다.
 
-`/my-tickets.html`에서 [내 문의 목록](./docs/my-tickets.md)을 읽고 대화로 이동해 추가 문의를 작성한다. 목록은 본인 고정 ID와 공개 대화 활동 시각을 기준으로 하며, Cursor는 권한 근거가 아니다. 조회 27개와 실제 Browser의 고객/직원 Session, CSRF, 저장 뒤 DB 대조가 통과했다. 불명확한 POST는 같은 종류/UUID/본문으로 재확인하고 저장 뒤 GET만 실패하면 조회를 다시 한다. 명시적 확인은 다음 구현 단위다. 아래 Week 10의 검증 개수와 Browser 결과는 당시 V10의 근거로 보존한다.
+`/my-tickets.html`에서 [내 문의 목록](./docs/my-tickets.md)을 읽고 대화로 이동해 추가 문의를 작성한다. 목록은 본인 고정 ID와 공개 대화 활동 시각을 기준으로 하며, Cursor는 권한 근거가 아니다. 조회 27개와 실제 Browser의 고객/직원 Session, CSRF, 저장 뒤 DB 대조가 통과했다. 불명확한 POST는 같은 종류/UUID/본문으로 재확인하고 저장 뒤 GET만 실패하면 조회를 다시 한다. 아래 Week 10의 검증 개수와 Browser 결과는 당시 V10의 근거로 보존한다.
+
+[V12 명시적 확인 저장/API](./docs/customer-message-confirmations.md)는 같은 Ticket/현재 배정의 MAX(through_message_id)를 읽는다. 늦은 작은 확인도 남기며 새 배정으로 과거 확인을 복사하지 않는다. 현재 담당자의 새 확인과 과거 제출의 재확인을 나누고 Commit 뒤 201/동일 제출 200을 반환한다. 새 HTTP/PostgreSQL 42개와 Migration 1개가 통과했다. 직원 목록 표시/확인 버튼과 새 Browser 실험은 다음 단위이며 이번 API에서 기존 화면 JS나 AI 처리는 변경하지 않았다.
 
 ## Week 10 배정과 인계 (10/24 후속)
 
