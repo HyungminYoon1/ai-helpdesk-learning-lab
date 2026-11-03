@@ -8,7 +8,7 @@ import {createConversationClient, isConversation, isConversationMessage} from ".
 
 const key = "11111111-1111-4111-8111-111111111111";
 const message = (id = 2, body = "reply", correction = null) => ({id, type: "OFFICIAL_REPLY", body, correctsMessageId: correction, createdAt: "2026-10-23T01:00:00Z"});
-const page = (id = 1, canReply = true) => ({ticket: {id, title: "synthetic ticket", status: "OPEN"}, capabilities: {canReply, expectedAssignmentVersion: canReply ? 1 : null},
+const page = (id = 1, canReply = true) => ({ticket: {id, title: "synthetic ticket", status: "OPEN"}, capabilities: {canReply, canFollowUp: !canReply, expectedAssignmentVersion: canReply ? 1 : null},
     messages: [{...message(1, "inquiry"), type: "INQUIRY"}], page: {nextAfterId: null, hasMore: false}});
 const response = (body, status = 200) => new Response(JSON.stringify(body), {status, headers: {"Content-Type": "application/json"}});
 const csrf = () => response({headerName: "X-CSRF-TOKEN", token: "synthetic-test-token"});
@@ -27,6 +27,7 @@ test("conversation contract rejects wrong ticket, ordering, correction shape and
     assert.equal(isConversation(page(), 1), true);
     assert.equal(isConversation(page(), 2), false);
     assert.equal(isConversation({...page(), extra: true}, 1), false);
+    assert.equal(isConversation({...page(), capabilities: {canReply: false, expectedAssignmentVersion: null}}, 1), false);
     assert.equal(isConversation({...page(), messages: [message(2), message(1)]}, 1), false);
     assert.equal(isConversation({...page(), page: {hasMore: true, nextAfterId: null}}, 1), false);
     assert.equal(isConversationMessage({...message(), correctsMessageId: 2}), false);
@@ -62,6 +63,70 @@ test("a customer followup returned by the reply endpoint cannot be accepted as a
     await h.client.reply("reply");
     assert.equal(h.states.at(-1).kind, "unknown-outcome");
     assert.equal(h.states.some((state) => state.kind === "reply-saved"), false);
+});
+
+test("customer followup uses a separate capability and sends only body and submission UUID", async () => {
+    const sent = [];
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") {
+            sent.push({url, options});
+            return response({...message(2, "  detail\nunchanged  "), type: "CUSTOMER_FOLLOWUP"}, 201);
+        }
+        const data = page(1, false); data.ticket.status = "RESOLVED"; return response(data);
+    });
+    await h.client.read(1); await h.client.followUp("  detail\nunchanged  ");
+    assert.equal(h.states.at(-1).kind, "followup-saved");
+    assert.equal(sent[0].url, "/api/tickets/1/customer-messages");
+    assert.deepEqual(JSON.parse(sent[0].options.body), {body: "  detail\nunchanged  ", clientRequestId: key});
+    assert.equal(sent[0].options.credentials, "same-origin");
+    assert.equal(sent[0].options.headers["X-CSRF-TOKEN"], "synthetic-test-token");
+});
+
+test("staff reply capability cannot grant customer followup capability", async () => {
+    let calls = 0;
+    const h = harness(async () => {calls++; return response(page());});
+    await h.client.read(1); await h.client.followUp("not owner");
+    assert.equal(h.states.at(-1).kind, "forbidden"); assert.equal(calls, 1);
+});
+
+test("unknown customer submission preserves key and kind and is retried only explicitly", async () => {
+    const posts = []; let keys = 0;
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") {
+            posts.push({url, body: options.body});
+            if (posts.length === 1) throw new Error("lost response");
+            return response({...message(2, "detail"), type: "CUSTOMER_FOLLOWUP"}, 200);
+        }
+        const data = page(); data.capabilities.canFollowUp = true; return response(data);
+    }, () => {keys++; return key;});
+    await h.client.read(1); await h.client.followUp("detail");
+    assert.equal(h.states.at(-1).kind, "unknown-outcome");
+    await h.client.reply("detail"); assert.equal(h.states.at(-1).kind, "unconfirmed-submission");
+    await h.client.followUp("changed"); assert.equal(posts.length, 1);
+    await h.client.followUp("detail"); assert.equal(posts.length, 2); assert.equal(keys, 1);
+    assert.deepEqual(posts[0], posts[1]); assert.equal(h.states.at(-1).kind, "followup-saved");
+});
+
+test("saved customer submission with a failed refresh needs only GET recovery", async () => {
+    let reads = 0, posts = 0;
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") {posts++; return response({...message(2, "detail"), type: "CUSTOMER_FOLLOWUP"}, 201);}
+        return ++reads === 2 ? response({}, 503) : response(page(1, false));
+    });
+    await h.client.read(1); await h.client.followUp("detail");
+    assert.equal(h.states.at(-1).kind, "followup-saved-refresh-failed");
+    await h.client.read(1); assert.equal(posts, 1); assert.equal(reads, 3);
+});
+
+test("a reply returned by customer endpoint remains unconfirmed", async () => {
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        return options.method === "POST" ? response(message(2, "detail"), 201) : response(page(1, false));
+    });
+    await h.client.read(1); await h.client.followUp("detail"); assert.equal(h.states.at(-1).kind, "unknown-outcome");
 });
 
 test("invalid ID and input prevent any unnecessary request", async () => {
@@ -242,4 +307,6 @@ test("leaving the page clears conversation and draft before a history-cache rest
     assert.equal(node("#conversation-ticket-id").value, "");
     assert.equal(node("#conversation-messages").children.length, 0);
     assert.equal(node("#official-reply").hidden, true);
+    assert.equal(node("#customer-followup").hidden, true);
+    assert.equal(node("#followup-body").value, "");
 });

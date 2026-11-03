@@ -100,18 +100,28 @@ class ConversationBrowserExperiment {
             long ticket=evidence.path("ticketId").asLong(),reply=evidence.path("replyId").asLong();
             assertThat(jdbc.queryForObject("SELECT title FROM tickets WHERE id=?",String.class,ticket)).isEqualTo("Conversation Browser synthetic");
             assertThat(jdbc.queryForObject("SELECT status FROM tickets WHERE id=?",String.class,ticket)).isEqualTo("OPEN");
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_messages WHERE ticket_id=?",Long.class,ticket)).isEqualTo(5);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_messages WHERE ticket_id=?",Long.class,ticket)).isEqualTo(6);
             assertThat(jdbc.queryForObject("SELECT body FROM ticket_messages WHERE ticket_id=? AND message_type='INQUIRY'",String.class,ticket)).isEqualTo("Original inquiry preserved.");
             assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_messages WHERE ticket_id=? AND corrects_message_id=?",Long.class,ticket,reply)).isOne();
             assertThat(jdbc.queryForObject("SELECT status FROM ai_suggestion_jobs",String.class)).isEqualTo("PENDING");
             assertThat(jdbc.queryForObject("SELECT reserved_generation_count FROM ai_suggestion_jobs",Integer.class)).isZero();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_suggestions",Long.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM ai_suggestion_jobs",Long.class)).isOne();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM ai_suggestion_attempts",Long.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT body FROM ticket_messages WHERE ticket_id=? AND message_type='CUSTOMER_FOLLOWUP'",String.class,ticket))
+                    .isEqualTo("<img src=x onerror=window.__followup_xss=true>Customer followup preserved.");
+            assertThat(jdbc.queryForObject("SELECT author_user_id FROM ticket_messages WHERE ticket_id=? AND message_type='CUSTOMER_FOLLOWUP'",Long.class,ticket)).isEqualTo(identity(A));
+            assertThat(jdbc.queryForObject("SELECT client_request_id IS NOT NULL AND corrects_message_id IS NULL AND reply_assignment_version IS NULL FROM ticket_messages WHERE ticket_id=? AND message_type='CUSTOMER_FOLLOWUP'",Boolean.class,ticket)).isTrue();
+            assertThat(evidence.path("myTicketsVerified").asBoolean()).isTrue();
+            assertThat(evidence.path("customerFollowupVerified").asBoolean()).isTrue();
+            assertThat(evidence.path("headBodyEmpty").asBoolean()).isTrue();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_assignment_events WHERE ticket_id=?",Long.class,ticket)).isEqualTo(3);
             assertThat(jdbc.queryForObject("SELECT assignee_user_id FROM tickets WHERE id=?",Long.class,ticket)).isEqualTo(identity(SUPERVISOR));
             assertThat(jdbc.queryForList("SELECT reply_assignment_version FROM ticket_messages WHERE ticket_id=? AND message_type='OFFICIAL_REPLY' ORDER BY id",Long.class,ticket)).containsExactly(1L,1L,2L,3L);
             assertThat(Files.exists(run.resolve("conversation-agent.png"))).isTrue();
+            assertThat(Files.exists(run.resolve("conversation-customer.png"))).isTrue();
             verifyNoInteractions(provider);
-            System.out.println("LOCAL_ASSIGNMENT_CONVERSATION_BROWSER_POSTGRES completed=true messages=5 assignmentEvents=3 providerCalls=0");
+            System.out.println("LOCAL_CUSTOMER_CONVERSATION_BROWSER_POSTGRES completed=true messages=6 assignmentEvents=3 providerCalls=0");
         } finally {
             if(child.isAlive()){child.descendants().forEach(ProcessHandle::destroyForcibly);child.destroyForcibly();}
             reader.join(2000);

@@ -17,7 +17,8 @@ export function isConversationMessage(message) {
 export function isConversation(value, ticketId, afterId = 0) {
     if (!fields(value, ["ticket", "capabilities", "messages", "page"])
             || !isTicket(value.ticket) || value.ticket.id !== ticketId
-            || !fields(value.capabilities, ["canReply", "expectedAssignmentVersion"]) || typeof value.capabilities.canReply !== "boolean"
+            || !fields(value.capabilities, ["canReply", "canFollowUp", "expectedAssignmentVersion"])
+            || typeof value.capabilities.canReply !== "boolean" || typeof value.capabilities.canFollowUp !== "boolean"
             || (value.capabilities.canReply ? !isId(value.capabilities.expectedAssignmentVersion) : value.capabilities.expectedAssignmentVersion !== null)
             || !Array.isArray(value.messages) || value.messages.length > 50
             || !fields(value.page, ["nextAfterId", "hasMore"]) || typeof value.page.hasMore !== "boolean") return false;
@@ -39,16 +40,16 @@ function failure(status) {
 
 export function createConversationClient({fetchImpl, view, newRequestId}) {
     let selected = null, selection = 0, latestRead = 0, readController = null;
-    let canReply = false, posting = false, pending = null, uncertain = false;
+    let canReply = false, canFollowUp = false, posting = false, pending = null, pendingKind = null, uncertain = false;
     let draftVersion = null;
 
     async function read(ticketId, afterId = 0) {
         readController?.abort();
         const request = ++latestRead;
-        if (selected !== ticketId) { selected = ticketId; selection++; pending = null; uncertain = false; canReply = false; draftVersion = null; }
+        if (selected !== ticketId) { selected = ticketId; selection++; pending = null; pendingKind = null; uncertain = false; canReply = false; canFollowUp = false; draftVersion = null; }
         const current = () => request === latestRead && selected === ticketId;
         if (!isId(ticketId) || !Number.isSafeInteger(afterId) || afterId < 0) {
-            canReply = false;
+            canReply = false; canFollowUp = false;
             view.render({kind: "invalid-id"});
             return false;
         }
@@ -59,36 +60,39 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
                 method: "GET", credentials: "same-origin", cache: "no-store", signal: readController.signal
             });
             if (!current()) return false;
-            if (!response.ok) { canReply = false; view.render(failure(response.status)); return false; }
+            if (!response.ok) { canReply = false; canFollowUp = false; view.render(failure(response.status)); return false; }
             const body = await response.json();
             if (!current()) return false;
             if (!isConversation(body, ticketId, afterId)) {
-                canReply = false; view.render({kind: "invalid-response"}); return false;
+                canReply = false; canFollowUp = false; view.render({kind: "invalid-response"}); return false;
             }
             canReply = body.capabilities.canReply;
+            canFollowUp = body.capabilities.canFollowUp;
             if (canReply && draftVersion === null) draftVersion = body.capabilities.expectedAssignmentVersion;
-            view.render({kind: "conversation", conversation: body, append: afterId > 0, canReconfirm: pending !== null});
+            view.render({kind: "conversation", conversation: body, append: afterId > 0,
+                canReconfirm: pendingKind === "reply", canReconfirmFollowup: pendingKind === "followup"});
             return true;
         } catch (error) {
-            if (current() && error?.name !== "AbortError") { canReply = false; view.render({kind: "request-unavailable"}); }
+            if (current() && error?.name !== "AbortError") { canReply = false; canFollowUp = false; view.render({kind: "request-unavailable"}); }
             return false;
         }
     }
 
-    async function reply(body, correction = null) {
+    async function submit(kind, body, correction = null) {
         if (posting) return;
-        if (!isId(selected) || !canReply && pending === null) { view.render({kind: "forbidden"}); return; }
+        if (pending && pendingKind !== kind) { view.render({kind: "unconfirmed-submission"}); return; }
+        if (!isId(selected) || !(kind === "reply" ? canReply : canFollowUp) && pending === null) { view.render({kind: "forbidden"}); return; }
         if (typeof body !== "string" || measuredMessage(body).length === 0
                 || [...measuredMessage(body)].length > 2000 || correction !== null && !isId(correction)) {
             view.render({kind: "bad-request"}); return;
         }
-        if (pending && (pending.body !== body || pending.correctsMessageId !== correction)) {
+        if (pending && (pending.body !== body || kind === "reply" && pending.correctsMessageId !== correction)) {
             view.render({kind: "unconfirmed-submission"}); return;
         }
         posting = true;
         const ticketId = selected, captured = selection;
         const current = () => selected === ticketId && captured === selection;
-        view.render({kind: "posting"});
+        view.render({kind: "posting", submissionKind: kind});
         try {
             let csrfResponse, csrf;
             try {
@@ -105,11 +109,14 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
             if (!pending) {
                 const id = newRequestId();
                 if (typeof id !== "string" || !uuid.test(id)) { view.render({kind: "invalid-response"}); return; }
-                pending = {body, clientRequestId: id, correctsMessageId: correction, expectedAssignmentVersion: draftVersion};
+                pending = kind === "reply"
+                    ? {body, clientRequestId: id, correctsMessageId: correction, expectedAssignmentVersion: draftVersion}
+                    : {body, clientRequestId: id};
+                pendingKind = kind;
             }
             let response;
             try {
-                response = await fetchImpl(`/api/tickets/${ticketId}/replies`, {
+                response = await fetchImpl(`/api/tickets/${ticketId}/${kind === "reply" ? "replies" : "customer-messages"}`, {
                     method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json", [csrf.headerName]: csrf.token},
                     body: JSON.stringify(pending)
                 });
@@ -118,7 +125,7 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
             if (!response.ok) {
                 // A 5xx may have happened after Commit. Keep the original submission for explicit verification.
                 if (response.status >= 500 || response.status === 409) uncertain = true;
-                if (!uncertain && response.status >= 400 && response.status < 500) pending = null;
+                if (!uncertain && response.status >= 400 && response.status < 500) { pending = null; pendingKind = null; }
                 view.render(response.status >= 500 ? {kind: "unknown-outcome"} : failure(response.status));
                 return;
             }
@@ -127,15 +134,16 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
             catch { if (current()) { uncertain = true; view.render({kind: "unknown-outcome"}); } return; }
             if (!current()) return;
             if (![200, 201].includes(response.status) || !isConversationMessage(message)
-                    || message.type !== "OFFICIAL_REPLY" || message.body !== pending.body
-                    || message.correctsMessageId !== pending.correctsMessageId) {
+                    || message.type !== (kind === "reply" ? "OFFICIAL_REPLY" : "CUSTOMER_FOLLOWUP") || message.body !== pending.body
+                    || message.correctsMessageId !== (kind === "reply" ? pending.correctsMessageId : null)) {
                 uncertain = true; view.render({kind: "unknown-outcome"}); return;
             }
             pending = null;
+            pendingKind = null;
             uncertain = false;
-            draftVersion = null;
+            if (kind === "reply") draftVersion = null;
             const refreshed = await read(ticketId);
-            if (current()) view.render({kind: refreshed ? "reply-saved" : "reply-saved-refresh-failed"});
+            if (current()) view.render({kind: `${kind}-saved${refreshed ? "" : "-refresh-failed"}`});
         } finally {
             posting = false;
             view.setPosting(false);
@@ -144,9 +152,10 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
 
     function clear() {
         readController?.abort();
-        latestRead++; selection++; selected = null; pending = null; uncertain = false; canReply = false; draftVersion = null;
+        latestRead++; selection++; selected = null; pending = null; pendingKind = null; uncertain = false; canReply = false; canFollowUp = false; draftVersion = null;
         view.render({kind: "selection-changed"});
     }
 
-    return {read, reply, clear};
+    return {read, reply: (body, correction = null) => submit("reply", body, correction),
+        followUp: (body) => submit("followup", body), clear};
 }

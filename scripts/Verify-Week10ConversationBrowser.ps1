@@ -124,6 +124,9 @@ return {replyId:(await response.json()).id, sessionCookieObserved:(headers.cooki
     Logout
     $stage = 'OTHER_USER_DENIED'
     Login 'B'
+    [void](Invoke-Cli @('goto', "$base/my-tickets.html"))
+    [void](Invoke-Cli @('snapshot'))
+    [void](Run-Code "await page.waitForFunction(()=>document.querySelector('#my-tickets-status').textContent==='등록한 문의가 없습니다.'); if (await page.locator('#my-tickets li').count()!==0) throw new Error('LIST_ISOLATION_FAILED'); return true;")
     Open-Conversation $ticketId 404
     [void](Run-Code "await page.waitForFunction(() => document.querySelectorAll('#conversation-messages li').length === 0); if (!(await page.locator('#official-reply').isHidden())) throw new Error('OWNERSHIP_FAILED'); return true;")
     Logout
@@ -131,8 +134,31 @@ return {replyId:(await response.json()).id, sessionCookieObserved:(headers.cooki
     Login 'A'
     Open-Conversation $ticketId 200
     [void](Run-Code "await page.waitForFunction(() => document.querySelectorAll('#conversation-messages li').length === 5); if (!(await page.locator('#official-reply').isHidden())) throw new Error('ROLE_FAILED'); if (await page.locator('#conversation-messages img').count() !== 0) throw new Error('RENDER_FAILED'); return true;")
+    $stage = 'OWNER_LIST_AND_FOLLOWUP'
+    [void](Invoke-Cli @('goto', "$base/my-tickets.html"))
+    [void](Invoke-Cli @('snapshot'))
+    [void](Run-Code "await page.locator('#my-tickets a').waitFor({state:'visible'}); if (await page.locator('#my-tickets li').count()!==1) throw new Error('OWN_LIST_FAILED'); const head=await page.evaluate(async()=>{const r=await fetch('/api/my/tickets',{method:'HEAD'});return {status:r.status,body:await r.text()};}); if (head.status!==200 || head.body!=='') throw new Error('HEAD_FAILED'); await page.locator('#my-tickets a').click(); await page.waitForFunction(()=>document.querySelectorAll('#conversation-messages li').length===5 && !document.querySelector('#customer-followup').hidden); return true;")
+    [void](Invoke-Cli @('snapshot'))
+    $followupCode = @'
+const missing=await page.evaluate(async()=> (await fetch('/api/tickets/TICKET_ID/customer-messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:'not stored',clientRequestId:crypto.randomUUID()})})).status);
+if(missing!==403)throw new Error('FOLLOWUP_CSRF_FAILED');
+await page.locator('#followup-body').fill('<img src=x onerror=window.__followup_xss=true>Customer followup preserved.');
+const received=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/customer-messages'));
+await page.locator('#followup-send').click();
+const reply=await received;
+const sent=reply.request().postDataJSON();
+if(reply.status()!==201 || (await reply.json()).type!=='CUSTOMER_FOLLOWUP' || Object.keys(sent).length!==2 || !sent.clientRequestId) throw new Error('FOLLOWUP_FAILED');
+await page.waitForFunction(()=>document.querySelectorAll('#conversation-messages li').length===6 && !document.querySelector('#followup-send').disabled);
+if(await page.locator('#conversation-messages img').count()!==0 || await page.evaluate(()=>window.__followup_xss===true))throw new Error('FOLLOWUP_RENDER_FAILED');
+if(await page.locator('#followup-body').inputValue()!=='')throw new Error('FOLLOWUP_DRAFT_NOT_CLEARED');
+return true;
+'@
+    [void](Run-Code $followupCode.Replace('TICKET_ID',[string]$ticketId))
+    $customerScreenshot = ConvertTo-Json -InputObject (Join-Path $RunDirectory 'conversation-customer.png') -Compress
+    [void](Run-Code "await page.screenshot({path:$customerScreenshot,fullPage:true}); return true;")
     [ordered]@{evidence='LOCAL_CONVERSATION_BROWSER_POSTGRES';completed=$true;ticketId=$ticketId;replyId=$firstReplyId;
         originalPreserved=$true;ownerIsolation=$true;correctionVisible=$true;textOnlyRendering=$true;
+        myTicketsVerified=$true;customerFollowupVerified=$true;headBodyEmpty=$true;
         sessionCookieObserved=$true;csrfHeaderObserved=$true;reloginVerified=$true} | ConvertTo-Json -Compress
 } catch {
     [ordered]@{evidence='LOCAL_CONVERSATION_BROWSER_POSTGRES';completed=$false;stage=$stage;failureCode='BROWSER_STEP_FAILED'} | ConvertTo-Json -Compress

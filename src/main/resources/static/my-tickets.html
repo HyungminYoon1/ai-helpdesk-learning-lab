@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>내 문의</title>
+    <link rel="icon" href="data:,">
+    <script type="module" src="/my-tickets-page.mjs"></script>
+</head>
+<body>
+<main>
+    <h1>내 문의</h1>
+    <p><a href="/login">로그인</a> | <a href="/tickets.html">새 문의 접수</a></p>
+    <p>내가 등록한 문의만 표시합니다. 최근 대화 순서이며, 새 글이 올라오면 새로고침해 확인하세요.</p>
+    <button id="my-tickets-refresh" type="button">목록 새로고침</button>
+    <p id="my-tickets-status" role="status" aria-live="polite">조회 전입니다.</p>
+    <ol id="my-tickets"></ol>
+    <button id="my-tickets-more" type="button" hidden>다음 목록 읽기</button>
+</main>
+</body>
+</html>

@@ -96,10 +96,12 @@ class TicketCustomerFollowupHttpIntegrationTest {
                 created.path("id").asLong())).isEqualTo(new JdbcUserIdentityRepository(jdbc).findId(IdentityFixtures.key(A)).orElseThrow());
         mvc.perform(get("/api/tickets/{id}/messages",ticket).with(as(A))).andExpect(status().isOk())
                 .andExpect(jsonPath("$.ticket.status").value(state))
+                .andExpect(jsonPath("$.capabilities.canFollowUp").value(true))
                 .andExpect(jsonPath("$.messages[1].body").value(body))
                 .andExpect(jsonPath("$.messages[1].authorUsername").doesNotExist())
                 .andExpect(jsonPath("$.messages[1].authorUserId").doesNotExist());
         mvc.perform(get("/api/tickets/{id}/messages",ticket).with(as(AGENT))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.capabilities.canFollowUp").value(false))
                 .andExpect(jsonPath("$.messages[1].type").value("CUSTOMER_FOLLOWUP"));
         assertThat(jdbc.queryForList("SELECT * FROM tickets WHERE id=?",ticket)).isEqualTo(originalTicket);
         assertThat(jdbc.queryForList("SELECT * FROM ticket_messages WHERE ticket_id=? AND message_type='INQUIRY'",ticket)).isEqualTo(originalInquiry);
@@ -164,6 +166,9 @@ class TicketCustomerFollowupHttpIntegrationTest {
         jdbc.update("UPDATE support_service_memberships SET active=false WHERE user_id=?",
                 new JdbcUserIdentityRepository(jdbc).findId(IdentityFixtures.key(AGENT)).orElseThrow());
         follow(own,"customer ownership survives",UUID.randomUUID(),AGENT,201);
+        mvc.perform(get("/api/tickets/{id}/messages",own).with(as(AGENT))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.capabilities.canFollowUp").value(true))
+                .andExpect(jsonPath("$.capabilities.canReply").value(false));
         assertThat(jdbc.queryForObject("SELECT assignment_version FROM tickets WHERE id=?",Long.class,own)).isEqualTo(2);
     }
 

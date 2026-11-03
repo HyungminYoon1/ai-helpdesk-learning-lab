@@ -20,7 +20,7 @@ import static lab.helpdesk.ticket.application.ConversationException.Code.*;
 @Service
 @Profile("postgres")
 public class TicketConversationService {
-    public record Conversation(TicketResult ticket, boolean canReply, Long expectedAssignmentVersion, List<ConversationMessage> messages,
+    public record Conversation(TicketResult ticket, boolean canReply, boolean canFollowUp, Long expectedAssignmentVersion, List<ConversationMessage> messages,
             Long nextAfterId, boolean hasMore) { }
     public record ReplyResult(ConversationMessage message, boolean created) { }
     public record FollowupResult(ConversationMessage message, boolean created) { }
@@ -50,6 +50,7 @@ public class TicketConversationService {
         var messages = List.copyOf(more ? fetched.subList(0, limit) : fetched);
         boolean canReply = staff && ticket.requesterUserId() != null && Objects.equals(scope.assigneeAgentId(),userId);
         return new Conversation(new TicketResult(ticket.id(), ticket.title(), ticket.status()), canReply,
+                Objects.equals(ticket.requesterUserId(),userId),
                 canReply ? scope.version() : null, messages,
                 more ? messages.getLast().id() : null, more);
     }

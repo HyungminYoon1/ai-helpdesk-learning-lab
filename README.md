@@ -1,12 +1,14 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 8–9 공개 마감과 Week 10의 V10 공식 답변/배정 검증에 이어, Week 12 첫 단위인 V11 고객 후속 저장을 구현했다. 실제 PostgreSQL/MockMvc와 전체 Java 1,095개·패키징 후 2개, JavaScript 333개와 Lint 통과. 고객 작성 화면/내 문의 목록과 명시적 확인은 다음 구현 단위다. 기존 Browser/Cloud 결과와 이번 로컬 검증 및 학습자 문답을 구분한다.
+> 상태: Week 12의 V11 고객 후속 저장, 본인 문의 목록과 고객 작성 화면을 구현했다. 실제 PostgreSQL/MockMvc와 합성 Browser에서 목록 선택/후속 저장/원문 및 AI 데이터 보존을 확인했고, 전체 Java 1,122개·패키징 후 2개, JavaScript 345개와 Lint가 통과했다. 이번 실행의 테스트 JVM 종료 제한 경고는 원인 미확정이다. 배정별 명시적 확인은 다음 구현 단위다. 기존 Cloud 결과와 이번 로컬 검증 및 학습자 문답을 구분한다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
-## Week 12 고객 후속 저장 (11/3 첫 구현)
+## Week 12 고객 후속 대화 (11/3 구현)
 
-현재 후속 구현은 [V11 고객 후속 저장 계약](./docs/customer-followups.md)을 따른다. `POST /api/tickets/{ticketId}/customer-messages`에서 본인 소유권, 원문 보존, `201/200/409`, 같은 UUID의 메시지 종류 구분과 32 KiB 입력 한도를 구현했다. 기존 세 상태와 문의/답변/배정/AI 데이터는 유지한다. 26개 HTTP 사례와 V10→V11 Migration, 전체 회귀를 로컬에서 확인했다. 고객 작성 화면/내 문의 목록과 명시적 확인은 다음 구현 단위이며 이번 변경의 실제 Browser 실험은 아직 없다. 아래 Week 10의 검증 개수와 Browser 결과는 당시 V10의 근거로 보존한다.
+현재 후속 구현은 [V11 고객 후속 대화 계약](./docs/customer-followups.md)을 따른다. `POST /api/tickets/{ticketId}/customer-messages`에서 본인 소유권, 원문 보존, `201/200/409`, 같은 UUID의 메시지 종류 구분과 32 KiB 입력 한도를 구현했다. 기존 세 상태와 문의/답변/배정/AI 데이터는 유지한다. 26개 HTTP 사례와 V10→V11 Migration을 검증했다.
+
+`/my-tickets.html`에서 [내 문의 목록](./docs/my-tickets.md)을 읽고 대화로 이동해 추가 문의를 작성한다. 목록은 본인 고정 ID와 공개 대화 활동 시각을 기준으로 하며, Cursor는 권한 근거가 아니다. 조회 27개와 실제 Browser의 고객/직원 Session, CSRF, 저장 뒤 DB 대조가 통과했다. 불명확한 POST는 같은 종류/UUID/본문으로 재확인하고 저장 뒤 GET만 실패하면 조회를 다시 한다. 명시적 확인은 다음 구현 단위다. 아래 Week 10의 검증 개수와 Browser 결과는 당시 V10의 근거로 보존한다.
 
 ## Week 10 배정과 인계 (10/24 후속)
 
@@ -16,7 +18,7 @@
 - 같은 서비스의 활성 직원만 Ticket·대화·AI 제안과 이력을 조회한다. 이전 Session도 DB 권한 검사를 생략하지 않는다. 고객은 자기 대화만 읽는다.
 - 배정과 이력은 같은 Transaction으로 Commit한다. 답변과 인계는 같은 Ticket을 짧게 잠근다. 지원권한 회수는 구성원 잠금으로 직렬화하고 배정 이력은 보존한다.
 - 답변 새 제출은 `expectedAssignmentVersion`이 필요하다. 구형 NULL 버전은 이미 저장된 동일 결과만 재확인할 수 있다. 화면에서 담당자가 다시 같아져도 오래된 초안 버전을 자동 갱신하지 않는다.
-- 구현과 Test는 로컬에서 마쳤으며, 후속 문서 검토·Commit·Push 및 원격 CI 확인은 별도 단계로 구분한다. 문서를 공개해도 ECR·AWS·Secret이나 AI 활성화 설정은 변경하지 않는다. 운영 인증과 고객 후속 메시지 및 실제 개인정보 입력은 후속 과업이다.
+- 구현과 Test는 로컬에서 마쳤으며, 후속 문서 검토·Commit·Push 및 원격 CI 확인은 별도 단계로 구분한다. 문서를 공개해도 ECR·AWS·Secret이나 AI 활성화 설정은 변경하지 않는다. 운영 인증과 실제 개인정보 입력은 후속 과업이다. 고객 후속 메시지는 위 Week 12에서 확장했다.
 
 ### 로컬 서비스 준비
 

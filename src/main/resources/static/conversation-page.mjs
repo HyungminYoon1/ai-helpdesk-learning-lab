@@ -3,6 +3,9 @@ import {createConversationClient} from "./conversation-ui.mjs";
 const readForm = document.querySelector("#conversation-read");
 const idInput = document.querySelector("#conversation-ticket-id");
 const replyForm = document.querySelector("#official-reply");
+const followupForm = document.querySelector("#customer-followup");
+const followupBody = document.querySelector("#followup-body");
+const followupSend = document.querySelector("#followup-send");
 const bodyInput = document.querySelector("#reply-body");
 const correctionInput = document.querySelector("#reply-correction");
 const sendButton = document.querySelector("#reply-send");
@@ -19,11 +22,13 @@ const labels = {
     "not-found": "조회할 수 있는 문의가 없습니다.", "conflict": "기존 제출과 충돌합니다. 대화 내역을 확인하세요.",
     "request-unavailable": "조회 또는 전송 준비에 실패했습니다. 연결을 확인하세요.",
     "unknown-outcome": "저장 여부를 확인하지 못했습니다. 내용을 바꾸지 말고 같은 제출로 다시 확인하세요.",
-    "unconfirmed-submission": "이전 제출의 저장 여부가 미확인입니다. 기존 본문과 정정 대상으로 먼저 확인하세요.",
+    "unconfirmed-submission": "이전 제출의 저장 여부가 미확인입니다. 기존 작성 종류와 본문, 정정 대상으로 먼저 확인하세요.",
     "invalid-response": "서버 응답을 확인할 수 없습니다.",
     "selection-changed": "Ticket이 변경되었습니다. 대화를 다시 조회하세요.",
     "reply-saved": "공식 답변을 저장하고 고객에게 공개했습니다.",
-    "reply-saved-refresh-failed": "답변 저장은 확인했지만 대화를 다시 읽지 못했습니다. 로그인과 조회 권한을 확인하세요."
+    "reply-saved-refresh-failed": "답변 저장은 확인했지만 대화를 다시 읽지 못했습니다. 로그인과 조회 권한을 확인하세요.",
+    "followup-saved": "추가 문의를 저장했습니다. Ticket의 해결 상태는 변경되지 않았습니다.",
+    "followup-saved-refresh-failed": "추가 문의 저장은 확인했지만 대화를 읽지 못했습니다. 다시 저장하지 말고 대화를 조회하세요."
 };
 
 function clearConversation() {
@@ -31,27 +36,33 @@ function clearConversation() {
     displayed.clear();
     heading.textContent = "대화 내역";
     replyForm.hidden = true;
+    followupForm.hidden = true;
     moreButton.hidden = true;
     cursor = null;
     correctionInput.replaceChildren(new Option("일반 추가 안내", ""));
 }
 
 const view = {
-    setPosting(value) { sendButton.disabled = value; },
+    setPosting(value) { sendButton.disabled = value; followupSend.disabled = value; },
     render(state) {
         status.textContent = labels[state.kind] ?? "대화를 조회했습니다.";
-        if (state.kind === "posting") sendButton.disabled = true;
+        if (state.kind === "posting") {
+            sendButton.disabled = true; followupSend.disabled = true;
+            if (state.submissionKind === "followup") status.textContent = "추가 문의를 저장하고 있습니다.";
+        }
         if (state.kind === "loading" && !state.append) clearConversation();
         if (["login-required", "forbidden", "not-found", "invalid-response", "invalid-id", "request-unavailable"].includes(state.kind)) clearConversation();
         if (state.kind === "reply-saved" || state.kind === "reply-saved-refresh-failed") {
             bodyInput.value = "";
             correctionInput.value = "";
         }
+        if (state.kind === "followup-saved" || state.kind === "followup-saved-refresh-failed") followupBody.value = "";
         if (state.kind !== "conversation") return;
         const data = state.conversation;
         if (!state.append) clearConversation();
         heading.textContent = `${data.ticket.id}: ${data.ticket.title} (${data.ticket.status})`;
         replyForm.hidden = !data.capabilities.canReply && !state.canReconfirm;
+        followupForm.hidden = !data.capabilities.canFollowUp && !state.canReconfirmFollowup;
         for (const message of data.messages) {
             if (displayed.has(message.id)) continue;
             displayed.add(message.id);
@@ -77,13 +88,13 @@ const client = createConversationClient({fetchImpl: window.fetch.bind(window), v
 let previousTicket = null;
 idInput.addEventListener("input", () => {
     if (Number(idInput.value) !== previousTicket) {
-        client.clear(); clearConversation(); bodyInput.value = "";
+        client.clear(); clearConversation(); bodyInput.value = ""; followupBody.value = "";
     }
 });
 readForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const id = Number(idInput.value);
-    if (id !== previousTicket) { bodyInput.value = ""; correctionInput.value = ""; previousTicket = id; }
+    if (id !== previousTicket) { bodyInput.value = ""; followupBody.value = ""; correctionInput.value = ""; previousTicket = id; }
     void client.read(id);
 });
 moreButton.addEventListener("click", () => { if (cursor !== null) void client.read(Number(idInput.value), cursor); });
@@ -91,12 +102,25 @@ replyForm.addEventListener("submit", (event) => {
     event.preventDefault();
     void client.reply(bodyInput.value, correctionInput.value === "" ? null : Number(correctionInput.value));
 });
+followupForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void client.followUp(followupBody.value);
+});
+
+if (window.location?.search) {
+    const ids = new window.URLSearchParams(window.location.search).getAll("ticketId");
+    if (ids.length === 1 && /^[1-9][0-9]*$/.test(ids[0]) && Number.isSafeInteger(Number(ids[0]))) {
+        previousTicket = Number(ids[0]); idInput.value = ids[0];
+        void client.read(previousTicket);
+    } else view.render({kind: "invalid-id"});
+}
 
 // A back/forward-cache restoration must not reveal the previous account's conversation.
 window.addEventListener("pagehide", () => {
     client.clear();
     clearConversation();
     bodyInput.value = "";
+    followupBody.value = "";
     idInput.value = "";
     previousTicket = null;
 });
