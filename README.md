@@ -12,6 +12,8 @@
 
 [V12 명시적 확인 저장/API](./docs/customer-message-confirmations.md)는 같은 Ticket/현재 배정의 MAX(through_message_id)를 읽는다. 늦은 작은 확인도 남기며 새 배정으로 과거 확인을 복사하지 않는다. 현재 담당자의 새 확인과 과거 제출의 재확인을 나누고 Commit 뒤 201/동일 제출 200을 반환한다. 새 HTTP/PostgreSQL 42개와 Migration 1개가 통과했다. 직원 목록 표시/확인 버튼과 새 Browser 실험은 다음 단위이며 이번 API에서 기존 화면 JS나 AI 처리는 변경하지 않았다.
 
+위 실행 수치는 로컬 검증의 근거다. 이후 승인한 저장소 Push와 정확한 Commit의 원격 CI 결과는 [11/3 문서·구현 전달 기록](https://github.com/HyungminYoon1/jungle-sw-ai-lab-advanced-wil/blob/main/week12/lab-reports/2026-11-03-documentation-publication.md)으로 구분한다. 일반 Push CI의 Image 빌드와 수동 ECR 업로드/Cloud 배포도 별도다.
+
 ## Week 10 배정과 인계 (10/24 후속)
 
 [배정 기술 계약](./docs/ticket-assignment.md)에 O1~O6과 결정 이유를 기록했다. V10은 서비스와 직원 권한, 현재 담당자와 배정 버전 및 변경 이력을 추가한다. V1~V9는 수정하지 않았으며 기존 서비스 미확인 문의를 임의로 매핑하지 않는다. 직원의 직접 담당하기, 현재 담당자 또는 같은 서비스 지원관리자의 인계, 현재 담당자만 새 공식 답변 작성하는 흐름이다. 인계는 Commit 즉시 적용한다.
