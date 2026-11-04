@@ -8,6 +8,8 @@
 
 ## Week 12 고객 후속 대화 (11/3 구현)
 
+11/4의 [V13 상태 처리 계약](./docs/ticket-status.md)은 현재 담당자의 처리 시작/해결/재개와 등록자 본인의 명시적 재개를 구분한다. 별도 상태 버전과 이력을 같은 Transaction으로 저장하며, 새 글/인계/권한 회수의 Commit 순서를 실제 PostgreSQL에서 검증했다. 저장/Domain 15개와 HTTP 45개 집중 검증은 통과했고 화면 연결과 이번 변경의 전체 회귀는 다음 단계다. 기존 메시지/AI 처리와 배정 버전은 상태 변경만으로 바꾸지 않는다.
+
 현재 후속 구현은 [V11 고객 후속 대화 계약](./docs/customer-followups.md)을 따른다. `POST /api/tickets/{ticketId}/customer-messages`에서 본인 소유권, 원문 보존, `201/200/409`, 같은 UUID의 메시지 종류 구분과 32 KiB 입력 한도를 구현했다. 기존 세 상태와 문의/답변/배정/AI 데이터는 유지한다. 26개 HTTP 사례와 V10→V11 Migration을 검증했다.
 
 `/my-tickets.html`에서 [내 문의 목록](./docs/my-tickets.md)을 읽고 대화로 이동해 추가 문의를 작성한다. 목록은 본인 고정 ID와 공개 대화 활동 시각을 기준으로 하며, Cursor는 권한 근거가 아니다. 조회 27개와 실제 Browser의 고객/직원 Session, CSRF, 저장 뒤 DB 대조가 통과했다. 불명확한 POST는 같은 종류/UUID/본문으로 재확인하고 저장 뒤 GET만 실패하면 조회를 다시 한다. 아래 Week 10의 검증 개수와 Browser 결과는 당시 V10의 근거로 보존한다.
