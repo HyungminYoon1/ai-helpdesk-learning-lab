@@ -43,74 +43,83 @@ function failure(status) {
 export function createConversationClient({fetchImpl, view, newRequestId}) {
     let selected = null, selection = 0, latestRead = 0, readController = null;
     let canReply = false, canFollowUp = false, posting = false, pending = null, pendingKind = null, uncertain = false;
-    let draftVersion = null;
+    let draftVersion = null, currentReplyVersion = null, replyVersionRejected = false;
+    const needsReplyReview = () => replyVersionRejected
+        || draftVersion !== null && currentReplyVersion !== null && draftVersion !== currentReplyVersion;
+    const render = (state) => view.render({...state, replyDraftVersion: draftVersion, replyCurrentVersion: currentReplyVersion,
+        replyReviewRequired: needsReplyReview(), canReconfirm: pendingKind === "reply" && !replyVersionRejected,
+        canReviewReply: needsReplyReview() && (pending === null || replyVersionRejected)});
 
     async function read(ticketId, afterId = 0) {
         readController?.abort();
         const request = ++latestRead;
-        if (selected !== ticketId) { selected = ticketId; selection++; pending = null; pendingKind = null; uncertain = false; canReply = false; canFollowUp = false; draftVersion = null; }
+        if (selected !== ticketId) { selected = ticketId; selection++; pending = null; pendingKind = null; uncertain = false; canReply = false; canFollowUp = false; draftVersion = null; currentReplyVersion = null; replyVersionRejected = false; }
         const current = () => request === latestRead && selected === ticketId;
         if (!isId(ticketId) || !Number.isSafeInteger(afterId) || afterId < 0) {
             canReply = false; canFollowUp = false;
-            view.render({kind: "invalid-id"});
+            render({kind: "invalid-id"});
             return false;
         }
         readController = new AbortController();
-        view.render({kind: "loading", append: afterId > 0});
+        render({kind: "loading", append: afterId > 0});
         try {
             const response = await fetchImpl(`/api/tickets/${ticketId}/messages?afterId=${afterId}&limit=50`, {
                 method: "GET", credentials: "same-origin", cache: "no-store", signal: readController.signal
             });
             if (!current()) return false;
-            if (!response.ok) { canReply = false; canFollowUp = false; view.render(failure(response.status)); return false; }
+            if (!response.ok) { canReply = false; canFollowUp = false; render(failure(response.status)); return false; }
             const body = await response.json();
             if (!current()) return false;
             if (!isConversation(body, ticketId, afterId)) {
-                canReply = false; canFollowUp = false; view.render({kind: "invalid-response"}); return false;
+                canReply = false; canFollowUp = false; render({kind: "invalid-response"}); return false;
             }
             canReply = body.capabilities.canReply;
             canFollowUp = body.capabilities.canFollowUp;
+            currentReplyVersion = body.capabilities.expectedAssignmentVersion;
             if (canReply && draftVersion === null) draftVersion = body.capabilities.expectedAssignmentVersion;
-            view.render({kind: "conversation", conversation: body, append: afterId > 0,
-                canReconfirm: pendingKind === "reply", canReconfirmFollowup: pendingKind === "followup"});
+            render({kind: "conversation", conversation: body, append: afterId > 0,
+                canReconfirmFollowup: pendingKind === "followup"});
             return true;
         } catch (error) {
-            if (current() && error?.name !== "AbortError") { canReply = false; canFollowUp = false; view.render({kind: "request-unavailable"}); }
+            if (current() && error?.name !== "AbortError") { canReply = false; canFollowUp = false; render({kind: "request-unavailable"}); }
             return false;
         }
     }
 
     async function submit(kind, body, correction = null) {
         if (posting) return;
-        if (pending && pendingKind !== kind) { view.render({kind: "unconfirmed-submission"}); return; }
-        if (!isId(selected) || !(kind === "reply" ? canReply : canFollowUp) && pending === null) { view.render({kind: "forbidden"}); return; }
+        if (pending && pendingKind !== kind) { render({kind: "unconfirmed-submission"}); return; }
+        if (kind === "reply" && (replyVersionRejected || pending === null && needsReplyReview())) {
+            render({kind: "reply-review-required"}); return;
+        }
+        if (!isId(selected) || !(kind === "reply" ? canReply : canFollowUp) && pending === null) { render({kind: "forbidden"}); return; }
         if (typeof body !== "string" || measuredMessage(body).length === 0
                 || [...measuredMessage(body)].length > 2000 || correction !== null && !isId(correction)) {
-            view.render({kind: "bad-request"}); return;
+            render({kind: "bad-request"}); return;
         }
         if (pending && (pending.body !== body || kind === "reply" && pending.correctsMessageId !== correction)) {
-            view.render({kind: "unconfirmed-submission"}); return;
+            render({kind: "unconfirmed-submission"}); return;
         }
         posting = true;
         const ticketId = selected, captured = selection;
         const current = () => selected === ticketId && captured === selection;
-        view.render({kind: "posting", submissionKind: kind});
+        render({kind: "posting", submissionKind: kind});
         try {
             let csrfResponse, csrf;
             try {
                 csrfResponse = await fetchImpl("/api/csrf", {credentials: "same-origin", cache: "no-store"});
                 if (!current()) return;
-                if (!csrfResponse.ok) { view.render(failure(csrfResponse.status)); return; }
+                if (!csrfResponse.ok) { render(failure(csrfResponse.status)); return; }
                 csrf = await csrfResponse.json();
-            } catch { if (current()) view.render({kind: "request-unavailable"}); return; }
+            } catch { if (current()) render({kind: "request-unavailable"}); return; }
             if (!current()) return;
             if (typeof csrf?.headerName !== "string" || !/^[A-Za-z0-9-]+$/.test(csrf.headerName)
                     || typeof csrf.token !== "string" || csrf.token.length === 0) {
-                view.render({kind: "invalid-response"}); return;
+                render({kind: "invalid-response"}); return;
             }
             if (!pending) {
                 const id = newRequestId();
-                if (typeof id !== "string" || !uuid.test(id)) { view.render({kind: "invalid-response"}); return; }
+                if (typeof id !== "string" || !uuid.test(id)) { render({kind: "invalid-response"}); return; }
                 pending = kind === "reply"
                     ? {body, clientRequestId: id, correctsMessageId: correction, expectedAssignmentVersion: draftVersion}
                     : {body, clientRequestId: id};
@@ -122,42 +131,62 @@ export function createConversationClient({fetchImpl, view, newRequestId}) {
                     method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json", [csrf.headerName]: csrf.token},
                     body: JSON.stringify(pending)
                 });
-            } catch { if (current()) { uncertain = true; view.render({kind: "unknown-outcome"}); } return; }
+            } catch { if (current()) { uncertain = true; render({kind: "unknown-outcome"}); } return; }
             if (!current()) return;
             if (!response.ok) {
+                if (kind === "reply" && response.status === 409) {
+                    let problem;
+                    try { problem = await response.json(); } catch { /* Keep ambiguous submissions unchanged. */ }
+                    if (!current()) return;
+                    if (problem !== null && typeof problem === "object" && !Array.isArray(problem)
+                            && Object.hasOwn(problem, "code") && problem.code === "ASSIGNMENT_VERSION_CONFLICT") {
+                        replyVersionRejected = true; currentReplyVersion = null; canReply = false;
+                        latestRead++; readController?.abort();
+                        render({kind: "reply-version-conflict"}); return;
+                    }
+                }
                 // A 5xx may have happened after Commit. Keep the original submission for explicit verification.
                 if (response.status >= 500 || response.status === 409) uncertain = true;
                 if (!uncertain && response.status >= 400 && response.status < 500) { pending = null; pendingKind = null; }
-                view.render(response.status >= 500 ? {kind: "unknown-outcome"} : failure(response.status));
+                render(response.status >= 500 ? {kind: "unknown-outcome"} : failure(response.status));
                 return;
             }
             let message;
             try { message = await response.json(); }
-            catch { if (current()) { uncertain = true; view.render({kind: "unknown-outcome"}); } return; }
+            catch { if (current()) { uncertain = true; render({kind: "unknown-outcome"}); } return; }
             if (!current()) return;
             if (![200, 201].includes(response.status) || !isConversationMessage(message)
                     || message.type !== (kind === "reply" ? "OFFICIAL_REPLY" : "CUSTOMER_FOLLOWUP") || message.body !== pending.body
                     || message.correctsMessageId !== (kind === "reply" ? pending.correctsMessageId : null)) {
-                uncertain = true; view.render({kind: "unknown-outcome"}); return;
+                uncertain = true; render({kind: "unknown-outcome"}); return;
             }
             pending = null;
             pendingKind = null;
             uncertain = false;
             if (kind === "reply") draftVersion = null;
             const refreshed = await read(ticketId);
-            if (current()) view.render({kind: `${kind}-saved${refreshed ? "" : "-refresh-failed"}`});
+            if (current()) render({kind: `${kind}-saved${refreshed ? "" : "-refresh-failed"}`});
         } finally {
             posting = false;
             view.setPosting(false);
         }
     }
 
+    async function reviewReply() {
+        if (posting || !isId(selected) || !needsReplyReview() || pending !== null && !replyVersionRejected) return false;
+        const ticketId = selected;
+        pending = null; pendingKind = null; uncertain = false;
+        draftVersion = null; currentReplyVersion = null; replyVersionRejected = false; canReply = false; canFollowUp = false;
+        render({kind: "reply-draft-reset"});
+        return read(ticketId);
+    }
+
     function clear() {
         readController?.abort();
-        latestRead++; selection++; selected = null; pending = null; pendingKind = null; uncertain = false; canReply = false; canFollowUp = false; draftVersion = null;
-        view.render({kind: "selection-changed"});
+        latestRead++; selection++; selected = null; pending = null; pendingKind = null; uncertain = false; canReply = false; canFollowUp = false; draftVersion = null; currentReplyVersion = null; replyVersionRejected = false;
+        render({kind: "selection-changed"});
     }
 
     return {read, reply: (body, correction = null) => submit("reply", body, correction),
-        followUp: (body) => submit("followup", body), clear};
+        followUp: (body) => submit("followup", body), reviewReply, clear};
 }
