@@ -6,7 +6,7 @@ Status: implemented and locally verified on 2026-10-23 under the agreed P1-P8 po
 
 The later [V11 customer follow-up storage contract](customer-followups.md) adds requester-only customer messages and kind-aware replay on both message-write routes. It preserves the assignment-only permission for new official replies. Customer composer/list and explicit confirmation are separate slices; the historical verification below retains its original version and counts.
 
-The accepted O1-O6 [service-scoped assignment contract](ticket-assignment.md) supersedes the all-AGENT read/new-reply policy below. New replies require current ownership and expectedAssignmentVersion. V9 and the following verification record describe the prior implementation, not verification of V10. The new request authorizes local implementation, tests and grouped commits, not push, deployment or live AI.
+The accepted O1-O6 [service-scoped assignment contract](ticket-assignment.md) supersedes the all-AGENT read/new-reply policy below. New replies require current ownership and expectedAssignmentVersion. The [explicit reply-draft review](ticket-assignment.md#explicit-reply-draft-review-2026-11-04) also separates a stale/rejected draft from an unknown submission after handoff. V9 and the following verification record describe the prior implementation, not verification of V10 or that later UI. The new request authorizes local implementation, tests and grouped commits, not push, deployment or live AI.
 
 ## Scope and decisions
 

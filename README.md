@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 12의 V11 고객 대화/목록/작성 화면과 V12 배정별 명시적 확인 저장/API를 구현했다. 최신 전체 Java 1,165개·패키징 후 2개가 통과했다. 화면의 기존 JavaScript 345개/Lint/합성 Browser 근거와 이번 API의 PostgreSQL/MockMvc 근거는 구분한다. 테스트 JVM 종료 지연은 미해결이며 직원 확인 표시/버튼과 Browser 연결은 다음 단위다. 기존 Cloud 결과와 이번 로컬 검증 및 학습자 문답도 구분한다.
+> 상태: Week 12의 고객 후속 대화와 배정별 명시적 확인을 V11/V12와 화면에 연결했다. 기반 전체 Java 1,173개/패키징 후 2개가 통과했고, 이후 답변 초안 복구는 Node 399개/Lint와 집중 Browser/PostgreSQL 4개가 통과했다. 이번 화면 변경에서 전체 Java를 다시 실행한 것은 아니며 테스트 JVM 종료 지연은 미해결이다. 기존 Cloud 결과, 새 로컬 검증과 학습자 문답은 구분한다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
@@ -19,6 +19,8 @@
 [인계/서비스 권한 회수 실험](./docs/customer-message-confirmations.md#retained-session-handoff-and-membership-revocation)도 기존 Session과 실제 HTTP/PostgreSQL에서 통과했다. 활성 직원 A의 과거 제출 재확인은 인계 뒤 200, 비담당자의 새 확인은 403, 서비스 권한 회수 Commit 뒤 과거 제출 재확인은 404였다. A의 기록 1건은 배정 1에 남고 B/배정 2의 지점은 NULL을 유지했다. 권한 회수는 검증한 Testcontainer의 Fixture에서만 수행했으며 공개 관리 API나 운영 권한 변경은 추가하지 않았다.
 
 [확인 버전 충돌 뒤 재선택](./docs/customer-message-confirmations.md#explicit-selection-after-a-rejected-assignment-version)은 409/ASSIGNMENT_VERSION_CONFLICT일 때만 명시적 버튼을 제공한다. 원래 선택을 자동 최신화하지 않고, 버튼의 GET 뒤 사용자가 새로 선택한 범위를 제출할 때 새 UUID를 발급한다. 결과 미확인/다른 충돌은 원래 제출을 유지한다. 후속 Node 380개/Lint와 실제 Browser/PostgreSQL 실험 3개가 통과했으며, A→B→A의 구형 선택 409/새 선택 201과 DB 확인 1건을 대조했다. Java Backend/Schema는 유지하고 이전 전체 Java 1,173+2를 재실행한 것으로 기록하지 않는다.
+
+[공식 답변 초안 검토](./docs/ticket-assignment.md#explicit-reply-draft-review-2026-11-04)는 미제출 초안의 확인된 배정 차이나 정확한 버전 거부에만 명시적 초기화/GET/빈 Form을 제공한다. 결과 미확인 답변은 원래 UUID/본문/정정 대상/버전을 보존하고 일반 대화 조회로 바꾸지 않는다. Node 399개/Lint와 집중 Browser/PostgreSQL 4개가 통과했다. 실제 409/201/201/200과 새 답변 2건, 배정 5에서도 유지된 저장 버전 3을 대조했으며 Provider는 0회다. 초기 정정 후보 목록 유실을 고친 과정과 검증 범위는 [실행 기록](./docs/ticket-assignment.md#verification-of-reply-draft-review-2026-11-04)에 남겼다.
 
 위 실행 수치는 로컬 검증의 근거다. 이후 승인한 저장소 Push와 정확한 Commit의 원격 CI 결과는 [11/3 문서·구현 전달 기록](https://github.com/HyungminYoon1/jungle-sw-ai-lab-advanced-wil/blob/main/week12/lab-reports/2026-11-03-documentation-publication.md)으로 구분한다. 일반 Push CI의 Image 빌드와 수동 ECR 업로드/Cloud 배포도 별도다.
 

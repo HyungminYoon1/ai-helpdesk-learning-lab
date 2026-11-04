@@ -50,6 +50,16 @@ Conversation capabilities return canReply and expectedAssignmentVersion (null fo
 
 UI keeps exact pending UUID/body/target/version when outcome is unknown, ignores stale reads after selection change, uses textContent, clears sensitive views on pagehide, and never stores drafts/credentials in persistent browser storage. Viewing an old event never overwrites the current assignment. Client-side capability checks never replace server checks.
 
+## Explicit reply-draft review, 2026-11-04
+
+The conversation client pins the first reply-capable assignment version until a saved reply or explicit fresh start. A later GET may expose a newer current version, including A-to-B-to-A, but must not rebind the old draft. An unsent draft with a known newer version now blocks new POSTs before CSRF/UUID allocation and offers an explicit discard-and-read action. It clears the body/correction choice, performs GET only, and requires the user to write again. A failed or unauthorized GET cannot enable a new reply.
+
+A submitted draft can use that action only after the reply endpoint returns both HTTP 409 and ASSIGNMENT_VERSION_CONFLICT. The reply service checks current read access and the actor/Ticket/UUID's saved result before checking a new write's assignment version. This endpoint-specific order supports the narrow recovery condition; it does not make every 409 evidence of non-storage. Ordinary refresh retains the rejected body/target and old version until the user deliberately discards that draft.
+
+Unknown reply outcomes retain the exact UUID/body/correction/version even when current GET shows a newer assignment. They expose only same-submission reconciliation, never this discard action. Other 409s, missing/unreadable codes or a pending customer follow-up also block draft reset. During reconciliation the original body/correction are read-only; a conversation refresh preserves a previously selected correction even if its target is outside the reloaded first page. A successful replay clears the draft. Ticket navigation/pagehide keeps the documented memory-only lifetime and does not cancel committed messages.
+
+The review button belongs to official replies, independently of the customer-message confirmation widget. Both still rely on server authorization/Commit checks. No service, schema, permission, account lifecycle, retention, AI or cloud policy changes accompany this UI slice.
+
 ## Implementation decisions
 
 | Context / alternatives | Decision and reason | Files / follow-up |
@@ -60,6 +70,7 @@ UI keeps exact pending UUID/body/target/version when outcome is unknown, ignores
 | Reject all old clients vs silently fill reply version | Legacy saved-result-only replay; new writes must supply expected version. Never invent historical assignment | Reply parser/service/repository and UI. Client/server must be released together |
 | Only guard new endpoints vs close old read bypasses | Recheck service scope on ticket/conversation/AI reads; keep customer own-message rights separate | Scoped query service/security tests. No credential database or Session replacement |
 | Documentation conflated rejected Commit with an unobserved outcome | Distinguish confirmed rollback from lost acknowledgement; preserve exact submission rather than assume failure or retry under a new UUID | Assignment/reply UI already retains unknown submissions. Documentation clarified; direct DB Commit-ACK fault injection remains unperformed |
+| Old reply drafts stay pinned after refresh; page re-entry loses submission context | Choose explicit discard/GET/blank writing only for an unsent stale draft or a typed version rejection. Reject automatic version replacement and broad error-based reset | conversation client/page/HTML, Node tests and ReplyDraftReviewBrowserExperiment. Preserve uncertain replies and correction selections; no persistent draft recovery or server changes |
 
 ## Design closure and deferred work
 
@@ -84,3 +95,19 @@ The actual local Browser experiment used isolated USER A/B, AGENT A/B and a serv
 Regression initially exposed old test fixtures without durable staff identity/service settings and expectations for the formerly shared TicketController. Fixtures now explicitly provision synthetic membership and test the postgres-specific scoped query controller; no production authorization bypass was added. The old internal read-only AI query still exists, but its HTTP wrapper now holds a short membership shared lock and verifies that business rows remain unchanged. SQLSTATE 55P03 is mapped safely without exposing raw SQL.
 
 The runtime test probe now expects V10 and its explicit synthetic receipt service; historic measurements are not rerun or relabeled. Existing tests that deliberately use pre-V10 data remain distinct from new V10 migration/storage checks. At this local verification stage, no push, remote CI, image publish, Cloud resource or real-secret changes were performed. Subsequent publication and exact-commit remote CI results are separate evidence.
+
+## Verification of reply draft review, 2026-11-04
+
+Node passed 399 cases (19 new and one revised stale-draft expectation relative to 380); ESLint and the new PowerShell script parser passed. The focused reply-client/panel file contains 41 cases, included in that total. They cover explicit review without POST/UUID allocation, typed versus ambiguous rejections, unknown reply/follow-up preservation, failed review GETs, in-flight/late responses, correction selection across a refreshed page and retained correction choices after saving.
+
+ReplyDraftReviewBrowserExperiment uses a fresh PostgreSQL Testcontainer, one synthetic AGENT Session/CSRF and existing transactional services for fixture handoffs. It pins a draft in assignment 1, commits A-to-B-to-A to assignment 3 and observes the actual reply endpoint's 409. Refresh preserves its old body/correction; explicit review performs GET and leaves a blank composer. A new reply then commits with a different UUID/version 3. A later correction also commits in version 3, but its 201 is deliberately blocked from reaching the page. After another fixture round trip commits assignment 5, the Browser keeps the unknown correction's original body/target/UUID/version and explicitly receives 200 for that same saved Message.
+
+The four upstream POST statuses are 409/201/201/200. PostgreSQL contains exactly two added official replies, both stored under assignment 3; the correction still references the original official reply. The inquiry and first reply, original Ticket title/status/requester/service, first assignment event and existing Job/Attempt/Suggestion/category/membership data are preserved. The four intended handoffs advance current assignment to 5/A, no confirmation rows appear, and Provider interactions stay zero. All four UI screenshots were inspected. This uses fixture service calls, not B's Browser login or an administrative production endpoint.
+
+The initial combined run passed the three existing confirmation Browser cases but failed the new reply case; a narrow diagnostic rerun also failed. A post-save draft cleanup incorrectly removed the loaded correction options. A failing Node regression reproduced it; cleanup now clears only the current choice after save and retains the candidate list. The final combined run passed all four explicit Browser/PostgreSQL cases with zero failures/errors/skips and BUILD SUCCESS. Earlier failures are not relabeled as successful runs.
+
+```powershell
+.\mvnw.cmd -B -ntp '-Dtest=ReplyDraftReviewBrowserExperiment,CustomerConfirmationReselectionBrowserExperiment,CustomerConfirmationRecoveryBrowserExperiment,CustomerConfirmationAuthorityBrowserExperiment' test
+```
+
+Ignored logs are target/week12-reply-review-all-node.log, target/week12-reply-review-eslint.log and target/week12-reply-review-browsers-final.log. The new experiment is opt-in, outside default *Test execution. The previous full Java 1,173+2 and long Conversation Browser were not rerun, and the pre-existing full-suite JVM shutdown issue remains open. There is no new Push/CI, image, cloud, real-key or external AI evidence in this local slice.
