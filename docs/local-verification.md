@@ -150,6 +150,35 @@ $helpdeskJavaExit = $LASTEXITCODE
 
 이 명령의 test는 선택한 두 Java/PostgreSQL 사례를 실행한다. 전체 verify의 모든 Java/Failsafe, Node/Lint/Browser나 실제 상용 AI를 실행한 결과로 해석하지 않는다. 기존 28건 집중 클래스 결과나 전체 1,221+2 결과에 두 건을 추가 합산하지 않는다.
 
-2026-11-04 참고 실행: 위 메서드 선택 인자를 사용한 Maven 명령은 clean commit fd879eb6758750afad6879e4c3a88094baa95b40에서 두 건/실패·오류·Skip 0, BUILD SUCCESS/exit 0을 확인했다. 새 Surefire Dump와 남은 소유 fork JVM은 0이었다. 이는 Codex의 선택 명령 검증이며 학습자의 독립 실행은 아직 확인하지 않았다. 원래 28건 XML은 덮어쓰기 전에 별도 복사했다.
+2026-11-04 참고 실행: 위 메서드 선택 인자를 사용한 Maven 명령은 clean commit fd879eb6758750afad6879e4c3a88094baa95b40에서 두 건/실패·오류·Skip 0, BUILD SUCCESS/exit 0을 확인했다. 새 Surefire Dump와 남은 소유 fork JVM은 0이었다. 이는 당시 Codex의 선택 명령 검증이다. 이후 사용자가 f226b53의 Clean 작업 트리에서 직접 같은 명령을 실행해 두 건/실패·오류·Skip 0, BUILD SUCCESS/exit 0을 확인했다. 원래 28건 XML은 덮어쓰기 전에 별도 복사했다.
 
 참고 실행의 명령/Commit/시각/종료 코드와 로그는 ignored target/week12-focused-reproduction-20261104/result.json 및 maven.log, 이번 XML은 focused-report.xml, 이전 XML은 previous-class-report.xml에 있다. 위 Tee-Object 안내의 파이프와 로그 경로는 PowerShell 구문으로 확인했고, 실제 참고 실행은 같은 Maven 선택 인자를 사용해 별도 로그로 출력한 것이다.
+
+## 7 Mockito 경고와 테스트 JVM 시작 설정
+
+사용자의 직접 실행은 성공했지만 Mockito is currently self-attaching 경고가 있었다. Mockito가 inline Mock/Spy를 준비하기 위해 실행 중인 JVM에 Instrumentation Agent를 동적으로 연결했다는 뜻이다. Agent는 테스트에서 클래스 동작을 조정하도록 돕는 JVM 보조 코드다. 이 테스트의 Spy는 실제 JDBC Repository의 INSERT 호출을 관찰하며 DB는 격리 PostgreSQL이다. Provider Mock은 외부 AI 상호작용을 검사하는 용도다.
+
+경고 출력의 색과 테스트 실패는 구분한다. 첨부 결과는 두 건 통과와 종료 코드 0이었다. 다만 이 연결 방식의 향후 JDK 제약에 대비할 필요가 있어 [프로젝트의 Mockito 5.23 공식 안내](https://github.com/mockito/mockito/blob/v5.23.0/mockito-core/src/main/java/org/mockito/Mockito.java#L188-L280)를 기준으로 테스트 시작 설정을 보완했다.
+
+| 검토 대상 | 적용한 설정과 이유 |
+|---|---|
+| 실행 중 연결 허용 옵션 또는 시작 시 Agent 등록 | Surefire와 Failsafe의 -javaagent로 시작 시 등록. 동적 연결을 계속 허용해 경고를 숨기는 옵션은 추가하지 않음 |
+| 개인 PC의 JAR 경로 또는 해석된 의존성 경로 | dependency:properties를 initialize에 연결해 org.mockito:mockito-core:jar 경로 사용. 기존 Boot 관리 버전과 test scope 유지 |
+| 추가 JVM 옵션과 Agent의 결합 | 기본 빈 argLine을 정의하고 ${argLine} 뒤에 따옴표로 감싼 Agent 경로를 추가. 명령행 옵션 전달도 별도 확인 |
+| 적용 범위 | pom.xml의 Maven 테스트 준비/Surefire·Failsafe fork JVM. Application의 실행 옵션, 전역 환경변수나 배포 설정을 바꾸지 않음 |
+
+현재는 커버리지 Agent가 없다. 향후 JaCoCo 등에서 argLine을 실행 중 설정한다면 Mockito 문서의 후평가 방식과 옵션 결합을 함께 재검증한다. 이번 변경만으로 그 조합까지 검증했다고 설명하지 않는다. 기본 진입점은 기존과 같은 Maven test/verify 생명주기다.
+
+사용자의 직접 재현 성공은 설정 변경 전의 결과다. 아래 Agent 설정 검증과 합산하지 않으며 전체 회귀/Browser/실제 AI/CI 결과와도 구분한다.
+
+설정 보완 뒤 기본 명령과 -DargLine=-XX:-EnableDynamicAgentLoading 조건에서 각각 같은 두 사례가 통과했다. 각 실행은 실패/오류/Skip 0, BUILD SUCCESS/exit 0이며 self-attaching/동적 Agent 경고는 0건이다. 새 Dump는 없고 로그에서 확인한 테스트 JVM PID도 종료됐다. 동일 사례의 두 조건 재실행이므로 새 네 사례를 추가한 것으로 세지 않는다.
+
+검증 중 처음 시도한 후평가 표현식에서는 명령행 옵션 전달을 확인하지 못해 현재 ${argLine} 구성을 선택했다. JVM 플래그를 출력하는 진단은 시작 시 native 출력이 Surefire 통신에 섞여 Dump에 기록됐다. 따라서 해당 관찰 스크립트의 실패를 업무 테스트 실패로 해석하지 않고, Dump의 실제 플래그를 확인한 뒤 출력 진단 옵션을 뺀 기본/차단 조건을 재실행했다. PrintCommandLineFlags는 POM이나 일반 실행 명령에 추가하지 않았다.
+
+별도의 Sharing is only supported for boot loader classes 경고는 두 검증에서 각각 남았다. 이 문서에서 해결한 self-attaching/동적 연결 경고와 구분하며 모든 JVM 경고가 사라졌다고 기록하지 않는다.
+
+변경 전 사용자 Log와 XML, 진단 기록 및 최종 기본/차단 실행의 Log/XML/result.json은 ignored target/week12-mockito-startup-agent-20261104 아래에 보존했다. 최종 두 실행은 validated-default와 validated-strict에 있으며, 시작 시각/종료 코드/POM SHA-256/경고 수/종료 관찰을 기록했다. 원래 사용자 Log를 덮어쓰지 않았다.
+
+이후 전체 확인은 Surefire 1,223건/Failsafe 2건, 실패/오류/Skip 0, BUILD SUCCESS/exit 0이었다. 이때 남은 self-attaching/동적 경고 각 한 건은 별도 Failsafe JVM에서 발생한 것을 로그로 확인했다. Failsafe에도 같은 시작 설정을 적용한 뒤 initialize와 Failsafe 두 목표만 실행해 해당 두 건을 동적 로딩 차단 조건에서 재검증했다. 두 건/실패·오류·Skip 0, BUILD SUCCESS/exit 0과 해당 경고 0건이었다. 마지막 Failsafe 설정 뒤 전체 verify를 다시 실행한 것으로 기록하지 않는다.
+
+전체 확인의 근거는 full-verify 아래, 마지막 Failsafe의 근거는 validated-failsafe-jdk25 아래에 분리했다. 후자의 첫 시도는 Codex 셸의 기존 JAVA_HOME 경로가 유효하지 않아 Maven 실행 전에 중단됐다. 이 실패와 오래된 XML 복사본을 별도로 표시하고, 해당 실행에서만 설치된 JDK 25.0.5를 지정해 재개했다. 원래 환경값은 복원했으며 시스템 환경변수 값은 변경하거나 기록하지 않았다. 전체 확인은 Java 25.0.4, 마지막 Failsafe 확인은 25.0.5이므로 조건도 구분한다.
