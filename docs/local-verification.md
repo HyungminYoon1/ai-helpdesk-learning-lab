@@ -88,13 +88,18 @@ if ($LASTEXITCODE -ne 0) { throw 'GIT_STATUS_UNAVAILABLE' }
 $helpdeskClean = ($helpdeskChanges.Count -eq 0)
 $helpdeskRun = Join-Path 'target' ('verification-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $helpdeskRun | Out-Null
+$helpdeskStartedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
 npx.cmd --yes --package 'eslint@10.11.0' eslint 'src/main/resources/static/*.mjs' 'src/test/js/*.mjs' > (Join-Path $helpdeskRun 'eslint.log') 2>&1
 $helpdeskExit = $LASTEXITCODE
 $helpdeskResult = [ordered]@{
     check = 'eslint@10.11.0'
+    command = 'npx.cmd --yes --package eslint@10.11.0 eslint src/main/resources/static/*.mjs src/test/js/*.mjs'
     gitCommit = $helpdeskCommit
     workingTreeCleanAtStart = $helpdeskClean
+    startedAtUtc = $helpdeskStartedAtUtc
+    finishedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     exitCode = $helpdeskExit
+    logBytes = (Get-Item -LiteralPath (Join-Path $helpdeskRun 'eslint.log')).Length
 }
 $helpdeskJson = $helpdeskResult | ConvertTo-Json
 [IO.File]::WriteAllText((Join-Path $helpdeskRun 'result.json'), $helpdeskJson + "`n", [Text.UTF8Encoding]::new($false))
@@ -104,3 +109,21 @@ if ($helpdeskExit -ne 0) { throw "ESLINT_FAILED exit=$helpdeskExit" }
 각 명령의 실행 결과는 따로 기록한다. 기록에 Credential, 환경변수 목록, Cookie, CSRF Token이나 API Key 값을 추가하지 않는다.
 
 target은 Git에서 추적하지 않는 로컬 생성물이며 Maven clean을 실행하면 지워진다. 보존할 실행 증거는 따로 보관한다. 공유할 때는 필요한 조건/결과/한계를 정리하고 Log나 화면에 비밀값이 없는지 확인한다.
+
+## 5 로컬 HTTP와 빈 출력 로그를 읽는 예시
+
+이번 패키징 검사의 요청 주소는 `http://127.0.0.1:<임의 Port>/v1/chat/completions` 형태다. `http://`는 HTTP이며, `127.0.0.1`은 이 실험을 실행한 컴퓨터의 로컬 가짜 서버다. Provider 카운터 1과 HTTP 카운터 1은 Adapter 호출과 가짜 서버의 요청 수신을 보여준다. 외부 HTTPS나 상용 모델의 추론 성공으로 바꾸어 기록하지 않는다. 테스트 전체에는 별도로 마스킹된 요청 내용과 DB 저장 결과의 검사도 있으며, 요청 수 두 값만으로 그 추가 검사까지 입증하지는 않는다.
+
+프로그램 출력 로그는 도구가 화면/출력 스트림에 쓴 내용이다. ESLint가 보고할 문제가 없으면 비어 있을 수 있다. 실행 결과 기록은 어떤 검사를 어떤 코드에 수행했고 어떻게 종료됐는지 남긴 별도 정보다.
+
+| 기록할 항목 | 이번 ESLint 기록의 예 | 필요한 이유 |
+|---|---|---|
+| 명령/도구 버전/대상 | ESLint 10.11.0, src/main/resources/static/*.mjs와 src/test/js/*.mjs | 무엇을 검사했는지 구분 |
+| 코드 기준/변경 유무 | 당시 Commit 1eca282, 시작 시 작업 트리 Clean | 어느 소스를 검사했는지 구분 |
+| 시작/종료 시각 | result.json의 UTC 시각 두 값 | 어느 실행의 결과인지 연결 |
+| 종료 코드 | exitCode=0 | 도구의 정상 종료/판정 확인 |
+| 출력 로그 크기 | logBytes=0 | 이번에는 출력이 없었다는 관찰 |
+
+ESLint의 종료 코드 0은 Lint 오류 없이 검사를 마친 결과다. 경고 상한 옵션을 썼다면 그 조건도 적용된다. [ESLint 공식 종료 코드 설명](https://eslint.org/docs/latest/use/command-line-interface#exit-codes)
+
+따라서 이번 기록은 해당 소스/명령의 Lint 통과를 뒷받침한다. 빈 파일 하나만 있고 종료 코드나 실행 기준이 없다면 성공/실패를 미확인으로 둔다. Lint 통과가 DB Commit/원문 보존/실제 모델 정확도까지 증명하지는 않는다.
