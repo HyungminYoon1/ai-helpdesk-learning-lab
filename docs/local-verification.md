@@ -127,3 +127,29 @@ target은 Git에서 추적하지 않는 로컬 생성물이며 Maven clean을 �
 ESLint의 종료 코드 0은 Lint 오류 없이 검사를 마친 결과다. 경고 상한 옵션을 썼다면 그 조건도 적용된다. [ESLint 공식 종료 코드 설명](https://eslint.org/docs/latest/use/command-line-interface#exit-codes)
 
 따라서 이번 기록은 해당 소스/명령의 Lint 통과를 뒷받침한다. 빈 파일 하나만 있고 종료 코드나 실행 기준이 없다면 성공/실패를 미확인으로 둔다. Lint 통과가 DB Commit/원문 보존/실제 모델 정확도까지 증명하지는 않는다.
+
+## 6 학습자가 직접 재현할 작은 검사
+
+요청/Commit/화면의 문답을 마친 뒤 직접 실행하고 결과를 읽는 연습이다. 이번 대상은 TicketCustomerFollowupHttpIntegrationTest의 customer_and_official_reply_commit_in_parent_lock_order_without_skipping_a_page 한 메서드다. 고객 먼저/공식 답변 먼저를 파라미터로 실행하므로 현재 사례는 두 건이다. 같은 Ticket의 부모 잠금 대기, 두 Commit 뒤 메시지/페이지 순서와 기존 Row 보존을 검사한다.
+
+1. Docker Desktop에서 Engine이 실행 중인지 확인한다. 기존 Container/Volume을 지우지 않는다.
+2. PowerShell 7을 열고 아래 명령을 순서대로 실행한다. 현재 Lab 작업공간의 소스를 사용하며 개인 계정 암호나 API Key 입력은 필요하지 않다.
+3. 마지막 Tests run/Failures/Errors/Skipped, BUILD 결과와 exitCode를 읽는다. 첫 두 Git 명령은 실행한 코드와 작업 트리 상태를 확인한다.
+
+```powershell
+Set-Location -LiteralPath 'C:\developer_folder\ai-helpdesk-learning-lab'
+git rev-parse --short HEAD
+git status --short
+New-Item -ItemType Directory -Path '.\target' -Force | Out-Null
+.\mvnw.cmd -B -ntp '-Dtest=TicketCustomerFollowupHttpIntegrationTest#customer_and_official_reply_commit_in_parent_lock_order_without_skipping_a_page' test 2>&1 | Tee-Object -FilePath '.\target\week12-self-reproduction.log'
+$helpdeskJavaExit = $LASTEXITCODE
+"exitCode=$helpdeskJavaExit"
+```
+
+현재 기준의 예상 결과는 Tests run: 2 / Failures: 0 / Errors: 0 / Skipped: 0, BUILD SUCCESS와 exitCode=0이다. 준비/컴파일/실행이 실패하면 이 예상치를 실적으로 기록하지 않고 실제 오류와 exitCode를 확인한다. 로그는 target/week12-self-reproduction.log에 남으며, 요약을 공유할 때는 실행한 Commit과 마지막 결과를 함께 적는다. 이 경로도 target 아래이므로 clean 시 지워진다.
+
+이 명령의 test는 선택한 두 Java/PostgreSQL 사례를 실행한다. 전체 verify의 모든 Java/Failsafe, Node/Lint/Browser나 실제 상용 AI를 실행한 결과로 해석하지 않는다. 기존 28건 집중 클래스 결과나 전체 1,221+2 결과에 두 건을 추가 합산하지 않는다.
+
+2026-11-04 참고 실행: 위 메서드 선택 인자를 사용한 Maven 명령은 clean commit fd879eb6758750afad6879e4c3a88094baa95b40에서 두 건/실패·오류·Skip 0, BUILD SUCCESS/exit 0을 확인했다. 새 Surefire Dump와 남은 소유 fork JVM은 0이었다. 이는 Codex의 선택 명령 검증이며 학습자의 독립 실행은 아직 확인하지 않았다. 원래 28건 XML은 덮어쓰기 전에 별도 복사했다.
+
+참고 실행의 명령/Commit/시각/종료 코드와 로그는 ignored target/week12-focused-reproduction-20261104/result.json 및 maven.log, 이번 XML은 focused-report.xml, 이전 XML은 previous-class-report.xml에 있다. 위 Tee-Object 안내의 파이프와 로그 경로는 PowerShell 구문으로 확인했고, 실제 참고 실행은 같은 Maven 선택 인자를 사용해 별도 로그로 출력한 것이다.
