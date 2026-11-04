@@ -1,5 +1,8 @@
 package lab.helpdesk.ai.job;
 
+import org.springframework.test.annotation.DirtiesContext;
+import lab.helpdesk.testing.ClassOwnedContextCleanupVerifier;
+import org.springframework.test.context.TestExecutionListeners;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.concurrent.Executors;
@@ -26,6 +29,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest(properties = {"logging.level.root=WARN", "spring.main.banner-mode=off"})
 @ActiveProfiles("postgres")
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@TestExecutionListeners(listeners = ClassOwnedContextCleanupVerifier.class, mergeMode = TestExecutionListeners.MergeMode.MERGE_WITH_DEFAULTS)
 class AiRateLimitRetryIntegrationTest {
 
     @Container

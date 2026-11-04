@@ -1,5 +1,8 @@
 package lab.helpdesk.ticket.web;
 
+import org.springframework.test.annotation.DirtiesContext;
+import lab.helpdesk.testing.ClassOwnedContextCleanupVerifier;
+import org.springframework.test.context.TestExecutionListeners;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
@@ -43,6 +46,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("postgres")
 @WithIdentityFixtures
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@TestExecutionListeners(listeners = ClassOwnedContextCleanupVerifier.class, mergeMode = TestExecutionListeners.MergeMode.MERGE_WITH_DEFAULTS)
 class CustomerMessageConfirmationHttpIntegrationTest {
     private static final String A="confirm-agent-a", B="confirm-agent-b", S="confirm-agent-supervisor",
             C="confirm-customer", OUT="confirm-agent-other";

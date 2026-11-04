@@ -1,5 +1,8 @@
 package lab.helpdesk.support;
 
+import org.springframework.test.annotation.DirtiesContext;
+import lab.helpdesk.testing.ClassOwnedContextCleanupVerifier;
+import org.springframework.test.context.TestExecutionListeners;
 import java.util.*;
 import lab.helpdesk.ai.provider.AiSuggestionProvider;
 import lab.helpdesk.identity.*;
@@ -31,6 +34,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("postgres")
 @WithIdentityFixtures
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@TestExecutionListeners(listeners = ClassOwnedContextCleanupVerifier.class, mergeMode = TestExecutionListeners.MergeMode.MERGE_WITH_DEFAULTS)
 class AssignmentQueueConfirmationHttpIntegrationTest {
     static final String A="queue-agent-a",B="queue-agent-b",C="queue-customer",OUT="queue-agent-other";
     static final List<String> TABLES=List.of("ticket_customer_message_confirmations","ticket_suggestion_categories",
