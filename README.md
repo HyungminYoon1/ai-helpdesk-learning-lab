@@ -20,6 +20,8 @@
 
 [확인 버전 충돌 뒤 재선택](./docs/customer-message-confirmations.md#explicit-selection-after-a-rejected-assignment-version)은 409/ASSIGNMENT_VERSION_CONFLICT일 때만 명시적 버튼을 제공한다. 원래 선택을 자동 최신화하지 않고, 버튼의 GET 뒤 사용자가 새로 선택한 범위를 제출할 때 새 UUID를 발급한다. 결과 미확인/다른 충돌은 원래 제출을 유지한다. 후속 Node 380개/Lint와 실제 Browser/PostgreSQL 실험 3개가 통과했으며, A→B→A의 구형 선택 409/새 선택 201과 DB 확인 1건을 대조했다. Java Backend/Schema는 유지하고 이전 전체 Java 1,173+2를 재실행한 것으로 기록하지 않는다.
 
+이후 같은 실험을 강화해 [선택 뒤 새 고객 글 도착](./docs/customer-message-confirmations.md#customer-activity-after-selection-2026-11-04)을 재현했다. 기존 대상의 확인 201과 별개로 새 글은 확인 필요로 남았고, 대화 재조회도 새 대상을 자동 선택하지 않았다. 강화한 기존 Browser/PostgreSQL 한 개가 통과했으며 테스트 수를 앞선 실행에 합산하지 않는다.
+
 [공식 답변 초안 검토](./docs/ticket-assignment.md#explicit-reply-draft-review-2026-11-04)는 미제출 초안의 확인된 배정 차이나 정확한 버전 거부에만 명시적 초기화/GET/빈 Form을 제공한다. 결과 미확인 답변은 원래 UUID/본문/정정 대상/버전을 보존하고 일반 대화 조회로 바꾸지 않는다. Node 399개/Lint와 집중 Browser/PostgreSQL 4개가 통과했다. 실제 409/201/201/200과 새 답변 2건, 배정 5에서도 유지된 저장 버전 3을 대조했으며 Provider는 0회다. 초기 정정 후보 목록 유실을 고친 과정과 검증 범위는 [실행 기록](./docs/ticket-assignment.md#verification-of-reply-draft-review-2026-11-04)에 남겼다.
 
 위 실행 수치는 로컬 검증의 근거다. 이후 승인한 저장소 Push와 정확한 Commit의 원격 CI 결과는 [11/3 문서·구현 전달 기록](https://github.com/HyungminYoon1/jungle-sw-ai-lab-advanced-wil/blob/main/week12/lab-reports/2026-11-03-documentation-publication.md)으로 구분한다. 일반 Push CI의 Image 빌드와 수동 ECR 업로드/Cloud 배포도 별도다.

@@ -62,25 +62,53 @@ await page.waitForFunction(()=>!document.querySelector('#confirmation-target').d
 if(posts.length!==1 || await page.locator('#confirmation-target').inputValue()!=='' || !(await page.locator('#confirmation-send').isDisabled()) || !(await page.locator('#confirmation-reselect').isHidden()))throw new Error('RESET_SENT_OR_SELECTED_A_COMMAND');
 await page.screenshot({path:EMPTY_SCREENSHOT,fullPage:true});
 await page.locator('#confirmation-target').selectOption('INQUIRY_ID');
-const saved=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith(path));
-await page.locator('#confirmation-send').click();
-const second=await saved;
-if(second.status()!==201 || (await second.json()).confirmation.assignmentVersion!==3)throw new Error('NEW_ASSIGNMENT_NOT_SAVED');
-await page.waitForFunction(()=>document.querySelector('#confirmation-current').textContent.includes('추가 확인할 글 없음') && !document.querySelector('#confirmation-refresh').disabled);
-if(posts.length!==2 || posts[1].expectedAssignmentVersion!==3 || posts[0].clientRequestId===posts[1].clientRequestId || posts[1].throughMessageId!==INQUIRY_ID)throw new Error('RESELECTION_REUSED_OLD_COMMAND');
-await page.screenshot({path:SAVED_SCREENSHOT,fullPage:true});
-return {postCount:posts.length,statuses:[first.status(),second.status()],oldVersionRetained:posts[0].expectedAssignmentVersion===1,
-    uuidChanged:posts[0].clientRequestId!==posts[1].clientRequestId,resetReadOnly:true,emptySelectionRequired:true,
-    csrfHeaderObserved:Object.keys(await second.request().allHeaders()).includes('x-csrf-token')};
+await page.evaluate(value=>{window.__reselectionOldRequest=value;},posts[0]);
+return {firstStatus:first.status(),oldVersionRetained:posts[0].expectedAssignmentVersion===1,resetReadOnly:true,emptySelectionRequired:true};
 '@
     $code=$code.Replace('TICKET_ID',[string]$TicketId).Replace('INQUIRY_ID',[string]$InquiryId)
     $code=$code.Replace('REJECTED_SCREENSHOT',(ConvertTo-Json -InputObject (Join-Path $RunDirectory 'rejected-confirmation-selection.png') -Compress))
     $code=$code.Replace('EMPTY_SCREENSHOT',(ConvertTo-Json -InputObject (Join-Path $RunDirectory 'empty-confirmation-reselection.png') -Compress))
+    $selected=Run-Code $code | ConvertFrom-Json
+    [IO.File]::WriteAllText((Join-Path $RunDirectory 'fresh-target-selected'),"READY`n",[Text.UTF8Encoding]::new($false))
+    $stage='WAITING_FOR_NEW_CUSTOMER_MESSAGE'
+    $deadline=[DateTime]::UtcNow.AddSeconds(60)
+    while(-not (Test-Path -LiteralPath (Join-Path $RunDirectory 'customer-message-committed'))){
+        if([DateTime]::UtcNow -ge $deadline){throw 'CUSTOMER_MESSAGE_GATE_TIMEOUT'}
+        Start-Sleep -Milliseconds 100
+    }
+    $latestId=[long](Get-Content -LiteralPath (Join-Path $RunDirectory 'customer-message-committed') -Encoding UTF8 -Raw)
+    if($latestId -le $InquiryId){throw 'NEW_CUSTOMER_MESSAGE_REQUIRED'}
+    $stage='CONFIRM_SELECTED_TARGET_WITH_NEW_CUSTOMER_MESSAGE'
+    $code=@'
+const path='/api/tickets/TICKET_ID/customer-message-confirmations';
+const posts=[];
+page.on('request',request=>{if(request.method()==='POST' && request.url().endsWith(path))posts.push(request.postDataJSON());});
+const saved=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith(path));
+await page.locator('#confirmation-send').click();
+const second=await saved;
+const result=await second.json();
+if(second.status()!==201 || result.confirmation.assignmentVersion!==3 || result.confirmation.throughMessageId!==INQUIRY_ID)throw new Error('NEW_ASSIGNMENT_NOT_SAVED');
+if(result.currentConfirmation.effectiveThroughMessageId!==INQUIRY_ID || result.currentConfirmation.latestCustomerMessageId!==LATEST_ID || !result.currentConfirmation.needsConfirmation)throw new Error('NEW_MESSAGE_WAS_SILENTLY_CONFIRMED');
+await page.waitForFunction(()=>document.querySelector('#confirmation-current').textContent.includes('최신 고객 메시지 #LATEST_ID / 확인 필요') && !document.querySelector('#confirmation-refresh').disabled);
+const old=await page.evaluate(()=>window.__reselectionOldRequest);
+if(posts.length!==1 || posts[0].expectedAssignmentVersion!==3 || old.clientRequestId===posts[0].clientRequestId || posts[0].throughMessageId!==INQUIRY_ID)throw new Error('RESELECTION_REUSED_OLD_COMMAND');
+await page.screenshot({path:SAVED_SCREENSHOT,fullPage:true});
+await page.locator('#conversation-read button').click();
+await page.waitForFunction(()=>[...document.querySelector('#confirmation-target').options].some(option=>option.value==='LATEST_ID') && !document.querySelector('#confirmation-target').disabled);
+if(await page.locator('#confirmation-target').inputValue()!=='' || !(await page.locator('#confirmation-send').isDisabled()) || posts.length!==1)throw new Error('NEW_CUSTOMER_TARGET_AUTOMATICALLY_SELECTED');
+await page.screenshot({path:LATE_SCREENSHOT,fullPage:true});
+return {postCount:posts.length,status:second.status(),uuidChanged:old.clientRequestId!==posts[0].clientRequestId,
+    lateMessageStillNeedsConfirmation:true,newTargetNotAutoSelected:true,
+    csrfHeaderObserved:Object.keys(await second.request().allHeaders()).includes('x-csrf-token')};
+'@
+    $code=$code.Replace('TICKET_ID',[string]$TicketId).Replace('INQUIRY_ID',[string]$InquiryId).Replace('LATEST_ID',[string]$latestId)
     $code=$code.Replace('SAVED_SCREENSHOT',(ConvertTo-Json -InputObject (Join-Path $RunDirectory 'new-assignment-confirmation.png') -Compress))
+    $code=$code.Replace('LATE_SCREENSHOT',(ConvertTo-Json -InputObject (Join-Path $RunDirectory 'new-customer-after-selection.png') -Compress))
     $result=Run-Code $code | ConvertFrom-Json
-    [ordered]@{evidence='LOCAL_CONFIRMATION_RESELECTION_BROWSER_POSTGRES';completed=$true;postCount=$result.postCount;statuses=$result.statuses;
-        oldVersionRetained=$result.oldVersionRetained;uuidChanged=$result.uuidChanged;resetReadOnly=$result.resetReadOnly;
-        emptySelectionRequired=$result.emptySelectionRequired;csrfHeaderObserved=$result.csrfHeaderObserved} | ConvertTo-Json -Compress
+    [ordered]@{evidence='LOCAL_CONFIRMATION_RESELECTION_BROWSER_POSTGRES';completed=$true;postCount=$result.postCount+1;statuses=@($selected.firstStatus,$result.status);
+        oldVersionRetained=$selected.oldVersionRetained;uuidChanged=$result.uuidChanged;resetReadOnly=$selected.resetReadOnly;
+        emptySelectionRequired=$selected.emptySelectionRequired;csrfHeaderObserved=$result.csrfHeaderObserved;
+        lateMessageStillNeedsConfirmation=$result.lateMessageStillNeedsConfirmation;newTargetNotAutoSelected=$result.newTargetNotAutoSelected} | ConvertTo-Json -Compress
 }catch{
     [ordered]@{evidence='LOCAL_CONFIRMATION_RESELECTION_BROWSER_POSTGRES';completed=$false;stage=$stage;failureCode='BROWSER_STEP_FAILED'} | ConvertTo-Json -Compress
     exit 1
