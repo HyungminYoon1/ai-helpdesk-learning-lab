@@ -16,6 +16,8 @@
 
 같은 날 추가한 [응답 유실/저장 후 GET 실패 실험](./docs/customer-message-confirmations.md#explicit-browser-response-loss-experiment)은 실제 Spring의 Commit 응답을 Browser 중계에서 차단했다. 원래 UUID 재확인 200/추가 Row 0과, 저장 성공 뒤 GET만 재시도하는 화면을 검증했다. 별도 명시적 Browser 실험 1개가 통과했으며 서버 처리 201/200/201의 POST 3회와 DB 확인 2건, 기존 업무 Row 보존을 대조했다. 운영 코드/Schema는 변경하지 않았고 앞의 전체 테스트 수를 새로 늘려 기록하지 않는다.
 
+[인계/서비스 권한 회수 실험](./docs/customer-message-confirmations.md#retained-session-handoff-and-membership-revocation)도 기존 Session과 실제 HTTP/PostgreSQL에서 통과했다. 활성 직원 A의 과거 제출 재확인은 인계 뒤 200, 비담당자의 새 확인은 403, 서비스 권한 회수 Commit 뒤 과거 제출 재확인은 404였다. A의 기록 1건은 배정 1에 남고 B/배정 2의 지점은 NULL을 유지했다. 권한 회수는 검증한 Testcontainer의 Fixture에서만 수행했으며 공개 관리 API나 운영 권한 변경은 추가하지 않았다.
+
 위 실행 수치는 로컬 검증의 근거다. 이후 승인한 저장소 Push와 정확한 Commit의 원격 CI 결과는 [11/3 문서·구현 전달 기록](https://github.com/HyungminYoon1/jungle-sw-ai-lab-advanced-wil/blob/main/week12/lab-reports/2026-11-03-documentation-publication.md)으로 구분한다. 일반 Push CI의 Image 빌드와 수동 ECR 업로드/Cloud 배포도 별도다.
 
 ## Week 10 배정과 인계 (10/24 후속)

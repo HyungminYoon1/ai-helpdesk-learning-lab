@@ -95,3 +95,19 @@ The experiment passed with three upstream POST results 201/200/201 and two DB co
 ```
 
 The experiment is excluded by the default *Test naming convention. Artifacts and logs remain ignored under output/playwright and target/week12-confirmation-recovery-browser.log. It requires local Docker, PowerShell 7, Node/npx and Chrome, following the existing explicit CLI experiment approach.
+
+## Retained Session, handoff and membership revocation
+
+`CustomerConfirmationAuthorityBrowserExperiment` uses a second fresh Testcontainer and one synthetic Browser login. The first confirmation commits and its response is blocked. A then transfers the ticket to active member B through the actual assignment HTTP API, without navigating away or losing the pending confirmation. While A remains an active service member, the UI replays the original submission and receives 200. The saved result stays in assignment 1; current assignment 2 has NULL progress. A new UUID from non-assignee A receives 403 NOT_ASSIGNEE, verifying the business denial rather than a missing-CSRF 403.
+
+After the Browser reaches a file gate, the Java fixture verifies the Testcontainer URL again and deactivates only A's membership in a short transaction with a two-second lock timeout. It signals the Browser only after that transaction commits. No production grant/revoke endpoint or application test hook is added. The same authenticated Browser Session then POSTs a captured copy of the original submission through HTTP: 404 SUPPORT_NOT_FOUND. The current-state GET is also 404. The CSRF endpoint remains 200, so loss of login is not used to explain the service-scoped denial.
+
+The old submission copy is test-driver memory captured from the original request, not persistent product recovery. The real UI performs the handoff-era replay and the revoked current-state refresh; the separate revoked replay probes the HTTP boundary. Current state is replaced by an unavailable/permission message and confirmation controls are disabled. The historical result already received before revocation can remain visible; these checks do not claim to revoke previously delivered data or synchronize every other form without a conversation refresh.
+
+The focused experiment passed with upstream confirmation POST results 201/200/403/404, one unchanged confirmation row for A/assignment 1, and current assignment 2 to B with no confirmation. Original Ticket title/status/requester/service, messages, prior assignment event and AI/Attempt/Suggestion/category rows were preserved. Only the intended handoff and A membership deactivation changed those respective states; other memberships were unchanged. Provider interactions stayed zero. Both handoff/current-state and revoked-read screenshots were inspected. This test-only slice does not rerun prior full Java/Node totals or prove cancellation of requests authorized before revocation commits.
+
+```powershell
+.\mvnw.cmd -B -ntp '-Dtest=CustomerConfirmationAuthorityBrowserExperiment' test
+```
+
+The explicit experiment is outside default *Test execution. Its ignored log is target/week12-confirmation-authority-browser.log. Application code/schema, production identities/permissions, external AI and cloud resources are unchanged.
