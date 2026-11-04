@@ -80,3 +80,5 @@ Reproduction (PowerShell 7, Docker Engine required): run the following after rep
 ```
 
 Final default verification: .\mvnw.cmd -B -ntp verify passed 1,221 Surefire cases and two packaged Failsafe cases, failures/errors/skips zero, BUILD SUCCESS. Focused Java cases above are included in that total; opt-in Browser experiments are separate. Log: target/week12-status-verify.log. New Surefire dumps were zero. This is local verification; the new commits have not been pushed or checked by remote CI.
+
+The [current local verification guide](./local-verification.md) consolidates Java/Node/Lint and the three representative Browser commands. On the same date, a documentation/evidence audit rechecked ESLint only: exit 0 on clean commit 1eca282, with command/UTC timing/code/exit metadata under ignored target/verification-audit-20261104-dcfd36ca/result.json. Its log was empty even on success. The prior Java/Node/Browser logs were inspected, not rerun; the packaged two-case AI endpoint is loopback, distinct from the status Browser's zero Provider interactions and from a commercial AI run.

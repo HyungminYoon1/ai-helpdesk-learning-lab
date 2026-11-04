@@ -4,6 +4,8 @@
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
+현재 코드를 다시 검증할 때는 [로컬 검증 실행 안내](./docs/local-verification.md)를 따른다. Maven verify/Node/Lint와 별도 Browser 실험을 구분하고 종료 코드와 코드 기준을 함께 기록한다. 아래 과거 주차별 명령/개수는 당시의 범위를 설명하는 기록으로 유지한다.
+
 11/4의 [테스트 자원 수명 점검](./docs/test-resource-lifecycle.md)은 클래스별 PostgreSQL Container와 Spring Context 캐시의 수명 차이를 다뤘다. 해당 기본 통합 테스트 21개에 클래스 종료 시 Context 정리를 적용하고 대표 3개에서는 Context 비활성, Hikari Pool 종료와 해당 Pool Thread 0개를 직접 확인했다. 아래에 남긴 이전 종료 경고는 수정 전 실행 기록이다. 운영 앱의 종료 설정이나 업무 Transaction은 변경하지 않았다.
 
 ## Week 12 고객 후속 대화 (11/3 구현)
