@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 12의 고객 후속 대화/배정별 확인에 이어 V13 상태 변경과 명시적 재개를 화면까지 연결했다. 현재 전체 Java 1,221개/패키징 후 2개, Node 418개/Lint와 집중 Browser 3개가 통과했다. 기존 Cloud 결과, 새 로컬 검증과 학습자 문답은 구분한다.
+> 상태: Week 12의 고객 후속 대화/배정별 확인에 이어 V13 상태 변경과 명시적 재개를 화면까지 연결했다. 로컬 전체 Maven 1,223+2 통과 후 마지막 Failsafe 시작 설정은 해당 2개로 재검증했다. Node 418개/Lint와 집중 Browser 3개의 앞선 결과는 별도 근거로 유지한다. 기존 Cloud 결과, 새 로컬 검증과 학습자 문답은 구분한다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 

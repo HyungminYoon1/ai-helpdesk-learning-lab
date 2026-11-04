@@ -2,6 +2,8 @@
 
 The V12 backend implements the agreed current-assignee confirmation contract. The 2026-11-04 staff queue projection and explicit-selection UI are locally verified with focused backend tests, JavaScript and an actual Browser/PostgreSQL experiment. The existing customer composer and original AI processing are unchanged.
 
+Current checkpoint, 2026-11-04: response-loss recovery, handoff/revocation and explicit reselection have subsequent local Browser/PostgreSQL evidence below. The earlier shutdown warnings describe those historical runs; the [test-resource lifecycle review](./test-resource-lifecycle.md) records the later context/pool cleanup. [V13 status handling](./ticket-status.md) is also locally implemented. Use the [current verification guide](./local-verification.md) for commands and execution-specific counts; local evidence does not establish remote CI or deployment.
+
 ## What a checkpoint means
 
 An audit row's `id` identifies that stored confirmation. `through_message_id` identifies the last customer Message explicitly included in it. For the same Ticket and assignment, records `(id=11, through=80)` and `(id=12, through=71)` are both retained; effective progress is 80. Neither last audit ID nor recorded_at defines progress. There is no expiry/TTL or deletion of lower confirmations.

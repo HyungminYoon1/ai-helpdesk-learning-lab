@@ -65,7 +65,7 @@ Surefire reported a fork-JVM exit timeout after tests in this final run. The ini
 
 ## Explicit confirmation backend
 
-The [V12 confirmation contract and verification](./customer-message-confirmations.md) adds current-assignee confirmation records/API with assignment-scoped MAX, separate replay/current state and no implicit action on GET. Its focused 43 cases and full Java 1,165+2 passed locally. Staff queue/confirmation buttons and their Browser flow are still pending. This backend creates no new Message or AI work and does not change customer ownership, Ticket state, message content or original suggestions.
+The [V12 confirmation contract and verification](./customer-message-confirmations.md) adds current-assignee confirmation records/API with assignment-scoped MAX, separate replay/current state and no implicit action on GET. Its focused 43 cases and full Java 1,165+2 passed locally. Staff queue/confirmation buttons and their Browser flow were pending at that backend checkpoint; the linked contract records their subsequent verification and recovery cases. This backend creates no new Message or AI work and does not change customer ownership, Ticket state, message content or original suggestions.
 
 ## Mixed customer/staff writer ordering (2026-11-04)
 
