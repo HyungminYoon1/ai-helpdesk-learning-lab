@@ -1,6 +1,6 @@
 # Customer follow-up storage contract
 
-Status: V11 customer follow-ups/list/composer and the V12 explicit-confirmation backend are implemented on 2026-11-03. Confirmation UI/queue integration and state APIs remain separate slices. Storage, Browser and subsequent backend verification are recorded separately below.
+Status: V11 customer follow-ups/list/composer and the V12 explicit-confirmation backend were implemented on 2026-11-03. Subsequent confirmation UI/queue and V13 state changes are documented in [confirmation](./customer-message-confirmations.md) and [status](./ticket-status.md) contracts. Historical slice results below retain their original scope; the mixed-writer verification was added on 2026-11-04.
 
 ## Scope
 
@@ -66,3 +66,13 @@ Surefire reported a fork-JVM exit timeout after tests in this final run. The ini
 ## Explicit confirmation backend
 
 The [V12 confirmation contract and verification](./customer-message-confirmations.md) adds current-assignee confirmation records/API with assignment-scoped MAX, separate replay/current state and no implicit action on GET. Its focused 43 cases and full Java 1,165+2 passed locally. Staff queue/confirmation buttons and their Browser flow are still pending. This backend creates no new Message or AI work and does not change customer ownership, Ticket state, message content or original suggestions.
+
+## Mixed customer/staff writer ordering (2026-11-04)
+
+The Week 12 evidence review found that same-key concurrency and customer-message/confirmation ordering had direct tests, but a customer follow-up competing with an official reply did not. The existing Service already locks the parent Ticket before either Message INSERT; no runtime behavior, authorization, schema or policy was changed.
+
+`TicketCustomerFollowupHttpIntegrationTest.customer_and_official_reply_commit_in_parent_lock_order_without_skipping_a_page` now checks both customer-first and staff-first cases against an isolated PostgreSQL Testcontainer. The first real Service call joins a test-owned transaction and pauses after INSERT, before Commit. The second real Service call must wait at the parent Ticket's `FOR UPDATE` query. Its exact backend PID and blocker are checked with `pg_stat_activity`/`pg_blocking_pids`, and the repository spy confirms its INSERT has not started. A delay or an INSERT-time foreign-key wait alone is not accepted as evidence of the required ordering.
+
+Before releasing the first transaction, a separate connection sees only the committed inquiry. After both commits, the second Message ID is greater than the first. A two-message page and its continuation return the inquiry and both new messages without omission. The inquiry's complete row and the existing Ticket/assignment/AI rows remain unchanged; Provider interactions stay zero. The two-message limit is a pagination test boundary, not a product restriction to two messages.
+
+The focused command `mvnw.cmd -B -ntp -Dtest=TicketCustomerFollowupHttpIntegrationTest test` passed 28 cases, failures/errors/skips 0, exit 0 and BUILD SUCCESS. Two cases are new; the other 26 are rerun cases. Metadata records base commit dcf897d, the modified test's SHA-256, start/end UTC and exit code in ignored `target/week12-followup-reply-order-result.json`; the log is `target/week12-followup-reply-order.log`. This run does not replace or increment the earlier full Java 1,221+2 result, and does not claim new Node/Lint/Browser/CI/Cloud or real AI verification.

@@ -6,6 +6,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import lab.helpdesk.ai.provider.AiSuggestionProvider;
 import lab.helpdesk.identity.*;
 import lab.helpdesk.ticket.application.*;
@@ -30,6 +31,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -58,6 +61,7 @@ class TicketCustomerFollowupHttpIntegrationTest {
     @Autowired ObjectMapper mapper;
     @Autowired TicketReceiptApplicationService receipts;
     @Autowired TicketConversationService conversations;
+    @Autowired PlatformTransactionManager manager;
     @Autowired lab.helpdesk.support.TicketAssignmentService assignments;
     @Autowired lab.helpdesk.ai.job.AiSuggestionJobClaimService claims;
     @Autowired lab.helpdesk.ai.suggestion.AiSuggestionResultService results;
@@ -228,6 +232,53 @@ class TicketCustomerFollowupHttpIntegrationTest {
         assertThat(messageCount()).isEqualTo(2);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans={true,false})
+    void customer_and_official_reply_commit_in_parent_lock_order_without_skipping_a_page(boolean customerFirst) throws Exception {
+        assignments.claim(ticket,UUID.randomUUID(),0,IdentityFixtures.actor(AGENT));
+        var original=jdbc.queryForList("SELECT * FROM ticket_messages WHERE ticket_id=?",ticket);
+        long inquiryId=((Number)original.getFirst().get("id")).longValue();
+        var before=snapshot();before.remove("ticket_messages");
+        var inserted=new CountDownLatch(1);var release=new CountDownLatch(1);var contenderStarted=new CountDownLatch(1);
+        var holderPid=new AtomicInteger();var contenderPid=new AtomicInteger();
+        try(var pool=Executors.newFixedThreadPool(2)) {
+            try {
+                var first=pool.submit(()->new TransactionTemplate(manager).execute(status->{
+                    holderPid.set(jdbc.queryForObject("SELECT pg_backend_pid()",Integer.class));
+                    long id=storeMessage(customerFirst,UUID.randomUUID());
+                    inserted.countDown();await(release);return id;
+                }));
+                await(inserted);
+                var second=pool.submit(()->new TransactionTemplate(manager).execute(status->{
+                    contenderPid.set(jdbc.queryForObject("SELECT pg_backend_pid()",Integer.class));
+                    contenderStarted.countDown();return storeMessage(!customerFirst,UUID.randomUUID());
+                }));
+                await(contenderStarted);
+                try {
+                    awaitParentLockWaiter(contenderPid.get(),holderPid.get());
+                    assertThat(second.isDone()).isFalse();
+                    // A lock wait during INSERT would be too late: allocation must wait at the parent read.
+                    if(customerFirst)verify(repository,never()).insertReply(anyLong(),anyLong(),anyString(),anyString(),any(UUID.class),any(),anyLong());
+                    else verify(repository,never()).insertCustomerFollowup(anyLong(),anyLong(),anyString(),anyString(),any(UUID.class));
+                    assertThat(jdbc.queryForList("SELECT * FROM ticket_messages WHERE ticket_id=?",ticket)).isEqualTo(original);
+                } finally {release.countDown();}
+                long firstId=first.get(10,TimeUnit.SECONDS),secondId=second.get(10,TimeUnit.SECONDS);
+                assertThat(secondId).isGreaterThan(firstId);
+                var page=conversations.read(ticket,0,2,IdentityFixtures.actor(A));
+                assertThat(page.messages()).extracting(message->message.id()).containsExactly(inquiryId,firstId);
+                assertThat(page.hasMore()).isTrue();assertThat(page.nextAfterId()).isEqualTo(firstId);
+                var next=conversations.read(ticket,page.nextAfterId(),2,IdentityFixtures.actor(A));
+                assertThat(next.messages()).extracting(message->message.id()).containsExactly(secondId);
+                assertThat(next.hasMore()).isFalse();assertThat(next.nextAfterId()).isNull();
+                assertThat(jdbc.queryForList("SELECT message_type FROM ticket_messages WHERE ticket_id=? ORDER BY id",String.class,ticket))
+                        .containsExactlyElementsOf(customerFirst?List.of("INQUIRY","CUSTOMER_FOLLOWUP","OFFICIAL_REPLY")
+                                :List.of("INQUIRY","OFFICIAL_REPLY","CUSTOMER_FOLLOWUP"));
+                assertThat(jdbc.queryForList("SELECT * FROM ticket_messages WHERE id=?",inquiryId)).isEqualTo(original);
+                var after=snapshot();after.remove("ticket_messages");assertThat(after).isEqualTo(before);
+            } finally {release.countDown();}
+        }
+    }
+
     @Test
     void failure_after_insert_preserves_existing_reply_assignment_and_nonempty_ai_result() throws Exception {
         assignments.claim(ticket,UUID.randomUUID(),0,IdentityFixtures.actor(AGENT));
@@ -268,6 +319,30 @@ class TicketCustomerFollowupHttpIntegrationTest {
         }
     }
 
+    private long storeMessage(boolean customer,UUID request) {
+        if(customer) {
+            var result=conversations.followUp(ticket,"concurrent customer detail",request,IdentityFixtures.actor(A));
+            assertThat(result.created()).isTrue();return result.message().id();
+        }
+        var result=conversations.reply(ticket,"concurrent official reply",request,null,1L,IdentityFixtures.actor(AGENT));
+        assertThat(result.created()).isTrue();return result.message().id();
+    }
+    private static void await(CountDownLatch latch) {
+        try {assertThat(latch.await(8,TimeUnit.SECONDS)).isTrue();}
+        catch(InterruptedException interrupted) {Thread.currentThread().interrupt();throw new AssertionError("fixture interrupted",interrupted);}
+    }
+    private void awaitParentLockWaiter(int waiter,int holder) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        while(System.nanoTime()<deadline) {
+            if(Boolean.TRUE.equals(jdbc.queryForObject("""
+                    SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+                    WHERE pid=? AND wait_event_type='Lock' AND ?=ANY(pg_blocking_pids(pid))
+                      AND query LIKE '%tickets%' AND query LIKE '%FOR UPDATE%')
+                    """,Boolean.class,waiter,holder)))return;
+            Thread.sleep(10);
+        }
+        throw new AssertionError("expected the specific writer to wait on the parent Ticket lock");
+    }
     private JsonNode follow(long id,String body,UUID key,String user,int expected) throws Exception {
         var result=mvc.perform(post("/api/tickets/{id}/customer-messages",id).with(as(user)).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(payload(body,key)))
