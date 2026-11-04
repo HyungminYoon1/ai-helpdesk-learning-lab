@@ -1,12 +1,10 @@
 package lab.helpdesk.ai.job;
 
-import org.springframework.test.annotation.DirtiesContext;
-import lab.helpdesk.testing.ClassOwnedContextCleanupVerifier;
-import org.springframework.test.context.TestExecutionListeners;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.concurrent.Executors;
 
+import lab.helpdesk.testing.ClassOwnedContextCleanupVerifier;
 import lab.helpdesk.ticket.application.TicketReceiptApplicationService;
 import lab.helpdesk.ticket.application.TicketReceiptResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,7 +14,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestExecutionListeners;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;

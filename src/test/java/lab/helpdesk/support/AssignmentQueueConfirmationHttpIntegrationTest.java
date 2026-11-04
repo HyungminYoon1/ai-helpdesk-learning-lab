@@ -1,9 +1,7 @@
 package lab.helpdesk.support;
 
-import org.springframework.test.annotation.DirtiesContext;
-import lab.helpdesk.testing.ClassOwnedContextCleanupVerifier;
-import org.springframework.test.context.TestExecutionListeners;
 import java.util.*;
+import lab.helpdesk.testing.ClassOwnedContextCleanupVerifier;
 import lab.helpdesk.ai.provider.AiSuggestionProvider;
 import lab.helpdesk.identity.*;
 import lab.helpdesk.ticket.application.*;
@@ -16,7 +14,9 @@ import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.userdetails.User;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestExecutionListeners;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.*;
