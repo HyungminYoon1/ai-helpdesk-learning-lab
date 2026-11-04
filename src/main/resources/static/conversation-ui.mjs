@@ -17,8 +17,10 @@ export function isConversationMessage(message) {
 export function isConversation(value, ticketId, afterId = 0) {
     if (!fields(value, ["ticket", "capabilities", "messages", "page"])
             || !isTicket(value.ticket) || value.ticket.id !== ticketId
-            || !fields(value.capabilities, ["canReply", "canFollowUp", "expectedAssignmentVersion"])
+            || !fields(value.capabilities, ["canReply", "canFollowUp", "canViewConfirmations", "expectedAssignmentVersion"])
             || typeof value.capabilities.canReply !== "boolean" || typeof value.capabilities.canFollowUp !== "boolean"
+            || typeof value.capabilities.canViewConfirmations !== "boolean"
+            || value.capabilities.canReply && !value.capabilities.canViewConfirmations
             || (value.capabilities.canReply ? !isId(value.capabilities.expectedAssignmentVersion) : value.capabilities.expectedAssignmentVersion !== null)
             || !Array.isArray(value.messages) || value.messages.length > 50
             || !fields(value.page, ["nextAfterId", "hasMore"]) || typeof value.page.hasMore !== "boolean") return false;

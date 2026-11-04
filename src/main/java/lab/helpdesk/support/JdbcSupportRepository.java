@@ -48,12 +48,29 @@ public class JdbcSupportRepository implements SupportRepository {
                 """, (r,i) -> new Member(r.getLong(1),r.getString(2),r.getString(3),r.getBoolean(4)),service,after,count);
     }
     public List<QueueTicket> queue(long service, Long assignee, long after, int count) {
-        return jdbc.query("SELECT t.id,t.title,t.status,(SELECT min(m.created_at) FROM ticket_messages m WHERE m.ticket_id=t.id),"
-                + "t.assignment_version FROM tickets t WHERE service_id=? AND "
-                + (assignee == null ? "assignee_user_id IS NULL" : "assignee_user_id=?") + " AND id>? ORDER BY id LIMIT ?",
-                (r,i) -> new QueueTicket(r.getLong(1),r.getString(2),r.getString(3),
-                        r.getObject(4,OffsetDateTime.class) == null ? null : r.getObject(4,OffsetDateTime.class).toInstant(),r.getLong(5)),
+        // Limit tickets first; assignment and its checkpoint share this statement's snapshot.
+        return jdbc.query("""
+                SELECT t.id,t.title,t.status,
+                    (SELECT min(m.created_at) FROM ticket_messages m WHERE m.ticket_id=t.id) AS created_at,
+                    t.assignment_version,customer.id AS latest_customer_id,customer.created_at AS latest_customer_at,
+                    (SELECT MAX(c.through_message_id) FROM ticket_customer_message_confirmations c
+                        WHERE c.ticket_id=t.id AND c.assignment_version=t.assignment_version) AS effective_through
+                FROM (SELECT id,title,status,assignment_version FROM tickets WHERE service_id=? AND
+                """ + (assignee == null ? "assignee_user_id IS NULL" : "assignee_user_id=?") + " AND id>? ORDER BY id LIMIT ?) t " + """
+                LEFT JOIN LATERAL (
+                    SELECT m.id,m.created_at FROM ticket_messages m
+                    WHERE m.ticket_id=t.id AND m.message_type IN ('INQUIRY','CUSTOMER_FOLLOWUP')
+                    ORDER BY m.id DESC LIMIT 1
+                ) customer ON TRUE ORDER BY t.id
+                """,
+                (r,i) -> new QueueTicket(r.getLong("id"),r.getString("title"),r.getString("status"),
+                        instant(r,"created_at"),r.getLong("assignment_version"),r.getObject("latest_customer_id",Long.class),
+                        instant(r,"latest_customer_at"),r.getObject("effective_through",Long.class)),
                 assignee == null ? new Object[]{service,after,count} : new Object[]{service,assignee,after,count});
+    }
+    private static java.time.Instant instant(ResultSet row,String column) throws SQLException {
+        var value=row.getObject(column,OffsetDateTime.class);
+        return value == null ? null : value.toInstant();
     }
     public Optional<TicketScope> ticket(long id, boolean lock) {
         return jdbc.query("SELECT id,service_id,assignee_user_id,assignment_version,requester_user_id FROM tickets WHERE id=?"

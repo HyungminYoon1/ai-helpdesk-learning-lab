@@ -9,7 +9,8 @@ public interface SupportRepository {
     record Service(long id, String code, String displayName) { }
     record Member(long agentId, String displayName, String role, boolean active) { }
     record TicketScope(long ticketId, Long serviceId, Long assigneeAgentId, long version, Long requesterUserId) { }
-    record QueueTicket(long id, String title, String status, Instant createdAt, long assignmentVersion) { }
+    record QueueTicket(long id, String title, String status, Instant createdAt, long assignmentVersion,
+            Long latestCustomerMessageId, Instant latestCustomerMessageAt, Long effectiveThroughMessageId) { }
     record Event(long id, long ticketId, long actorId, UUID requestId, String type, long expectedVersion,
             long assignmentVersion, Long fromAgentId, long toAgentId, String reason, Instant recordedAt) { }
 

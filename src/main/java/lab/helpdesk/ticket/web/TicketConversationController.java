@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.*;
 @Profile("postgres")
 @RequestMapping("/api/tickets/{ticketId}")
 public class TicketConversationController {
-    public record Capabilities(boolean canReply, boolean canFollowUp, Long expectedAssignmentVersion) { }
+    public record Capabilities(boolean canReply, boolean canFollowUp, boolean canViewConfirmations, Long expectedAssignmentVersion) { }
     public record Page(Long nextAfterId, boolean hasMore) { }
     public record MessageResponse(long id, MessageType type, String body, Instant createdAt, Long correctsMessageId) {
         static MessageResponse from(ConversationMessage message) {
@@ -37,7 +37,7 @@ public class TicketConversationController {
             Authentication authentication) {
         var conversation = service.read(ticketId, afterId, limit, AuthenticatedActorFactory.from(authentication));
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(new ConversationResponse(
-                TicketResponse.from(conversation.ticket()), new Capabilities(conversation.canReply(),conversation.canFollowUp(),conversation.expectedAssignmentVersion()),
+                TicketResponse.from(conversation.ticket()), new Capabilities(conversation.canReply(),conversation.canFollowUp(),conversation.canViewConfirmations(),conversation.expectedAssignmentVersion()),
                 conversation.messages().stream().map(MessageResponse::from).toList(),
                 new Page(conversation.nextAfterId(), conversation.hasMore())));
     }

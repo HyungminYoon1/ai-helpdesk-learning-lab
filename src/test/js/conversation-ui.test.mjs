@@ -8,7 +8,7 @@ import {createConversationClient, isConversation, isConversationMessage} from ".
 
 const key = "11111111-1111-4111-8111-111111111111";
 const message = (id = 2, body = "reply", correction = null) => ({id, type: "OFFICIAL_REPLY", body, correctsMessageId: correction, createdAt: "2026-10-23T01:00:00Z"});
-const page = (id = 1, canReply = true) => ({ticket: {id, title: "synthetic ticket", status: "OPEN"}, capabilities: {canReply, canFollowUp: !canReply, expectedAssignmentVersion: canReply ? 1 : null},
+const page = (id = 1, canReply = true) => ({ticket: {id, title: "synthetic ticket", status: "OPEN"}, capabilities: {canReply, canFollowUp: !canReply, canViewConfirmations: canReply, expectedAssignmentVersion: canReply ? 1 : null},
     messages: [{...message(1, "inquiry"), type: "INQUIRY"}], page: {nextAfterId: null, hasMore: false}});
 const response = (body, status = 200) => new Response(JSON.stringify(body), {status, headers: {"Content-Type": "application/json"}});
 const csrf = () => response({headerName: "X-CSRF-TOKEN", token: "synthetic-test-token"});
@@ -287,7 +287,7 @@ test("leaving the page clears conversation and draft before a history-cache rest
     const handlers = new Map(), nodes = new Map();
     let clears = 0;
     const source = readFileSync(new URL("../../main/resources/static/conversation-page.mjs", import.meta.url), "utf8");
-    const moduleBody = source.replace(/^import \{createConversationClient\} from "\.\/conversation-ui\.mjs";\r?\n/u, "");
+    const moduleBody = source.replace(/^import .*;\r?\n/gmu, "");
     const node = (selector) => {
         if (!nodes.has(selector)) nodes.set(selector, {
             value: "old draft", hidden: false, textContent: "old conversation", children: ["old message"],
@@ -297,6 +297,7 @@ test("leaving the page clears conversation and draft before a history-cache rest
     };
     vm.runInNewContext(moduleBody, {
         createConversationClient: () => ({clear() { clears++; }}),
+        attachCustomerConfirmations: () => ({observe() {}, clear() {}}),
         document: {querySelector: node},
         window: {fetch() {}, crypto: {randomUUID() {}}, addEventListener: (name, handler) => handlers.set(name, handler)},
         Option: class { constructor(label, value) { this.label = label; this.value = value; } }

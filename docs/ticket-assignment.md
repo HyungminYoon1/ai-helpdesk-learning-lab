@@ -38,6 +38,8 @@ Staff endpoints require Session AGENT; writes also require CSRF. Application rec
 
 IDs are positive signed 64-bit integers; an assignment expected version is nonnegative and less than Long.MAX_VALUE; canonical UUID string required. Browser clients reject numbers outside their safe integer range. Page limit 1..100. New committed event is 201; exact actor/ticket/UUID/operation/version/target/reason replay is 200. Return the original event separately from current assignment, since a later transfer may already exist. Same UUID with changed fields is 409 ASSIGNMENT_REQUEST_CONFLICT. Check current service read permission before replay, but replay before current owner/version checks. Replay does not restore new-write permission.
 
+The 2026-11-04 queue projection adds latestCustomerMessageId/At, effectiveThroughMessageId, needsConfirmation and canConfirm without changing its pagination or excluding RESOLVED tickets. Progress belongs to the current assignment; GET does not record confirmation. The exact fields, active-membership read capability and local focused verification are recorded in [customer-message confirmations](customer-message-confirmations.md#staff-queue-projection-2026-11-04).
+
 New operations reject stale versions (409 ASSIGNMENT_VERSION_CONFLICT), assigned claims (409 ASSIGNMENT_NOT_UNASSIGNED), unassigned transfers (409 ASSIGNMENT_REQUIRED), unauthorized transfer (403 ASSIGNMENT_FORBIDDEN), invalid/inactive/out-of-service targets (400 INVALID_ASSIGNEE). Do not auto-retry with a new UUID or silently refresh expected version.
 
 ## Official reply revision and read paths

@@ -16,6 +16,9 @@ public class TicketAssignmentService {
     public record Assignment(long ticketId,long serviceId,Long assigneeAgentId,long version,
             boolean canClaim,boolean canTransfer,boolean canReply) { }
     public record Change(Event event,Assignment assignment,boolean created) { }
+    public record QueueEntry(long id,String title,String status,java.time.Instant createdAt,long assignmentVersion,
+            Long latestCustomerMessageId,java.time.Instant latestCustomerMessageAt,Long effectiveThroughMessageId,
+            boolean needsConfirmation,boolean canConfirm) { }
     public record Page<T>(List<T> items,Long nextAfterId,boolean hasMore) { }
     private final SupportRepository repository;
     private final SupportAccess access;
@@ -32,11 +35,16 @@ public class TicketAssignmentService {
         return pageOf(repository.agents(service,after,limit+1),limit,Member::agentId);
     }
     @Transactional
-    public Page<QueueTicket> queue(long service,String view,long after,int limit,AuthenticatedActor actor) {
+    public Page<QueueEntry> queue(long service,String view,long after,int limit,AuthenticatedActor actor) {
         page(after,limit);
         if (!List.of("UNASSIGNED","MINE").contains(view)) throw new SupportException(INVALID_ASSIGNMENT_REQUEST);
         access.service(service,actor);
-        return pageOf(repository.queue(service,view.equals("MINE") ? access.actorId(actor) : null,after,limit+1),limit,QueueTicket::id);
+        boolean mine=view.equals("MINE");
+        var rows=repository.queue(service,mine ? access.actorId(actor) : null,after,limit+1);
+        return pageOf(rows.stream().map(row -> new QueueEntry(row.id(),row.title(),row.status(),row.createdAt(),row.assignmentVersion(),
+                row.latestCustomerMessageId(),row.latestCustomerMessageAt(),row.effectiveThroughMessageId(),
+                row.latestCustomerMessageId()!=null && (row.effectiveThroughMessageId()==null || row.effectiveThroughMessageId()<row.latestCustomerMessageId()),
+                mine && row.latestCustomerMessageId()!=null)).toList(),limit,QueueEntry::id);
     }
     @Transactional
     public Assignment read(long ticketId,AuthenticatedActor actor) {

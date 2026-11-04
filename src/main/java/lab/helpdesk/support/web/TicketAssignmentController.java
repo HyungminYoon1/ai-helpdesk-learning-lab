@@ -37,7 +37,7 @@ public class TicketAssignmentController {
         return ok(new TicketAssignmentService.Page<>(page.items().stream().map(m -> new Agent(m.agentId(),m.displayName(),m.role())).toList(),page.nextAfterId(),page.hasMore()));
     }
     @GetMapping("/api/services/{id}/assignment-queue")
-    public ResponseEntity<TicketAssignmentService.Page<SupportRepository.QueueTicket>> queue(@PathVariable long id,
+    public ResponseEntity<TicketAssignmentService.Page<TicketAssignmentService.QueueEntry>> queue(@PathVariable long id,
             @RequestParam(defaultValue="UNASSIGNED") String view,@RequestParam(defaultValue="0") long afterId,
             @RequestParam(defaultValue="50") int limit,Authentication authentication) {
         return ok(service.queue(id,view,afterId,limit,AuthenticatedActorFactory.from(authentication)));
