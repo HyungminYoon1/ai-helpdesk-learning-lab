@@ -1,5 +1,6 @@
 import {createConversationClient} from "./conversation-ui.mjs";
 import {attachCustomerConfirmations} from "./customer-confirmation-page.mjs";
+import {attachTicketStatus} from "./ticket-status-page.mjs";
 
 const readForm = document.querySelector("#conversation-read");
 const idInput = document.querySelector("#conversation-ticket-id");
@@ -21,6 +22,8 @@ let posting = false, replyReviewRequired = false, canReconfirmReply = false, can
 const displayed = new Set();
 const confirmations = attachCustomerConfirmations({fetchImpl: window.fetch.bind(window),
     newRequestId: () => window.crypto.randomUUID(), document});
+const ticketStatus = attachTicketStatus({fetchImpl: window.fetch.bind(window), newRequestId: () => window.crypto.randomUUID(), document,
+    requesterView: new URLSearchParams(window.location?.search ?? "").get("statusView") === "customer"});
 const labels = {
     "loading": "대화 조회 중입니다.", "posting": "저장 후 즉시 고객에게 공개됩니다. 답변을 저장하고 있습니다.",
     "invalid-id": "올바른 Ticket ID를 입력하세요.", "bad-request": "본문과 정정 대상을 확인하세요. 본문은 앞뒤 공백 제외 2,000자 이내입니다.",
@@ -68,6 +71,7 @@ const view = {
     setPosting(value) { posting = value; replyControls(); followupSend.disabled = value; },
     render(state) {
         confirmations.observe(state);
+        ticketStatus.observe(state);
         replyReviewRequired = state.replyReviewRequired ?? false;
         canReconfirmReply = state.canReconfirm ?? false;
         canReviewReply = state.canReviewReply ?? false;
@@ -92,7 +96,7 @@ const view = {
         if (!state.append) clearConversation();
         const selectedCorrection = correctionInput.value;
         if (!state.append) correctionInput.replaceChildren(new Option("일반 추가 안내", ""));
-        heading.textContent = `${data.ticket.id}: ${data.ticket.title} (${data.ticket.status})`;
+        heading.textContent = `${data.ticket.id}: ${data.ticket.title}`;
         replyForm.hidden = !data.capabilities.canReply && !state.canReconfirm && !state.canReviewReply;
         followupForm.hidden = !data.capabilities.canFollowUp && !state.canReconfirmFollowup;
         for (const message of data.messages) {
@@ -128,6 +132,7 @@ let previousTicket = null;
 idInput.addEventListener("input", () => {
     if (Number(idInput.value) !== previousTicket) {
         client.clear(); clearConversation(); bodyInput.value = ""; followupBody.value = "";
+        ticketStatus.clear();
     }
 });
 readForm.addEventListener("submit", (event) => {
@@ -159,6 +164,7 @@ if (window.location?.search) {
 window.addEventListener("pagehide", () => {
     client.clear();
     confirmations.clear();
+    ticketStatus.clear();
     clearConversation();
     bodyInput.value = "";
     followupBody.value = "";

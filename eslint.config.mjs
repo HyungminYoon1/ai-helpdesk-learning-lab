@@ -28,6 +28,7 @@ export default [
                 AbortController: "readonly",
                 Element: "readonly",
                 Option: "readonly",
+                URLSearchParams: "readonly",
                 document: "readonly",
                 window: "readonly"
             }

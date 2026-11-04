@@ -22,7 +22,7 @@ const client = createMyTicketsClient({fetchImpl: window.fetch.bind(window), view
         list.replaceChildren();
         for (const ticket of state.items) {
             const item = document.createElement("li"), link = document.createElement("a"), detail = document.createElement("p");
-            link.href = `/conversation.html?ticketId=${ticket.ticketId}`;
+            link.href = `/conversation.html?ticketId=${ticket.ticketId}&statusView=customer`;
             link.textContent = `#${ticket.ticketId} ${ticket.title}`;
             detail.textContent = `${ticket.status} / 최근 대화: ${ticket.lastActivityAt ?? "기록 없음"}`;
             item.append(link, detail); list.append(item);

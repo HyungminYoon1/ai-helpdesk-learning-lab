@@ -418,12 +418,21 @@ function pageHarness(fetchImpl, factory = () => key) {
     vm.runInNewContext(source.replace(/^import .*;\r?\n/gmu, ""), {
         createConversationClient: (options) => { client = createConversationClient(options); return client; },
         attachCustomerConfirmations: () => ({observe() {}, clear() {}}),
+        attachTicketStatus: () => ({observe() {}, clear() {}}),
+        URLSearchParams: globalThis.URLSearchParams,
         document: {querySelector: node, createElement: () => ({append() {}})},
         window: {fetch: fetchImpl, crypto: {randomUUID: factory}, addEventListener: (name, handler) => handlers.set(name, handler)},
         Option: class { constructor(label, value) { this.label = label; this.value = value; } }
     });
     return {client, node, handlers};
 }
+
+test("the conversation heading does not repeat a status from an older conversation snapshot", async () => {
+    const data = page(); data.ticket.status = "RESOLVED";
+    const h = pageHarness(async () => response(data));
+    await h.client.read(1);
+    assert.equal(h.node("#conversation-heading").textContent, "1: synthetic ticket");
+});
 
 test("the page retains a rejected draft until explicit review and clears body and correction before GET", async () => {
     let version = 1, posts = 0;
@@ -499,7 +508,7 @@ test("saving a reply clears only its draft and retains loaded correction choices
 
 test("leaving the page clears conversation and draft before a history-cache restoration", () => {
     const handlers = new Map(), nodes = new Map();
-    let clears = 0;
+    let clears = 0, statusClears = 0;
     const source = readFileSync(new URL("../../main/resources/static/conversation-page.mjs", import.meta.url), "utf8");
     const moduleBody = source.replace(/^import .*;\r?\n/gmu, "");
     const node = (selector) => {
@@ -512,12 +521,15 @@ test("leaving the page clears conversation and draft before a history-cache rest
     vm.runInNewContext(moduleBody, {
         createConversationClient: () => ({clear() { clears++; }}),
         attachCustomerConfirmations: () => ({observe() {}, clear() {}}),
+        attachTicketStatus: () => ({observe() {}, clear() { statusClears++; }}),
+        URLSearchParams: globalThis.URLSearchParams,
         document: {querySelector: node},
         window: {fetch() {}, crypto: {randomUUID() {}}, addEventListener: (name, handler) => handlers.set(name, handler)},
         Option: class { constructor(label, value) { this.label = label; this.value = value; } }
     });
     handlers.get("pagehide")();
     assert.equal(clears, 1);
+    assert.equal(statusClears, 1);
     assert.equal(node("#reply-body").value, "");
     assert.equal(node("#conversation-ticket-id").value, "");
     assert.equal(node("#conversation-messages").children.length, 0);

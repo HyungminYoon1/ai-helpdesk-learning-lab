@@ -38,6 +38,27 @@
             <button id="confirmation-send" type="submit" disabled>선택한 메시지까지 확인</button>
         </form>
     </section>
+    <section id="status-panel" hidden>
+        <h2>문의 처리 상태</h2>
+        <p>문의 처리 상태는 AI 작업이나 답변 저장과 별개입니다. 고객 글을 읽거나 답변을 저장하는 것만으로 해결 처리하지 않습니다.</p>
+        <p id="status-current"></p><p id="status-saved"></p>
+        <p id="status-message" role="status" aria-live="polite"></p><p id="status-draft"></p>
+        <button id="status-refresh" type="button">처리 상태 새로고침</button>
+        <button id="status-reset" type="button" hidden>거부된 제출 또는 오래된 초안 비우고 상태 다시 조회</button>
+        <form id="status-form">
+            <label id="status-action-label" for="status-action">처리 종류</label>
+            <select id="status-action"><option value="">직접 선택</option><option value="START">처리 시작</option><option value="RESOLVE">해결 처리</option><option value="REOPEN">문의 재개</option></select>
+            <label for="status-reason">처리 또는 재개 사유 (최대 500자)</label>
+            <textarea id="status-reason" rows="3" required></textarea>
+            <div id="status-resolution" hidden>
+                <p>대화에서 불러온 글을 직접 선택하세요. 최신 고객 글의 명시적 확인이 먼저 필요합니다. 답변 참조만으로 문제 해결이 자동 입증되지는 않습니다.</p>
+                <label for="status-reply">해결 근거인 공식 답변</label><select id="status-reply"><option value="">관련 공식 답변 선택</option></select>
+                <label for="status-through">직접 확인한 마지막 고객 글</label><select id="status-through"><option value="">직접 확인한 마지막 고객 글 선택</option></select>
+            </div>
+            <p>현재 담당자와 문의 등록자는 명시적으로 재개할 수 있습니다. 새 글만으로 자동 재개하지 않습니다. 저장 여부 미확인 시 같은 제출로 재확인하세요. 페이지를 떠나면 이 화면의 초안과 제출 ID는 지워집니다.</p>
+            <button id="status-send" type="submit" disabled>선택한 처리 저장</button>
+        </form>
+    </section>
     <form id="customer-followup" hidden>
         <h2>추가 문의 작성</h2>
         <p>같은 문제의 경과를 남겨주세요. 독립적인 새 문제는 새 문의로 접수하면 됩니다.</p>
