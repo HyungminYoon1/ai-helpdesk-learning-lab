@@ -12,6 +12,8 @@
 
 [V12 명시적 확인 저장/API](./docs/customer-message-confirmations.md)는 같은 Ticket/현재 배정의 MAX(through_message_id)를 읽는다. 늦은 작은 확인도 남기며 새 배정으로 과거 확인을 복사하지 않는다. 현재 담당자의 새 확인과 과거 제출의 재확인을 나누고 Commit 뒤 201/동일 제출 200을 반환한다. 새 HTTP/PostgreSQL 42개와 Migration 1개가 통과했다. 직원 목록 표시/확인 버튼과 새 Browser 실험은 다음 단위이며 이번 API에서 기존 화면 JS나 AI 처리는 변경하지 않았다.
 
+11/4 후속 구현은 직원 업무 목록에 최신 고객 Message/시각과 배정별 확인 범위를 연결한다. 대화 화면에서는 읽어 온 고객 글을 직접 선택하며, 선택 당시 배정 버전과 결과 미확인 제출을 고정한다. 고객 화면에는 직원 확인 정보를 표시하지 않는다. 새 목록 집중 8개와 기존 75개, JavaScript 전체 366개/Lint와 실제 합성 Browser/PostgreSQL 실험이 통과했다. Browser에서는 메시지 6건/배정 이력 4건/확인 2건과 Provider 0회를 대조했다. 최종 전체 Java는 Surefire 1,173개/Failsafe 2개, 실패/오류/Skip 0과 BUILD SUCCESS다. 집중 83개는 전체에 포함하며 위 11/3 결과와 합산하지 않는다. 기존 Surefire fork JVM의 30초 종료 제한 메시지는 다시 발생해 후속 점검으로 남긴다.
+
 위 실행 수치는 로컬 검증의 근거다. 이후 승인한 저장소 Push와 정확한 Commit의 원격 CI 결과는 [11/3 문서·구현 전달 기록](https://github.com/HyungminYoon1/jungle-sw-ai-lab-advanced-wil/blob/main/week12/lab-reports/2026-11-03-documentation-publication.md)으로 구분한다. 일반 Push CI의 Image 빌드와 수동 ECR 업로드/Cloud 배포도 별도다.
 
 ## Week 10 배정과 인계 (10/24 후속)

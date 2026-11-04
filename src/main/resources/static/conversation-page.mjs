@@ -1,4 +1,5 @@
 import {createConversationClient} from "./conversation-ui.mjs";
+import {attachCustomerConfirmations} from "./customer-confirmation-page.mjs";
 
 const readForm = document.querySelector("#conversation-read");
 const idInput = document.querySelector("#conversation-ticket-id");
@@ -15,6 +16,8 @@ const heading = document.querySelector("#conversation-heading");
 const list = document.querySelector("#conversation-messages");
 let cursor = null;
 const displayed = new Set();
+const confirmations = attachCustomerConfirmations({fetchImpl: window.fetch.bind(window),
+    newRequestId: () => window.crypto.randomUUID(), document});
 const labels = {
     "loading": "대화 조회 중입니다.", "posting": "저장 후 즉시 고객에게 공개됩니다. 답변을 저장하고 있습니다.",
     "invalid-id": "올바른 Ticket ID를 입력하세요.", "bad-request": "본문과 정정 대상을 확인하세요. 본문은 앞뒤 공백 제외 2,000자 이내입니다.",
@@ -45,6 +48,7 @@ function clearConversation() {
 const view = {
     setPosting(value) { sendButton.disabled = value; followupSend.disabled = value; },
     render(state) {
+        confirmations.observe(state);
         status.textContent = labels[state.kind] ?? "대화를 조회했습니다.";
         if (state.kind === "posting") {
             sendButton.disabled = true; followupSend.disabled = true;
@@ -118,6 +122,7 @@ if (window.location?.search) {
 // A back/forward-cache restoration must not reveal the previous account's conversation.
 window.addEventListener("pagehide", () => {
     client.clear();
+    confirmations.clear();
     clearConversation();
     bodyInput.value = "";
     followupBody.value = "";

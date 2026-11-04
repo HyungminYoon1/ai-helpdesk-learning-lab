@@ -89,7 +89,7 @@ class ConversationBrowserExperiment {
         var output=new java.io.ByteArrayOutputStream();
         Thread reader=Thread.ofVirtual().start(() -> {try{child.getInputStream().transferTo(output);}catch(Exception ignored){}});
         try {
-            assertThat(child.waitFor(Duration.ofMinutes(4).toMillis(),TimeUnit.MILLISECONDS)).isTrue();
+            assertThat(child.waitFor(Duration.ofMinutes(8).toMillis(),TimeUnit.MILLISECONDS)).as("bounded Browser CLI completion").isTrue();
             reader.join(2000);
             String raw=output.toString(java.nio.charset.StandardCharsets.UTF_8);
             // Emit only whitelisted stage/counters, never raw Browser/CLI/credential output.
@@ -115,13 +115,23 @@ class ConversationBrowserExperiment {
             assertThat(evidence.path("myTicketsVerified").asBoolean()).isTrue();
             assertThat(evidence.path("customerFollowupVerified").asBoolean()).isTrue();
             assertThat(evidence.path("headBodyEmpty").asBoolean()).isTrue();
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_assignment_events WHERE ticket_id=?",Long.class,ticket)).isEqualTo(3);
-            assertThat(jdbc.queryForObject("SELECT assignee_user_id FROM tickets WHERE id=?",Long.class,ticket)).isEqualTo(identity(SUPERVISOR));
+            assertThat(evidence.path("explicitConfirmationVerified").asBoolean()).isTrue();
+            assertThat(evidence.path("assignmentConfirmationScopeVerified").asBoolean()).isTrue();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM ticket_assignment_events WHERE ticket_id=?",Long.class,ticket)).isEqualTo(4);
+            assertThat(jdbc.queryForObject("SELECT assignee_user_id FROM tickets WHERE id=?",Long.class,ticket)).isEqualTo(identity(AGENT_B));
+            assertThat(jdbc.queryForObject("SELECT assignment_version FROM tickets WHERE id=?",Long.class,ticket)).isEqualTo(4L);
             assertThat(jdbc.queryForList("SELECT reply_assignment_version FROM ticket_messages WHERE ticket_id=? AND message_type='OFFICIAL_REPLY' ORDER BY id",Long.class,ticket)).containsExactly(1L,1L,2L,3L);
+            long inquiry=jdbc.queryForObject("SELECT id FROM ticket_messages WHERE ticket_id=? AND message_type='INQUIRY'",Long.class,ticket);
+            long followup=jdbc.queryForObject("SELECT id FROM ticket_messages WHERE ticket_id=? AND message_type='CUSTOMER_FOLLOWUP'",Long.class,ticket);
+            assertThat(jdbc.queryForList("SELECT assignment_version FROM ticket_customer_message_confirmations WHERE ticket_id=? ORDER BY id",Long.class,ticket)).containsExactly(3L,4L);
+            assertThat(jdbc.queryForList("SELECT through_message_id FROM ticket_customer_message_confirmations WHERE ticket_id=? ORDER BY id",Long.class,ticket)).containsExactly(inquiry,followup);
+            assertThat(jdbc.queryForList("SELECT actor_user_id FROM ticket_customer_message_confirmations WHERE ticket_id=? ORDER BY id",Long.class,ticket)).containsExactly(identity(SUPERVISOR),identity(AGENT_B));
             assertThat(Files.exists(run.resolve("conversation-agent.png"))).isTrue();
             assertThat(Files.exists(run.resolve("conversation-customer.png"))).isTrue();
+            assertThat(Files.exists(run.resolve("conversation-confirmation.png"))).isTrue();
+            assertThat(Files.exists(run.resolve("conversation-confirmation-handoff.png"))).isTrue();
             verifyNoInteractions(provider);
-            System.out.println("LOCAL_CUSTOMER_CONVERSATION_BROWSER_POSTGRES completed=true messages=6 assignmentEvents=3 providerCalls=0");
+            System.out.println("LOCAL_CUSTOMER_CONVERSATION_BROWSER_POSTGRES completed=true messages=6 assignmentEvents=4 confirmations=2 providerCalls=0");
         } finally {
             if(child.isAlive()){child.descendants().forEach(ProcessHandle::destroyForcibly);child.destroyForcibly();}
             reader.join(2000);

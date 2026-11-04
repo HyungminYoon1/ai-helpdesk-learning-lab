@@ -156,9 +156,45 @@ return true;
     [void](Run-Code $followupCode.Replace('TICKET_ID',[string]$ticketId))
     $customerScreenshot = ConvertTo-Json -InputObject (Join-Path $RunDirectory 'conversation-customer.png') -Compress
     [void](Run-Code "await page.screenshot({path:$customerScreenshot,fullPage:true}); return true;")
+    [void](Run-Code "if (!(await page.locator('#customer-confirmations').isHidden())) throw new Error('CUSTOMER_STAFF_STATE_VISIBLE'); return true;")
+    Logout
+    $stage = 'CURRENT_ASSIGNEE_CONFIRMATION'
+    Login 'SUPERVISOR'
+    [void](Invoke-Cli @('goto', "$base/assignments.html"))
+    [void](Invoke-Cli @('snapshot'))
+    [void](Run-Code "await page.locator('#queue-view').selectOption('MINE'); await page.locator('#assignment-queue a').waitFor({state:'visible'}); if (!(await page.locator('#assignment-queue').innerText()).includes('확인 필요')) throw new Error('QUEUE_CUSTOMER_ACTIVITY_MISSING'); await page.locator('#assignment-queue a').click(); await page.waitForFunction(()=>!document.querySelector('#customer-confirmations').hidden && !document.querySelector('#confirmation-target').disabled); return true;")
+    [void](Invoke-Cli @('snapshot'))
+    $confirmationCode = @'
+if (await page.locator('#confirmation-send').isEnabled()) throw new Error('CONFIRMATION_AUTO_SELECTED');
+const targets=await page.locator('#confirmation-target option').evaluateAll(options=>options.filter(o=>o.value).map(o=>Number(o.value)));
+if(targets.length!==2)throw new Error('CONFIRMATION_TARGET_KINDS');
+const missing=await page.evaluate(async()=> (await fetch('/api/tickets/TICKET_ID/customer-message-confirmations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientRequestId:crypto.randomUUID(),expectedAssignmentVersion:3,throughMessageId:1})})).status);
+if(missing!==403)throw new Error('CONFIRMATION_CSRF_FAILED');
+await page.locator('#confirmation-target').selectOption(String(targets[0]));
+const received=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/customer-message-confirmations'));
+await page.locator('#confirmation-send').click();
+const reply=await received;
+const sent=reply.request().postDataJSON(),result=await reply.json(),headers=await reply.request().allHeaders();
+if(reply.status()!==201 || Object.keys(sent).length!==3 || sent.expectedAssignmentVersion!==3 || sent.throughMessageId!==targets[0]
+    || result.currentConfirmation.latestCustomerMessageId!==targets[1] || !result.currentConfirmation.needsConfirmation
+    || !Object.keys(headers).includes('x-csrf-token') || !(headers.cookie??'').includes('JSESSIONID='))throw new Error('EXPLICIT_CONFIRMATION_FAILED');
+await page.waitForFunction(()=>document.querySelector('#confirmation-current').textContent.includes('확인 필요') && !document.querySelector('#confirmation-refresh').disabled);
+return {throughMessageId:targets[0],latestCustomerMessageId:targets[1]};
+'@
+    [void](Run-Code $confirmationCode.Replace('TICKET_ID',[string]$ticketId))
+    $confirmationScreenshot = ConvertTo-Json -InputObject (Join-Path $RunDirectory 'conversation-confirmation.png') -Compress
+    [void](Run-Code "await page.screenshot({path:$confirmationScreenshot,fullPage:true}); return true;")
+    $stage = 'CONFIRMATION_HANDOFF_SCOPE'
+    Transfer $ticketId $agentBId 4
+    Logout
+    Login 'AGENT_B'
+    Open-Conversation $ticketId 200
+    [void](Run-Code "await page.waitForFunction(()=>!document.querySelector('#confirmation-target').disabled); const summary=await page.locator('#confirmation-current').innerText(); if (!summary.includes('v4') || !summary.includes('현재 배정의 확인 기록 없음')) throw new Error('CONFIRMATION_SCOPE_COPIED'); await page.locator('#confirmation-target').selectOption({index:2}); const received=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/customer-message-confirmations')); await page.locator('#confirmation-send').click(); const reply=await received; if(reply.status()!==201 || (await reply.json()).currentConfirmation.needsConfirmation)throw new Error('NEW_ASSIGNEE_CONFIRMATION_FAILED'); await page.waitForFunction(()=>document.querySelector('#confirmation-current').textContent.includes('추가 확인할 글 없음') && !document.querySelector('#confirmation-refresh').disabled); return true;")
+    $finalConfirmationScreenshot = ConvertTo-Json -InputObject (Join-Path $RunDirectory 'conversation-confirmation-handoff.png') -Compress
+    [void](Run-Code "await page.screenshot({path:$finalConfirmationScreenshot,fullPage:true}); return true;")
     [ordered]@{evidence='LOCAL_CONVERSATION_BROWSER_POSTGRES';completed=$true;ticketId=$ticketId;replyId=$firstReplyId;
         originalPreserved=$true;ownerIsolation=$true;correctionVisible=$true;textOnlyRendering=$true;
-        myTicketsVerified=$true;customerFollowupVerified=$true;headBodyEmpty=$true;
+        myTicketsVerified=$true;customerFollowupVerified=$true;headBodyEmpty=$true;explicitConfirmationVerified=$true;assignmentConfirmationScopeVerified=$true;
         sessionCookieObserved=$true;csrfHeaderObserved=$true;reloginVerified=$true} | ConvertTo-Json -Compress
 } catch {
     [ordered]@{evidence='LOCAL_CONVERSATION_BROWSER_POSTGRES';completed=$false;stage=$stage;failureCode='BROWSER_STEP_FAILED'} | ConvertTo-Json -Compress

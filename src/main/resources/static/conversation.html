@@ -22,6 +22,21 @@
     <h2 id="conversation-heading">대화 내역</h2>
     <ol id="conversation-messages"></ol>
     <button id="conversation-more" type="button" hidden>다음 대화 읽기</button>
+    <section id="customer-confirmations" hidden>
+        <h2>고객 메시지 확인</h2>
+        <p>현재 담당자가 직접 확인한 범위를 기록합니다. 조회만으로 확인 처리하거나 문의를 해결 상태로 바꾸지 않습니다.</p>
+        <p id="confirmation-current"></p>
+        <p id="confirmation-status" role="status" aria-live="polite"></p>
+        <p id="confirmation-result"></p>
+        <button id="confirmation-refresh" type="button">확인 상태 새로고침</button>
+        <form id="confirmation-form">
+            <label for="confirmation-target">확인할 마지막 고객 메시지</label>
+            <select id="confirmation-target" required><option value="">확인할 고객 메시지 선택</option></select>
+            <p id="confirmation-selection">확인할 메시지를 직접 선택하세요.</p>
+            <p>화면에 읽어 온 고객 메시지만 선택할 수 있습니다. 이후 도착한 글은 자동 확인되지 않습니다. 저장 여부 미확인 시 같은 제출로 재확인하세요. 페이지를 떠나면 선택과 제출 ID는 지워집니다.</p>
+            <button id="confirmation-send" type="submit" disabled>선택한 메시지까지 확인</button>
+        </form>
+    </section>
     <form id="customer-followup" hidden>
         <h2>추가 문의 작성</h2>
         <p>같은 문제의 경과를 남겨주세요. 독립적인 새 문제는 새 문의로 접수하면 됩니다.</p>

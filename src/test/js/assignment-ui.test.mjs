@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {createAssignmentClient, isAssignment, isSupportPage} from "../../main/resources/static/assignment-ui.mjs";
+import {createAssignmentClient, isAssignment, isSupportPage, isAssignmentQueuePage} from "../../main/resources/static/assignment-ui.mjs";
 
 const key = "11111111-1111-4111-8111-111111111111";
 const assigned = (ticketId = 1, owner = null, version = 0) => ({ticketId, serviceId: 1, assigneeAgentId: owner, version,
@@ -15,6 +15,19 @@ function harness(fetchImpl) {
         view: {render: (state) => states.push(state), setBusy: (value) => busy.push(value)}})};
 }
 function deferred() { let resolve; const promise = new Promise((done) => { resolve = done; }); return {resolve, promise}; }
+
+test("queue rejects inconsistent customer progress and timestamps without excluding resolved tickets", () => {
+    const item = {id: 1, title: "synthetic", status: "RESOLVED", createdAt: null, assignmentVersion: 1,
+        latestCustomerMessageId: 30, latestCustomerMessageAt: "2026-11-04T01:00:00Z", effectiveThroughMessageId: null,
+        needsConfirmation: true, canConfirm: true};
+    const page = (changes = {}) => ({items: [{...item, ...changes}], hasMore: false, nextAfterId: null});
+    assert.equal(isAssignmentQueuePage(page()), true);
+    for (const changes of [{title: null}, {assignmentVersion: 0}, {latestCustomerMessageAt: null},
+        {latestCustomerMessageAt: "invalid"}, {effectiveThroughMessageId: 31}, {needsConfirmation: false}, {canConfirm: "yes"}])
+        assert.equal(isAssignmentQueuePage(page(changes)), false);
+    assert.equal(isAssignmentQueuePage(page({assignmentVersion: 0, canConfirm: false})), true);
+    assert.equal(isAssignmentQueuePage(page({latestCustomerMessageId: null, latestCustomerMessageAt: null, needsConfirmation: false, canConfirm: false})), true);
+});
 
 test("assignment state and ordered bounded pages reject unsafe or inconsistent values", () => {
     assert.equal(isAssignment(assigned(), 1), true);

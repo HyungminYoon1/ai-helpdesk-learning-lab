@@ -1,3 +1,5 @@
+import {isConfirmationState} from "./customer-confirmation-ui.mjs";
+
 const id = (value) => Number.isSafeInteger(value) && value > 0;
 const version = (value) => Number.isSafeInteger(value) && value >= 0;
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -9,6 +11,15 @@ export function isSupportPage(data, after = 0, itemId = "id") {
     let last = after;
     for (const item of data.items) { if (!object(item) || !id(item[itemId]) || item[itemId] <= last) return false; last = item[itemId]; }
     return data.hasMore ? data.items.length > 0 && data.nextAfterId === last : data.nextAfterId === null;
+}
+export function isAssignmentQueuePage(data, after = 0) {
+    return isSupportPage(data, after) && data.items.every((item) => typeof item.title === "string"
+        && ["OPEN", "IN_PROGRESS", "RESOLVED"].includes(item.status)
+        && (item.createdAt === null || typeof item.createdAt === "string" && Number.isFinite(Date.parse(item.createdAt)))
+        && (item.latestCustomerMessageId === null ? item.latestCustomerMessageAt === null
+            : typeof item.latestCustomerMessageAt === "string" && Number.isFinite(Date.parse(item.latestCustomerMessageAt)))
+        && isConfirmationState({assignmentVersion: item.assignmentVersion, effectiveThroughMessageId: item.effectiveThroughMessageId,
+            latestCustomerMessageId: item.latestCustomerMessageId, needsConfirmation: item.needsConfirmation, canConfirm: item.canConfirm}));
 }
 const failed = (status) => ({kind: ({400: "invalid-input", 401: "login-required", 403: "forbidden", 404: "not-found", 409: "conflict"})[status] ?? "unavailable"});
 

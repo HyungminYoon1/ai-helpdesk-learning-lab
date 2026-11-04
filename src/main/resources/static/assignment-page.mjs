@@ -1,4 +1,4 @@
-import {createAssignmentClient, isSupportPage} from "./assignment-ui.mjs";
+import {createAssignmentClient, isSupportPage, isAssignmentQueuePage} from "./assignment-ui.mjs";
 
 const el = (name) => document.querySelector(`#${name}`);
 const status = el("assignment-status"), service = el("support-service"), ticket = el("assignment-ticket-id");
@@ -93,13 +93,18 @@ async function loadQueue(append = false) {
     try {
         const data = await get(`/api/services/${selectedService}/assignment-queue?view=${el("queue-view").value}&afterId=${after}&limit=50`);
         if (sequence !== queueSequence || gen !== pageGeneration) return;
-        if (!isSupportPage(data, after)) throw new Error("invalid queue");
+        if (!isAssignmentQueuePage(data, after)) throw new Error("invalid queue");
         if (!append) queue.replaceChildren();
         for (const entry of data.items) {
-            const row = document.createElement("li"), button = document.createElement("button");
+            const row = document.createElement("li"), button = document.createElement("button"), progress = document.createElement("p"), conversation = document.createElement("a");
             button.type = "button"; button.textContent = `#${entry.id} ${entry.title} (${entry.status}) / ${entry.createdAt ?? "접수 시각 미확인"}`;
             button.addEventListener("click", () => { client.clear(); ticket.value = String(entry.id); el("transfer-reason").value = ""; void client.read(entry.id); });
-            row.append(button); queue.append(row);
+            progress.textContent = `배정 v${entry.assignmentVersion} / `
+                + (entry.latestCustomerMessageId === null ? "고객 메시지 없음" : `최신 고객 메시지 #${entry.latestCustomerMessageId} (${entry.latestCustomerMessageAt})`)
+                + (entry.effectiveThroughMessageId === null ? " / 현재 배정의 확인 기록 없음" : ` / #${entry.effectiveThroughMessageId}까지 확인`)
+                + (entry.needsConfirmation ? " / 확인 필요" : " / 추가 확인할 글 없음");
+            conversation.href = `/conversation.html?ticketId=${entry.id}`; conversation.textContent = "대화와 확인 범위 보기";
+            row.append(button, progress, conversation); queue.append(row);
         }
         queueCursor = data.nextAfterId; el("queue-more").hidden = !data.hasMore;
     } catch { if (sequence === queueSequence && gen === pageGeneration) { queue.replaceChildren(); el("queue-more").hidden = true; status.textContent = "업무 목록을 읽지 못했습니다."; } }
