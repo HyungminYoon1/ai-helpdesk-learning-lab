@@ -3,8 +3,8 @@ import {createCustomerConfirmationClient} from "./customer-confirmation-ui.mjs";
 export function attachCustomerConfirmations({fetchImpl, newRequestId, document}) {
     const el = (id) => document.querySelector(`#${id}`);
     const panel = el("customer-confirmations"), form = el("confirmation-form"), target = el("confirmation-target");
-    const send = el("confirmation-send"), refresh = el("confirmation-refresh"), status = el("confirmation-status");
-    let selectedTicket = null, busy = false, canConfirm = false, canReconfirm = false;
+    const send = el("confirmation-send"), refresh = el("confirmation-refresh"), reselect = el("confirmation-reselect"), status = el("confirmation-status");
+    let selectedTicket = null, busy = false, canConfirm = false, canReconfirm = false, canReselect = false;
     const known = new Set();
     const labels = {loading: "확인 상태를 조회하고 있습니다.", posting: "선택한 고객 메시지까지 확인을 기록하고 있습니다.",
         "invalid-input": "고객 메시지를 선택하고 현재 담당 권한을 확인하세요.", "login-required": "로그인이 필요합니다.",
@@ -12,22 +12,28 @@ export function attachCustomerConfirmations({fetchImpl, newRequestId, document})
         unavailable: "확인 상태를 읽지 못했습니다. 상태 조회를 다시 시도하세요.",
         "unknown-outcome": "저장 여부 미확인입니다. 같은 제출 재확인 버튼으로 결과를 확인하세요.",
         "unconfirmed-change": "미확인 제출의 대상을 바꿀 수 없습니다. 먼저 같은 제출을 재확인하세요.",
+        "version-conflict": "담당 배정이 바뀌어 요청이 거부됐습니다. 배정을 다시 조회하고 확인할 글을 다시 선택하세요.",
+        "selection-review-required": "기존 선택을 새 배정에 자동 적용하지 않습니다. 배정을 다시 조회하고 범위를 다시 선택하세요.",
+        "selection-reset": "기존 선택을 비웠습니다. 현재 배정을 조회한 뒤 범위를 직접 선택하세요.",
         "saved-refresh-failed": "확인 저장은 완료됐지만 현재 상태를 읽지 못했습니다. 저장 대신 상태 조회를 다시 시도하세요."};
     function buttons() {
-        target.disabled = busy || canReconfirm || !canConfirm;
-        send.disabled = busy || !canReconfirm && (!canConfirm || !target.value);
+        target.disabled = busy || canReconfirm || canReselect || !canConfirm;
+        send.disabled = busy || canReselect || !canReconfirm && (!canConfirm || !target.value);
         send.textContent = canReconfirm ? "같은 제출 재확인" : "선택한 메시지까지 확인";
         refresh.disabled = busy;
+        reselect.hidden = !canReselect; reselect.disabled = busy;
     }
     const client = createCustomerConfirmationClient({fetchImpl, newRequestId, view: {
         setBusy(value) { busy = value; buttons(); },
         render(state) {
             canReconfirm = state.canReconfirm;
+            canReselect = state.canReselect;
             if (state.kind === "cleared") { canConfirm = false; return; }
             status.textContent = labels[state.kind] ?? "현재 확인 상태를 조회했습니다.";
             if (state.kind === "current") {
                 const data = state.currentConfirmation;
                 canConfirm = data.canConfirm;
+                if (canReselect) status.textContent = labels["version-conflict"];
                 el("confirmation-current").textContent = `현재 배정 v${data.assignmentVersion} / `
                     + (data.effectiveThroughMessageId === null ? "현재 배정의 확인 기록 없음" : `고객 메시지 #${data.effectiveThroughMessageId}까지 확인`)
                     + (data.latestCustomerMessageId === null ? " / 고객 메시지 없음" : ` / 최신 고객 메시지 #${data.latestCustomerMessageId}`)
@@ -40,6 +46,7 @@ export function attachCustomerConfirmations({fetchImpl, newRequestId, document})
                 el("confirmation-result").textContent = `저장 확인: 배정 v${saved.assignmentVersion}, 고객 메시지 #${saved.throughMessageId}까지. 현재 배정 상태와 구분한 이력입니다.`;
                 target.value = "";
             }
+            if (state.kind === "selection-reset") target.value = "";
             el("confirmation-selection").textContent = state.selectedTarget === null ? "확인할 메시지를 직접 선택하세요."
                 : `선택한 범위: 배정 v${state.selectedVersion}, 고객 메시지 #${state.selectedTarget}까지`;
             buttons();
@@ -51,8 +58,9 @@ export function attachCustomerConfirmations({fetchImpl, newRequestId, document})
     });
     form.addEventListener("submit", (event) => { event.preventDefault(); void client.confirm(); });
     refresh.addEventListener("click", () => { if (selectedTicket !== null) void client.read(selectedTicket); });
+    reselect.addEventListener("click", () => { void client.reselect(); });
     function clear() {
-        client.clear(); selectedTicket = null; known.clear(); panel.hidden = true; canConfirm = false; canReconfirm = false;
+        client.clear(); selectedTicket = null; known.clear(); panel.hidden = true; canConfirm = false; canReconfirm = false; canReselect = false;
         target.replaceChildren(new Option("확인할 고객 메시지 선택", ""));
         el("confirmation-current").textContent = ""; el("confirmation-result").textContent = "";
         el("confirmation-selection").textContent = ""; status.textContent = "";

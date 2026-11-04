@@ -26,11 +26,11 @@ function isChange(data, pending) {
 
 // Stores an explicit selection and its assignment version; refresh never expands the target.
 export function createCustomerConfirmationClient({fetchImpl, view, newRequestId}) {
-    let selected = null, generation = 0, readSequence = 0, currentState = null, target = null, pending = null, posting = false;
+    let selected = null, generation = 0, readSequence = 0, currentState = null, target = null, pending = null, posting = false, versionRejected = false;
     const render = (state) => view.render({...state, selectedTarget: target?.throughMessageId ?? null,
-        selectedVersion: target?.expectedAssignmentVersion ?? null, canReconfirm: pending !== null});
+        selectedVersion: target?.expectedAssignmentVersion ?? null, canReconfirm: pending !== null && !versionRejected, canReselect: versionRejected});
     async function read(ticket) {
-        if (selected !== ticket) { generation++; selected = ticket; currentState = null; target = null; pending = null; }
+        if (selected !== ticket) { generation++; selected = ticket; currentState = null; target = null; pending = null; versionRejected = false; }
         const sequence = ++readSequence, gen = generation;
         const current = () => selected === ticket && gen === generation && sequence === readSequence;
         if (!id(ticket)) { currentState = null; render({kind: "invalid-input"}); return false; }
@@ -47,6 +47,7 @@ export function createCustomerConfirmationClient({fetchImpl, view, newRequestId}
     }
     function choose(throughMessageId) {
         if (posting) return;
+        if (versionRejected) { render({kind: "selection-review-required"}); return; }
         if (pending) { render({kind: "unconfirmed-change"}); return; }
         if (!id(throughMessageId) || !currentState?.canConfirm) { render({kind: "invalid-input"}); return; }
         target = {throughMessageId, expectedAssignmentVersion: currentState.assignmentVersion};
@@ -54,6 +55,7 @@ export function createCustomerConfirmationClient({fetchImpl, view, newRequestId}
     }
     async function confirm() {
         if (posting) return;
+        if (versionRejected) { render({kind: "selection-review-required"}); return; }
         if (!id(selected) || !pending && (!currentState?.canConfirm || target === null)) { render({kind: "invalid-input"}); return; }
         const ticket = selected, gen = generation;
         const current = () => selected === ticket && generation === gen;
@@ -82,8 +84,20 @@ export function createCustomerConfirmationClient({fetchImpl, view, newRequestId}
                 });
             } catch { if (current()) render({kind: "unknown-outcome"}); return; }
             if (!current()) return;
-            // Preserve exact submission even on 409 or 5xx; never replace its version or target.
-            if (!response.ok) { render(response.status >= 500 ? {kind: "unknown-outcome"} : failed(response.status)); return; }
+            // Only this typed conflict is emitted after authorized submission lookup found no saved command.
+            if (!response.ok) {
+                if (response.status === 409) {
+                    let problem;
+                    try { problem = await response.json(); } catch { /* An unreadable error cannot prove rejection. */ }
+                    if (!current()) return;
+                    if (problem !== null && typeof problem === "object" && Object.hasOwn(problem, "code")
+                            && problem.code === "ASSIGNMENT_VERSION_CONFLICT") {
+                        versionRejected = true; currentState = null; readSequence++;
+                        render({kind: "version-conflict"}); return;
+                    }
+                }
+                render(response.status >= 500 ? {kind: "unknown-outcome"} : failed(response.status)); return;
+            }
             try { saved = await response.json(); } catch { if (current()) render({kind: "unknown-outcome"}); return; }
             if (!current()) return;
             if (![200, 201].includes(response.status) || !isChange(saved, pending)) { render({kind: "unknown-outcome"}); return; }
@@ -94,7 +108,15 @@ export function createCustomerConfirmationClient({fetchImpl, view, newRequestId}
             if (!await read(ticket) && current()) render({kind: "saved-refresh-failed", confirmation});
         } finally { posting = false; view.setBusy(false); }
     }
+    async function reselect() {
+        if (posting || !versionRejected || !id(selected)) return false;
+        const ticket = selected;
+        // Explicit user action retires a known rejected command; it never sends a replacement POST.
+        pending = null; target = null; currentState = null; versionRejected = false;
+        render({kind: "selection-reset"});
+        return read(ticket);
+    }
     function suspend() { readSequence++; currentState = null; }
-    function clear() { generation++; readSequence++; selected = null; currentState = null; target = null; pending = null; render({kind: "cleared"}); }
-    return {read, choose, confirm, suspend, clear};
+    function clear() { generation++; readSequence++; selected = null; currentState = null; target = null; pending = null; versionRejected = false; render({kind: "cleared"}); }
+    return {read, choose, confirm, reselect, suspend, clear};
 }

@@ -58,7 +58,7 @@ await page.route('**'+postPath+'/current',async route=>{
 await page.locator('#confirmation-target').selectOption('INQUIRY_ID');
 await page.locator('#confirmation-send').click();
 await page.waitForFunction(()=>document.querySelector('#confirmation-status').textContent.includes('저장 여부 미확인') && !document.querySelector('#confirmation-send').disabled);
-if(lost!==1 || posts.length!==1 || await page.locator('#confirmation-target').isEnabled())throw new Error('UNKNOWN_SUBMISSION_NOT_RETAINED');
+if(lost!==1 || posts.length!==1 || await page.locator('#confirmation-target').isEnabled() || !(await page.locator('#confirmation-reselect').isHidden()))throw new Error('UNKNOWN_SUBMISSION_NOT_RETAINED');
 await page.screenshot({path:UNKNOWN_SCREENSHOT,fullPage:true});
 await page.locator('#confirmation-refresh').click();
 await page.waitForFunction(()=>document.querySelector('#confirmation-current').textContent.includes('#INQUIRY_ID까지 확인') && !document.querySelector('#confirmation-refresh').disabled);

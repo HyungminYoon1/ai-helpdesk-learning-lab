@@ -36,6 +36,10 @@ Selecting a target captures both throughMessageId and expectedAssignmentVersion.
 
 The client generates a UUID only when it is ready to POST with CSRF. Any unconfirmed POST preserves the exact UUID/version/target for explicit replay; a changed target is blocked until that submission is reconciled or the page is left. It never submits automatically. A matching 200/201 response confirms that historical submission; its current-state snapshot is not used to overwrite a newer read. The UI shows the historical result separately and GETs current state again. If this GET fails, the saved submission is cleared and only the read is retried.
 
+For a POST response with both HTTP 409 and code ASSIGNMENT_VERSION_CONFLICT, the confirmation endpoint has already checked current service access and looked up this actor's submission before rejecting the old version, without inserting a new record. The UI keeps the old selection but disables resubmission and offers an explicit reselection button. Only that user action clears the rejected pending command and target, then GETs current state again. A fresh read must permit confirmation and the user must select a loaded customer Message before a new UUID/version can be submitted. Ordinary refresh alone does not replace the old selection, and reset never POSTs automatically.
+
+Other 409 codes (including CONFIRMATION_REQUEST_CONFLICT), missing/malformed error JSON, connection failures and 4xx/5xx with an unexpected status/code pairing cannot enable this action. They retain the original pending command. The UI trusts only the recognized status/code combination from this endpoint, never a suggested replacement version or raw error text. This refines reconciliation of a known version rejection; it is not a general rule that any HTTP 409 proves an earlier command was never stored.
+
 Ticket generation/read sequence guards reject late GET/JSON/POST responses. pagehide clears the panel, in-memory selection and pending submission; no persistent recovery or local storage is introduced. Customer views never render the staff panel. Neither confirmation nor refresh changes Ticket state or creates messages/AI work. These controls record an explicit declaration, not proof that a human read or understood the text.
 
 ## Storage and Commit
@@ -61,6 +65,7 @@ Failed INSERT/confirmed Commit rollback removes only that transaction's new rows
 | UI guesses staff rights from ownership/reply rights versus an explicit read capability | Add canViewConfirmations from the existing service membership result; keep sensitive progress in the protected endpoint | Conversation service/DTO/decoder. Non-assignees can read; revoked owners remain customers |
 | Auto-select latest/version or preserve a deliberate selection | Capture the target and assignment together; preserve the exact pending request across refresh and handoff | Confirmation client/panel and Node tests. Unknown POST replay does not become a new confirmation |
 | Apply POST's historical/current response or refresh authoritative current state | Display the saved event separately, then GET current state; a failed GET never repeats the saved POST | Confirmation client/panel. Late responses cannot replace the selected Ticket's newer state |
+| Require full-page re-entry, silently update versions, discard all errors or provide typed conflict recovery | Only 409/ASSIGNMENT_VERSION_CONFLICT enables explicit reset, authorized GET and a fresh selection/new UUID. Keep ambiguous outcomes intact | Confirmation client/panel/HTML and tests. This endpoint's lookup-before-version-check order is the basis; no schema/server policy or audit deletion changes |
 
 ## Verification
 
@@ -111,3 +116,17 @@ The focused experiment passed with upstream confirmation POST results 201/200/40
 ```
 
 The explicit experiment is outside default *Test execution. Its ignored log is target/week12-confirmation-authority-browser.log. Application code/schema, production identities/permissions, external AI and cloud resources are unchanged.
+
+## Explicit selection after a rejected assignment version
+
+The subsequent UI slice adds the explicit reselection action described above. CustomerConfirmationReselectionBrowserExperiment first captures a visible selection in assignment 1. At a file gate, the isolated fixture calls the existing transactional application service to hand off A-to-B-to-A, committing assignment 3. It does not add a production test/admin endpoint or claim to test B's Browser login. The stale HTTP POST receives the actual server's typed 409. Refresh shows current assignment 3 while retaining the original version-1 selection and keeping submit/target disabled. Explicit reset sends GET only, leaves the target empty and submit disabled, then the user's new choice produces a different UUID/version 3 and 201.
+
+The real PostgreSQL check finds one confirmation for the intended actor/Message in assignment 3. Original Ticket title/status/requester/service, Message/Job/Attempt/Suggestion/category/membership data and the first assignment event are preserved. The fixture intentionally adds two handoff events and advances the assignment version to 3. Three screenshots (rejected old selection, empty fresh selection, saved new-assignment confirmation) were inspected. The reset applies only to this confirmation widget; other forms/drafts still need their own refresh/discard workflow.
+
+Node passed 380 tests (14 new, including typed-versus-ambiguous errors, failed authorization/read on reset, late selection reads and panel controls); ESLint passed. The new reselection experiment and existing response-loss and authority experiments passed together: three explicit Browser/PostgreSQL cases, zero failures/errors/skips and BUILD SUCCESS, with Provider interactions zero. The response-loss Browser case also verifies that its unknown outcome never exposes reselection. These runs are separate from the earlier full Java 1,173+2 count; backend code/schema is unchanged and that full run was not repeated. The pre-existing full-suite JVM shutdown issue remains open.
+
+```powershell
+.\mvnw.cmd -B -ntp '-Dtest=CustomerConfirmationReselectionBrowserExperiment,CustomerConfirmationRecoveryBrowserExperiment,CustomerConfirmationAuthorityBrowserExperiment' test
+```
+
+Ignored logs: target/week12-reselection-all-node.log, target/week12-reselection-eslint.log and target/week12-reselection-browsers.log. No remote CI, image publication or cloud execution is established by this local slice.

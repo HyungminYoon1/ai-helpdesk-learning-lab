@@ -163,8 +163,79 @@ test("mismatched saved target is unconfirmed and does not consume the original p
     await h.client.confirm(); assert.equal(posts[1], posts[0]);
 });
 
+test("typed version rejection requires explicit reset, fresh read, new selection and a new UUID", async () => {
+    let snapshot = current(), keys = 0; const posts = [];
+    const nextKey = "22222222-2222-4222-8222-222222222222";
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") {
+            posts.push(JSON.parse(options.body));
+            if (posts.length === 1) { snapshot = current({assignmentVersion: 3}); return response({code: "ASSIGNMENT_VERSION_CONFLICT"}, 409); }
+            snapshot = current({assignmentVersion: 3, effectiveThroughMessageId: 30, needsConfirmation: false});
+            return response(change({confirmation: {...change().confirmation, assignmentVersion: 3}, currentConfirmation: snapshot}), 201);
+        }
+        return response(snapshot);
+    }, () => ++keys === 1 ? key : nextKey);
+    await h.client.read(1); h.client.choose(30); await h.client.confirm();
+    assert.equal(h.states.at(-1).kind, "version-conflict");
+    assert.equal(h.states.at(-1).canReselect, true); assert.equal(h.states.at(-1).canReconfirm, false);
+    assert.equal(h.states.at(-1).selectedVersion, 1);
+    await h.client.read(1); h.client.choose(31); await h.client.confirm();
+    assert.equal(posts.length, 1); assert.equal(h.states.at(-1).kind, "selection-review-required");
+    assert.equal(h.states.at(-1).selectedTarget, 30); assert.equal(h.states.at(-1).selectedVersion, 1);
+    assert.equal(await h.client.reselect(), true);
+    assert.equal(h.states.at(-1).selectedTarget, null); assert.equal(h.states.at(-1).canReselect, false);
+    await h.client.confirm(); assert.equal(posts.length, 1); assert.equal(keys, 1);
+    h.client.choose(30); await h.client.confirm();
+    assert.deepEqual(posts, [{clientRequestId: key, throughMessageId: 30, expectedAssignmentVersion: 1},
+        {clientRequestId: nextKey, throughMessageId: 30, expectedAssignmentVersion: 3}]);
+});
+for (const [name, status, body] of [
+    ["payload conflict", 409, {code: "CONFIRMATION_REQUEST_CONFLICT"}], ["unknown code", 409, {code: "OTHER"}],
+    ["missing code", 409, {}], ["null code", 409, {code: null}], ["array", 409, ["ASSIGNMENT_VERSION_CONFLICT"]],
+    ["server failure", 500, {code: "ASSIGNMENT_VERSION_CONFLICT"}], ["not assignee", 403, {code: "ASSIGNMENT_VERSION_CONFLICT"}],
+    ["missing permission", 404, {code: "ASSIGNMENT_VERSION_CONFLICT"}], ["unreadable body", 409, undefined]
+]) test(`${name} cannot retire an unconfirmed command or offer version reselection`, async () => {
+    let reads = 0; const posts = [];
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") { posts.push(options.body); return body === undefined ? new Response("invalid-json", {status}) : response(body, status); }
+        reads++; return response(current());
+    });
+    await h.client.read(1); h.client.choose(30); await h.client.confirm();
+    assert.equal(h.states.at(-1).canReselect, false); assert.equal(h.states.at(-1).canReconfirm, true);
+    assert.equal(await h.client.reselect(), false); assert.equal(reads, 1);
+    h.client.choose(31); await h.client.confirm();
+    assert.equal(posts.length, 2); assert.equal(posts[0], posts[1]);
+});
+for (const status of [401, 404, 503]) test(`reselection GET ${status} does not grant a new write or re-use the old target`, async () => {
+    let reads = 0, posts = 0;
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") { posts++; return response({code: "ASSIGNMENT_VERSION_CONFLICT"}, 409); }
+        return ++reads === 1 ? response(current()) : response({}, status);
+    });
+    await h.client.read(1); h.client.choose(30); await h.client.confirm(); await h.client.reselect();
+    assert.equal(h.states.at(-1).selectedTarget, null); assert.equal(h.states.at(-1).canReconfirm, false);
+    h.client.choose(30); await h.client.confirm(); assert.equal(posts, 1);
+});
+test("a late reselection GET cannot replace another Ticket's scope", async () => {
+    const held = deferred(), started = deferred(); let reads = 0;
+    const h = harness(async (url, options) => {
+        if (url === "/api/csrf") return csrf();
+        if (options.method === "POST") return response({code: "ASSIGNMENT_VERSION_CONFLICT"}, 409);
+        if (++reads === 2) { started.resolve(); return held.promise; }
+        return response(current({assignmentVersion: reads === 1 ? 1 : 2}));
+    });
+    await h.client.read(1); h.client.choose(30); await h.client.confirm();
+    const reset = h.client.reselect(); await started.promise; await h.client.read(2);
+    held.resolve(response(current({assignmentVersion: 3}))); await reset;
+    assert.equal(h.states.at(-1).currentConfirmation.assignmentVersion, 2); assert.equal(h.states.at(-1).canReselect, false);
+    assert.equal(h.states.at(-1).selectedTarget, null);
+});
+
 test("staff panel offers loaded customer messages only and customer views make no staff-state request", async () => {
-    const nodes = new Map(); let posts = 0, calls = 0, stored = false;
+    const nodes = new Map(); let posts = 0, calls = 0, stored = false, rejectVersion = false, snapshotVersion = 1;
     const node = (selector) => {
         if (!nodes.has(selector)) nodes.set(selector, {hidden: false, value: "", textContent: "", disabled: false, options: [], listeners: new Map(),
             addEventListener(name, handler) { this.listeners.set(name, handler); }, add(option) { this.options.push(option); },
@@ -178,11 +249,13 @@ test("staff panel offers loaded customer messages only and customer views make n
             calls++;
             if (url === "/api/csrf") return csrf();
             if (options.method === "POST") {
-                posts++; stored = true; const sent = JSON.parse(options.body); assert.equal(sent.throughMessageId, 1);
+                posts++;
+                if (rejectVersion) { snapshotVersion = 3; return response({code: "ASSIGNMENT_VERSION_CONFLICT"}, 409); }
+                stored = true; const sent = JSON.parse(options.body); assert.equal(sent.throughMessageId, 1);
                 return response(change({confirmation: {...change().confirmation, throughMessageId: 1},
                     currentConfirmation: current({latestCustomerMessageId: 3, effectiveThroughMessageId: 1})}), 201);
             }
-            return response(current({latestCustomerMessageId: 3, effectiveThroughMessageId: stored ? 1 : null}));
+            return response(current({assignmentVersion: snapshotVersion, latestCustomerMessageId: 3, effectiveThroughMessageId: stored && snapshotVersion === 1 ? 1 : null}));
         }});
         const conversation = (staff) => ({kind: "conversation", conversation: {ticket: {id: 1}, capabilities: {canViewConfirmations: staff},
             messages: [{id: 1, type: "INQUIRY"}, {id: 2, type: "OFFICIAL_REPLY"}, {id: 3, type: "CUSTOMER_FOLLOWUP"}]}});
@@ -194,6 +267,15 @@ test("staff panel offers loaded customer messages only and customer views make n
         node("#confirmation-form").listeners.get("submit")({preventDefault() {}}); await nextTick();
         assert.equal(posts, 1); assert.match(node("#confirmation-current").textContent, /확인 필요/u);
         assert.match(node("#confirmation-result").textContent, /#1/);
+        rejectVersion = true; node("#confirmation-target").value = "3"; node("#confirmation-target").listeners.get("change")();
+        node("#confirmation-form").listeners.get("submit")({preventDefault() {}}); await nextTick();
+        assert.equal(node("#confirmation-reselect").hidden, false); assert.equal(node("#confirmation-send").disabled, true);
+        node("#confirmation-refresh").listeners.get("click")(); await nextTick();
+        assert.equal(node("#confirmation-target").disabled, true); assert.equal(node("#confirmation-send").disabled, true);
+        node("#confirmation-reselect").listeners.get("click")(); await nextTick();
+        assert.equal(node("#confirmation-target").value, ""); assert.equal(node("#confirmation-target").disabled, false);
+        assert.equal(node("#confirmation-send").disabled, true); assert.equal(node("#confirmation-reselect").hidden, true);
+        assert.equal(posts, 2);
         panel.clear(); assert.equal(node("#customer-confirmations").hidden, true); assert.equal(node("#confirmation-result").textContent, "");
     } finally { if (oldOption === undefined) delete globalThis.Option; else globalThis.Option = oldOption; }
 });
