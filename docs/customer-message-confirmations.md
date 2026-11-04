@@ -79,3 +79,19 @@ The explicit ConversationBrowserExperiment passed with isolated Session accounts
 The first Browser attempt reached the final screenshot but exceeded its six-minute child-process completion limit before the parent ran its DB assertions. It was a failed run. The same checks passed after increasing only the experiment limit to eight minutes (the suite took 386.2 seconds); this did not change application Job deadlines or weaken assertions. The final full Java regression is a separate run.
 
 Final 2026-11-04 `mvnw -B -ntp verify` passed 1,173 Surefire cases and 2 packaged Failsafe cases with zero failures/errors/skips and BUILD SUCCESS. The 83 focused cases overlap that full count; the explicit Browser experiment is separate. Surefire again logged `[ERROR] Surefire is going to kill self fork JVM. The exit has elapsed 30 seconds after System.exit(0).` once. The pre-existing process-shutdown issue remains unresolved despite the successful test/build result; it is distinct from the corrected Browser experiment deadline. Logs are ignored under target/week12-staff-full-verify.log and target/week12-staff-browser-recheck.log. This local verification does not establish new remote CI, ECR publication or deployment evidence.
+
+## Explicit Browser response-loss experiment
+
+`CustomerConfirmationRecoveryBrowserExperiment` is a separate, opt-in Session/CSRF/PostgreSQL experiment. It provisions one synthetic assignee and customer, an inquiry/follow-up, one assignment and the original Job in a fresh Testcontainer. The child CLI receives only the required system environment and synthetic credentials; no AI key or personal Browser session is used. Logs expose only stage/counters, not credentials, cookies or full payloads.
+
+Using [Playwright request/response interception](https://playwright.dev/docs/network#modify-responses), the first POST is forwarded to the real Spring server with route.fetch(). Only after the upstream returns 201 does the test abort delivery to the page's fetch. The UI must retain the exact pending submission. Even a manual current-state GET showing the new checkpoint does not clear that command's unknown outcome. Reconfirming the original UUID/version/target returns the real server's 200 without another row.
+
+For a second explicit target, the server's 201 is delivered normally, then only its follow-up current-state GET is aborted. The UI shows saved-refresh-failed, clears the saved submission and retries GET on the refresh button. It sends no additional POST. This condition is injected deliberately; it is not an observed production outage or a database Commit-acknowledgement fault.
+
+The experiment passed with three upstream POST results 201/200/201 and two DB confirmation rows, matching targets/actors/version and two distinct submission IDs. All pre-existing Ticket/Message/assignment/Job/Attempt/Suggestion/category rows matched their complete before-snapshot. Provider interactions stayed zero. Three screenshots of unknown outcome, saved/read failure and restored current state were inspected. This test-only slice does not change application code/schema, rerun the earlier 1,173+2/366 totals or resolve the pre-existing full-suite JVM shutdown issue.
+
+```powershell
+.\mvnw.cmd -B -ntp '-Dtest=CustomerConfirmationRecoveryBrowserExperiment' test
+```
+
+The experiment is excluded by the default *Test naming convention. Artifacts and logs remain ignored under output/playwright and target/week12-confirmation-recovery-browser.log. It requires local Docker, PowerShell 7, Node/npx and Chrome, following the existing explicit CLI experiment approach.
