@@ -8,6 +8,25 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class TicketTest {
 
     @Test
+    void resolved_ticket_reopens_without_losing_its_title_and_can_start_again() {
+        var ticket = Ticket.restore("Synthetic inquiry", TicketStatus.RESOLVED);
+        ticket.reopen();
+        assertEquals(TicketStatus.OPEN, ticket.status());
+        assertEquals("Synthetic inquiry", ticket.title());
+        ticket.startProgress();
+        assertEquals(TicketStatus.IN_PROGRESS, ticket.status());
+    }
+
+    @Test
+    void reopening_is_rejected_before_resolution_without_changing_the_state() {
+        for (var state : new TicketStatus[] {TicketStatus.OPEN, TicketStatus.IN_PROGRESS}) {
+            var ticket = Ticket.restore("Synthetic inquiry", state);
+            assertThrows(IllegalStateException.class, ticket::reopen);
+            assertEquals(state, ticket.status());
+        }
+    }
+
+    @Test
     void new_ticket_starts_open() {
         // Given
         var title = "로그인 오류";

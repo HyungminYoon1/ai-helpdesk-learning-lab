@@ -54,6 +54,14 @@ public final class Ticket {
         status = TicketStatus.RESOLVED;
     }
 
+    // Explicit reopening does not imply that processing has already started.
+    public void reopen() {
+        if (status != TicketStatus.RESOLVED) {
+            throw new IllegalStateException("only RESOLVED ticket can be reopened");
+        }
+        status = TicketStatus.OPEN;
+    }
+
     // 현재 티켓 상태 호출
     public TicketStatus status() {
         return status;
