@@ -1,6 +1,6 @@
 # Ticket status changes and explicit reopening
 
-Status: T01-T08 accepted on 2026-11-04. Technical contract for the next local implementation slice; runtime results are recorded after execution. No deployment, production migration or live AI is part of this work.
+Status: T01-T08 accepted and implemented locally on 2026-11-04. This contract records the separate persistence/API/UI slices and their execution checkpoints. No deployment, production migration or live AI is part of this work.
 
 ## Policy and ownership
 
@@ -55,8 +55,28 @@ An unknown POST result retains the exact UUID/body/selected versions/references 
 | A waiting statement may have started before the preceding customer commit | Lock the Ticket with a simple statement, then read status/messages/confirmation in a fresh statement. GET uses one coherent snapshot without a status mutation | Status repository/Service. Actual lock-wait tests cover both message/resolution orders |
 | Legacy requester is unconfirmed | New resolution retains the existing official-reply restriction; no owner is inferred. Staff may read and use their other authorized status actions; requester routes still require fixed ownership | Service/HTTP tests. Legacy identity repair is a separate administrative task |
 
-Planned validation: domain transitions; V12->V13 preservation/constraints; actual PostgreSQL HTTP authorization/parser/replay/Commit tests; both customer-message/resolution commit orders, handoff and revocation; Node/UI/representative Browser; appropriate full regression. Codex authors/runs these checks; they do not prove independent learner implementation or production readiness.
+Validation covers domain transitions, V12->V13 preservation/constraints, actual PostgreSQL HTTP authorization/parser/replay/Commit tests, both customer-message/resolution commit orders, handoff/revocation, Node/UI, representative Browser and the appropriate full regression. Codex authors/runs these checks; they do not prove independent learner implementation or production readiness.
 
 Local storage checkpoint, 2026-11-04: TicketTest 14 cases (including its existing cases) and one V12->V13 migration/storage test passed. The latter preserves existing row content, checks baseline zero/no fabricated events, same-ticket/identity/version constraints, requester assignment-zero reopening and rollback of an update whose event insert fails. Log: target/week12-status-storage.log (ignored). Service/HTTP/UI verification is still pending at this checkpoint.
 
 Backend checkpoint: TicketStatusHttpIntegrationTest passed 45 cases. It covers strict input/security, customer projection/dual role/revocation, exact replay versus current state, state and assignment fencing, confirmation/related-message checks, populated AI-row preservation, actual deferred Commit failure, lock timeout and competing submissions. Lock-wait tests observe pg_stat_activity before releasing the preceding transaction, including both message/resolution, handoff and membership-revocation orders. Log: target/week12-status-http-concurrency.log. These are local synthetic PostgreSQL/MockMvc checks, not Browser or full-regression results. The current isolated resource probe now expects V13; no new operational resource measurement is claimed.
+
+## UI and Browser checkpoint
+
+The conversation page uses ticket-status-ui.mjs for request state and ticket-status-page.mjs for DOM wiring. Staff choose only loaded reply/customer references; a draft captures both versions when explicitly edited. Refresh does not promote a selected range, replace draft versions or rewrite a pending command. An unknown POST retains the original UUID and fields for reconciliation. Only a recognized rejection, or a known stale unsent draft, enables explicit reset followed by GET. A confirmed saved change followed by failed GET retries only GET. Request sequence and ticket-selection fences ignore late responses.
+
+My Tickets links select the requester projection, including for dual-role owners. A staff link does not grant staff rights: the server remains authoritative. The conversation heading no longer repeats its older status snapshot while the independent status area is current. Historical change and current status remain separate labels. Page departure clears in-memory draft/submission data; no cross-account local storage is added.
+
+Additional decisions: keep client-selected targets instead of auto-selecting the newest customer message; keep unknown submissions instead of resetting on every 409/5xx; use separate current/history labels instead of treating a replay as a state update. The affected files are the two status UI modules, conversation page/HTML, My Tickets page and their Node/Browser checks. Durable draft recovery and a polished role-specific portal remain follow-up work.
+
+Node passed 418 cases, including 18 status-client cases and one stale-heading regression; ESLint passed. TicketStatusBrowserExperiment passed against a real local Spring server and isolated PostgreSQL. Its six HTTP status changes were 201/409/201/200/201/201. Controlled fixture reopen/handoff/resolve actions produced six total status events, final OPEN/status version 6/assignment version 3. Original Message rows and the AI snapshot were unchanged; Provider interactions were zero. This sequential gate experiment complements, rather than replaces, the actual lock-wait HTTP tests. Existing ReplyDraftReviewBrowserExperiment and CustomerConfirmationReselectionBrowserExperiment both passed after integration.
+
+The first Browser setup failed because the pinned CLI callback has no process/fetch globals. The final harness delivers synthetic login data once per role through a test-only loopback server and page.request; credentials are not interpolated into CLI code or printed. It binds only loopback, stops in finally, accepts no production configuration, and exposes no route in the application. Browser/child cleanup affects only the owned session/processes. Screenshots are ignored under output/playwright/week12-ticket-status-*; logs are target/week12-status-browser.log and target/week12-status-browser-regression.log.
+
+Reproduction (PowerShell 7, Docker Engine required): run the following after replacing the pwsh path. Do not supply API keys; the child environment is restricted to a Windows runtime whitelist and its own session directory.
+
+```powershell
+.\mvnw.cmd -B -ntp '-Dtest=TicketStatusBrowserExperiment' '-Dhelpdesk.browser.pwsh=<absolute pwsh.exe path>' test
+```
+
+Final default verification: .\mvnw.cmd -B -ntp verify passed 1,221 Surefire cases and two packaged Failsafe cases, failures/errors/skips zero, BUILD SUCCESS. Focused Java cases above are included in that total; opt-in Browser experiments are separate. Log: target/week12-status-verify.log. New Surefire dumps were zero. This is local verification; the new commits have not been pushed or checked by remote CI.

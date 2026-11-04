@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: Week 12의 고객 후속 대화와 배정별 명시적 확인을 V11/V12와 화면에 연결했다. 답변 초안 복구는 Node 399개/Lint와 집중 Browser/PostgreSQL 4개가 통과했다. 이후 테스트 Context 정리를 보완한 전체 Java 1,173개/패키징 후 2개가 통과했고 이번 실행의 JVM 종료 제한 경고와 새 Dump는 0건이다. 기존 Cloud 결과, 새 로컬 검증과 학습자 문답은 구분한다.
+> 상태: Week 12의 고객 후속 대화/배정별 확인에 이어 V13 상태 변경과 명시적 재개를 화면까지 연결했다. 현재 전체 Java 1,221개/패키징 후 2개, Node 418개/Lint와 집중 Browser 3개가 통과했다. 기존 Cloud 결과, 새 로컬 검증과 학습자 문답은 구분한다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
@@ -8,7 +8,7 @@
 
 ## Week 12 고객 후속 대화 (11/3 구현)
 
-11/4의 [V13 상태 처리 계약](./docs/ticket-status.md)은 현재 담당자의 처리 시작/해결/재개와 등록자 본인의 명시적 재개를 구분한다. 별도 상태 버전과 이력을 같은 Transaction으로 저장하며, 새 글/인계/권한 회수의 Commit 순서를 실제 PostgreSQL에서 검증했다. 저장/Domain 15개와 HTTP 45개 집중 검증은 통과했고 화면 연결과 이번 변경의 전체 회귀는 다음 단계다. 기존 메시지/AI 처리와 배정 버전은 상태 변경만으로 바꾸지 않는다.
+11/4의 [V13 상태 처리 계약](./docs/ticket-status.md)은 현재 담당자의 처리 시작/해결/재개와 등록자 본인의 명시적 재개를 구분한다. 별도 상태 버전과 이력을 같은 Transaction으로 저장하며, 새 글/인계/권한 회수의 Commit 순서를 실제 PostgreSQL에서 검증했다. 저장/Domain 15개와 HTTP 45개, Node 전체 418개/Lint, 상태 Browser와 기존 답변/확인 Browser 2개 및 전체 Java 1,221+2가 통과했다. 집중 Java 검사는 전체에 포함하며 합산하지 않는다. 기존 메시지/AI 처리와 배정 버전은 상태 변경만으로 바꾸지 않는다. 과거 저장 이력과 현재 상태를 구분하고 미확인 제출은 같은 UUID/근거로 재확인한다.
 
 현재 후속 구현은 [V11 고객 후속 대화 계약](./docs/customer-followups.md)을 따른다. `POST /api/tickets/{ticketId}/customer-messages`에서 본인 소유권, 원문 보존, `201/200/409`, 같은 UUID의 메시지 종류 구분과 32 KiB 입력 한도를 구현했다. 기존 세 상태와 문의/답변/배정/AI 데이터는 유지한다. 26개 HTTP 사례와 V10→V11 Migration을 검증했다.
 
