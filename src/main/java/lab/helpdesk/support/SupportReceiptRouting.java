@@ -16,5 +16,4 @@ public class SupportReceiptRouting {
         if (code==null || code.isBlank()) throw new SupportException(SUPPORT_NOT_CONFIGURED);
         return repository.service(code).orElseThrow(() -> new SupportException(SUPPORT_NOT_CONFIGURED)).id();
     }
-    public void attach(long ticketId,long serviceId) { repository.attachService(ticketId,serviceId); }
 }

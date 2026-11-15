@@ -31,11 +31,14 @@ public class JdbcTicketConversationRepository implements TicketConversationRepos
     }
 
     @Override
-    public void attachReceiptOwner(long ticket, long message, long user) {
-        int tickets = jdbc.update("UPDATE tickets SET requester_user_id=? WHERE id=? AND requester_user_id IS NULL", user, ticket);
-        int messages = jdbc.update("UPDATE ticket_messages SET author_user_id=? WHERE id=? AND ticket_id=? AND message_type='INQUIRY'",
-                user, message, ticket);
-        if (tickets != 1 || messages != 1) throw new IllegalStateException("receipt identity attachment failed");
+    public void attachInquiryAuthor(long ticket, long message, long user) {
+        int updated = jdbc.update("""
+                UPDATE ticket_messages SET author_user_id = ?
+                WHERE id = ? AND ticket_id = ? AND message_type = 'INQUIRY' AND author_user_id IS NULL
+                """, user, message, ticket);
+        if (updated != 1) {
+            throw new IllegalStateException("receipt author attachment failed");
+        }
     }
 
     @Override

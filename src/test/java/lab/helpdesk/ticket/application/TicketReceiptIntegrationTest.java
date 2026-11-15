@@ -1,6 +1,12 @@
 package lab.helpdesk.ticket.application;
 
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import lab.helpdesk.ticket.Ticket;
@@ -9,7 +15,7 @@ import lab.helpdesk.ticket.TicketStatus;
 import lab.helpdesk.ticket.repository.JdbcTicketMessageRepository;
 import lab.helpdesk.ticket.repository.JdbcTicketRepository;
 import lab.helpdesk.ticket.repository.TicketMessageRepository;
-import lab.helpdesk.ticket.repository.TicketRepository;
+import lab.helpdesk.ticket.repository.TicketReceiptRepository;
 import lab.helpdesk.ai.job.JdbcAiSuggestionJobRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +34,8 @@ import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -63,6 +71,9 @@ class TicketReceiptIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void clearIsolatedTestDatabase() {
         Boolean connectedToTestContainer = jdbcTemplate.execute(
@@ -85,6 +96,7 @@ class TicketReceiptIntegrationTest {
         TicketReceiptResult result = receipts.receive(
                 "로그인 문의", originalBody, lab.helpdesk.identity.IdentityFixtures.actor("synthetic-author"));
 
+        assertThat(result.created()).isTrue();
         assertThat(result.ticket().id()).isPositive();
         assertThat(result.messageId()).isPositive();
         assertThat(result.jobId()).isPositive();
@@ -204,6 +216,120 @@ class TicketReceiptIntegrationTest {
         assertRowCounts(0, 0, 0);
     }
 
+    @Test
+    void replay_compares_the_original_title_and_body_and_uses_the_authenticated_owner_scope() {
+        var firstCustomer = lab.helpdesk.identity.IdentityFixtures.actor("receipt-user-a");
+        var secondCustomer = lab.helpdesk.identity.IdentityFixtures.actor("receipt-agent-b");
+        UUID key = UUID.randomUUID();
+        String title = "접수 확인";
+        String body = "  원본 문의\n두 번째 줄  ";
+
+        var first = receipts.receive(title, body, key, firstCustomer);
+        // A later status change does not turn a receipt confirmation into a new OPEN ticket.
+        jdbcTemplate.update("UPDATE tickets SET status = 'IN_PROGRESS' WHERE id = ?", first.ticket().id());
+        var replay = receipts.receive(title, body, key, firstCustomer);
+        assertThat(replay.created()).isFalse();
+        assertThat(replay.ticket().id()).isEqualTo(first.ticket().id());
+        assertThat(replay.ticket().status()).isEqualTo(TicketStatus.IN_PROGRESS);
+        assertThat(replay.messageId()).isEqualTo(first.messageId());
+        assertThat(replay.jobId()).isEqualTo(first.jobId());
+
+        assertThatThrownBy(() -> receipts.receive(title + " ", body, key, firstCustomer))
+                .isInstanceOf(TicketReceiptConflictException.class);
+        assertThatThrownBy(() -> receipts.receive(title, body.strip(), key, firstCustomer))
+                .isInstanceOf(TicketReceiptConflictException.class);
+        assertRowCounts(1, 1, 1);
+        assertThat(jdbcTemplate.queryForObject("SELECT body FROM ticket_messages WHERE id = ?",
+                String.class, first.messageId())).isEqualTo(body);
+
+        var anotherOwner = receipts.receive(title, body, key, secondCustomer);
+        var separateSubmission = receipts.receive(title, body, UUID.randomUUID(), firstCustomer);
+        assertThat(anotherOwner.created()).isTrue();
+        assertThat(separateSubmission.created()).isTrue();
+        assertThat(java.util.Set.of(first.ticket().id(), anotherOwner.ticket().id(), separateSubmission.ticket().id()))
+                .hasSize(3);
+        assertRowCounts(3, 3, 3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void overlapping_submissions_wait_for_the_same_key_and_follow_commit_or_rollback(boolean rollBackFirst)
+            throws Exception {
+        var customer = lab.helpdesk.identity.IdentityFixtures.actor("receipt-user-a");
+        UUID key = UUID.randomUUID();
+        var transaction = new TransactionTemplate(transactionManager);
+        transaction.setTimeout(20);
+        var firstReady = new CountDownLatch(1);
+        var finishFirst = new CountDownLatch(1);
+        var firstPid = new CompletableFuture<Integer>();
+        var secondPid = new CompletableFuture<Integer>();
+
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> transaction.execute(status -> {
+                firstPid.complete(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                var result = receipts.receive("동시 접수", "원본 문의", key, customer);
+                firstReady.countDown();
+                await(finishFirst);
+                if (rollBackFirst) {
+                    status.setRollbackOnly();
+                }
+                return result;
+            }));
+            try {
+                await(firstReady);
+                var second = workers.submit(() -> transaction.execute(status -> {
+                    secondPid.complete(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    return receipts.receive("동시 접수", "원본 문의", key, customer);
+                }));
+                awaitDatabaseBlock(firstPid.get(8, TimeUnit.SECONDS), secondPid.get(8, TimeUnit.SECONDS));
+                assertRowCounts(0, 0, 0);
+
+                finishFirst.countDown();
+                var initial = first.get(8, TimeUnit.SECONDS);
+                var contender = second.get(8, TimeUnit.SECONDS);
+                assertThat(initial.created()).isTrue();
+                assertThat(contender.created()).isEqualTo(rollBackFirst);
+                if (rollBackFirst) {
+                    assertThat(contender.ticket().id()).isNotEqualTo(initial.ticket().id());
+                } else {
+                    assertThat(contender.ticket().id()).isEqualTo(initial.ticket().id());
+                    assertThat(contender.messageId()).isEqualTo(initial.messageId());
+                    assertThat(contender.jobId()).isEqualTo(initial.jobId());
+                }
+                assertRowCounts(1, 1, 1);
+                assertThat(jdbcTemplate.queryForObject(
+                        "SELECT id FROM tickets WHERE receipt_request_id = ?", Long.class, key))
+                        .isEqualTo(contender.ticket().id());
+                assertThat(jdbcTemplate.queryForObject(
+                        "SELECT input_message_id FROM ai_suggestion_jobs WHERE status = 'PENDING'", Long.class))
+                        .isEqualTo(contender.messageId());
+            } finally {
+                finishFirst.countDown();
+            }
+        }
+    }
+
+    private void awaitDatabaseBlock(int holder, int waiter) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
+        do {
+            if (Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                    "SELECT ? = ANY(pg_blocking_pids(?))", Boolean.class, holder, waiter))) {
+                return;
+            }
+            Thread.sleep(20);
+        } while (System.nanoTime() < deadline);
+        throw new AssertionError("the contender never waited on the first receipt transaction");
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            assertThat(latch.await(15, TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("receipt test was interrupted", interrupted);
+        }
+    }
+
     private void assertRowCounts(long ticketCount, long messageCount, long jobCount) {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM tickets", Long.class)).isEqualTo(ticketCount);
@@ -230,7 +356,7 @@ class TicketReceiptIntegrationTest {
     }
 
     // 저장을 대체하지 않고 실제 PostgreSQL 저장이 성공해서 반환된 횟수만 기록한다.
-    static class RecordingTicketRepository implements TicketRepository {
+    static class RecordingTicketRepository implements TicketReceiptRepository {
 
         private final JdbcTicketRepository delegate;
         final AtomicInteger successfulSaves = new AtomicInteger();
@@ -240,15 +366,17 @@ class TicketReceiptIntegrationTest {
         }
 
         @Override
-        public long save(Ticket ticket) {
-            long id = delegate.save(ticket);
-            successfulSaves.incrementAndGet();
-            return id;
+        public OptionalLong insertReceipt(Ticket ticket, long requesterUserId, long serviceId, UUID clientRequestId) {
+            var inserted = delegate.insertReceipt(ticket, requesterUserId, serviceId, clientRequestId);
+            if (inserted.isPresent()) {
+                successfulSaves.incrementAndGet();
+            }
+            return inserted;
         }
 
         @Override
-        public Optional<Ticket> findById(long id) {
-            return delegate.findById(id);
+        public Optional<StoredReceipt> findReceipt(long requesterUserId, UUID clientRequestId) {
+            return delegate.findReceipt(requesterUserId, clientRequestId);
         }
     }
 
