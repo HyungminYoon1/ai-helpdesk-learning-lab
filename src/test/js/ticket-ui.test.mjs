@@ -233,6 +233,7 @@ test("CSRF 응답 구조가 잘못되면 POST를 보내지 않는다", async () 
 
     assert.deepEqual(calls, ["/api/csrf"]);
     assert.equal(view.states.at(-1).kind, "invalid-response");
+    assert.equal(view.states.at(-1).beforeSubmission, true);
 });
 
 test("POST 응답을 읽지 못하면 성공·실패를 단정하거나 자동 재시도하지 않는다", async () => {
@@ -257,6 +258,100 @@ test("POST 응답을 읽지 못하면 성공·실패를 단정하거나 자동 �
     assert.deepEqual(calls, ["/api/csrf", "/api/tickets"]);
     assert.equal(view.states.at(-1).kind, "unknown-outcome");
     assert.deepEqual(view.tickets, []);
+});
+
+test("결과를 잃은 접수는 버튼을 눌렀을 때만 원래 UUID, 원문과 CSRF로 재확인한다", async () => {
+    const original = "  합성 원문\n공백 보존  ";
+    const requestId = randomUUID();
+    const receiptContext = randomUUID();
+    const originalToken = randomUUID();
+    const calls = [];
+    const view = recordView();
+    const ticket = { id: 21, title: "문의", status: "OPEN" };
+    let csrfReads = 0;
+    let posts = 0;
+    const client = createTicketClient({
+        fetchImpl: async (url, options) => {
+            calls.push({ url, options });
+            if (url === "/api/csrf") {
+                return jsonResponse(200, {
+                    headerName: "X-CSRF-TOKEN",
+                    token: csrfReads++ === 0 ? originalToken : randomUUID(),
+                    receiptContext
+                });
+            }
+            if (++posts === 1) {
+                throw new TypeError("response lost");
+            }
+            return jsonResponse(200, ticket);
+        },
+        view,
+        newRequestId: () => requestId
+    });
+
+    await client.createTicket("문의", original);
+    assert.deepEqual(view.states.at(-1), { kind: "unknown-outcome", canConfirm: true });
+    await client.createTicket("다른 제목", "다른 본문");
+    assert.equal(posts, 1);
+
+    await client.confirmReceipt();
+    assert.equal(posts, 2);
+    assert.equal(calls[1].options.body, calls[3].options.body);
+    assert.deepEqual(JSON.parse(calls[3].options.body),
+        { title: "문의", body: original, clientRequestId: requestId });
+    assert.equal(calls[3].options.headers["X-CSRF-TOKEN"], originalToken);
+    assert.deepEqual(view.states.at(-1), { kind: "receipt-confirmed", ticket });
+    assert.deepEqual(view.tickets, [ticket]);
+});
+
+test("새 세션에서 이전 문의의 키나 원문을 재전송하지 않고 내 문의로 안내한다", async () => {
+    const view = recordView();
+    let posts = 0;
+    const client = createTicketClient({
+        fetchImpl: async (url) => {
+            if (url === "/api/csrf") {
+                return jsonResponse(200, {
+                    headerName: "X-CSRF-TOKEN", token: randomUUID(), receiptContext: randomUUID()
+                });
+            }
+            posts++;
+            throw new TypeError("response lost");
+        },
+        view
+    });
+
+    await client.createTicket("문의", "첫 세션의 합성 원문");
+    await client.confirmReceipt();
+    assert.equal(posts, 1);
+    assert.deepEqual(view.states.at(-1), { kind: "receipt-check-list" });
+    await client.confirmReceipt();
+    assert.equal(posts, 1);
+});
+
+test("POST 뒤 서버 오류나 응답 형식 오류도 같은 제출로 재확인할 수 있다", async () => {
+    for (const initialResponse of [jsonResponse(500, {}), jsonResponse(201, { id: 1 })]) {
+        const receiptContext = randomUUID();
+        const view = recordView();
+        const ticket = { id: 21, title: "문의", status: "OPEN" };
+        const bodies = [];
+        const client = createTicketClient({
+            fetchImpl: async (url, options) => {
+                if (url === "/api/csrf") {
+                    return jsonResponse(200, { headerName: "X-CSRF-TOKEN", token: randomUUID(), receiptContext });
+                }
+                bodies.push(options.body);
+                return bodies.length === 1 ? initialResponse : jsonResponse(201, ticket);
+            },
+            view
+        });
+
+        await client.createTicket("문의", "합성 문의 본문");
+        assert.deepEqual(view.states.at(-1), { kind: "unknown-outcome", canConfirm: true });
+        await client.confirmReceipt();
+        assert.equal(bodies.length, 2);
+        assert.equal(bodies[1], bodies[0]);
+        assert.deepEqual(view.states.at(-1), { kind: "created", ticket });
+    }
 });
 
 test("접수는 원문 body를 보존하며 작성자나 Role을 요청에 추가하지 않는다", async () => {

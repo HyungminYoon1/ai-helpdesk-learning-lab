@@ -1,6 +1,7 @@
 package lab.helpdesk.ticket.web;
 
 import java.net.URI;
+import java.util.UUID;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -35,14 +36,17 @@ public class TicketReceiptController {
             Authentication authentication,
             HttpServletRequest servletRequest) {
         // Service의 접수 Transaction이 Commit된 뒤에만 정상 반환을 받는다.
-        var result = service.receive(
-                request.title(), request.body(), AuthenticatedActorFactory.from(authentication));
-        // In this HTTP flow the transactional Service proxy has already committed.
-        // This is receipt metadata, not AI completion or proof the Browser received the response.
+        var result = service.receive(request.title(), request.body(), UUID.fromString(request.clientRequestId()),
+                AuthenticatedActorFactory.from(authentication));
+        var location = URI.create("/api/tickets/" + result.ticket().id());
+        var body = TicketResponse.from(result.ticket());
+
+        if (!result.created()) {
+            return ResponseEntity.ok().location(location).body(body);
+        }
         LOGGER.info("event=TICKET_RECEIPT_COMMITTED requestId={} ticketId={} messageId={} jobId={}",
                 RequestIdFilter.requestIdForLog(servletRequest), result.ticket().id(),
                 result.messageId(), result.jobId());
-        return ResponseEntity.created(URI.create("/api/tickets/" + result.ticket().id()))
-                .body(TicketResponse.from(result.ticket()));
+        return ResponseEntity.created(location).body(body);
     }
 }

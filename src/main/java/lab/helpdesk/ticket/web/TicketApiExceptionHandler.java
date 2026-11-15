@@ -1,6 +1,7 @@
 package lab.helpdesk.ticket.web;
 
 import lab.helpdesk.ticket.application.TicketNotFoundException;
+import lab.helpdesk.ticket.application.TicketReceiptConflictException;
 import lab.helpdesk.ai.query.AiSuggestionQueryException;
 import lab.helpdesk.ai.query.AiSuggestionQueryException.Code;
 
@@ -21,6 +22,14 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 @RestControllerAdvice
 public class TicketApiExceptionHandler
         extends ResponseEntityExceptionHandler {
+
+    @ExceptionHandler(TicketReceiptConflictException.class)
+    public ProblemDetail handleReceiptConflict() {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, "the receipt request ID has already been used with different content");
+        problem.setProperty("code", "RECEIPT_REQUEST_CONFLICT");
+        return problem;
+    }
 
     @ExceptionHandler(lab.helpdesk.ticket.application.TicketStatusException.class)
     public ProblemDetail handleTicketStatus(lab.helpdesk.ticket.application.TicketStatusException exception) {

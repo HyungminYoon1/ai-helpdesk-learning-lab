@@ -87,7 +87,7 @@ class MyTicketsHttpIntegrationTest {
 
     @Test void empty_and_legacy_unowned_rows_are_safe_and_staff_revocation_is_not_customer_revocation() throws Exception {
         long own=receive(AGENT),legacy=receive(A);
-        jdbc.update("UPDATE tickets SET requester_user_id=NULL WHERE id=?",legacy);
+        jdbc.update("UPDATE tickets SET requester_user_id=NULL, receipt_request_id=NULL WHERE id=?",legacy);
         jdbc.update("UPDATE support_service_memberships SET active=false WHERE user_id=?",identity(AGENT));
         assertThat(list(AGENT,"",200).path("items").get(0).path("ticketId").asLong()).isEqualTo(own);
         var empty=list(A,"",200);

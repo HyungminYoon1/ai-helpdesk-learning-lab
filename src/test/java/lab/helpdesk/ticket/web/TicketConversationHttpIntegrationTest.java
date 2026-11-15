@@ -137,7 +137,7 @@ class TicketConversationHttpIntegrationTest {
 
     @Test
     void missing_legacy_owner_allows_agent_read_only_without_guessing_from_author_name() throws Exception {
-        jdbc.update("UPDATE tickets SET requester_user_id=NULL WHERE id=?", ticket);
+        jdbc.update("UPDATE tickets SET requester_user_id=NULL, receipt_request_id=NULL WHERE id=?", ticket);
         mvc.perform(get("/api/tickets/{id}/messages", ticket).with(as(AGENT)))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.capabilities.canReply").value(false));
         mvc.perform(get("/api/tickets/{id}/messages", ticket).with(as(A))).andExpect(status().isNotFound());
@@ -190,7 +190,9 @@ class TicketConversationHttpIntegrationTest {
     void missing_binding_or_plain_username_cannot_create_a_receipt_or_reply() throws Exception {
         var unknown = IdentityFixtures.user(User.withUsername("unlinked-user").password("fixture").roles("USER").build());
         mvc.perform(post("/api/tickets").with(user(unknown)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"title\":\"not saved\",\"body\":\"not saved\"}"))
+                .content("""
+                        {"title":"not saved","body":"not saved","clientRequestId":"%s"}
+                        """.formatted(UUID.randomUUID())))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("IDENTITY_UNLINKED"));
         mvc.perform(post("/api/tickets/{id}/replies", ticket).with(user("plain-agent").roles("AGENT")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(payload("not saved", UUID.randomUUID(), null)))

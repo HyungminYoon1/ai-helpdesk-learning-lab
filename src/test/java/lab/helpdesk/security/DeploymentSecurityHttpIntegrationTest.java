@@ -91,7 +91,9 @@ class DeploymentSecurityHttpIntegrationTest {
         assertThat(context.getBeansOfType(AiSuggestionJobWorker.class)).isEmpty();
 
         MockHttpSession userSession = login(USER_NAME, USER_SECRET);
-        String payload = mapper.writeValueAsString(Map.of("title", "배포 설정 접수", "body", "합성 문의 원문"));
+        String payload = mapper.writeValueAsString(Map.of(
+                "title", "배포 설정 접수", "body", "합성 문의 원문",
+                "clientRequestId", java.util.UUID.randomUUID().toString()));
         MvcResult denied = mockMvc.perform(post("/api/tickets").session(userSession)
                         .contentType(MediaType.APPLICATION_JSON).content(payload))
                 .andExpect(status().isForbidden()).andReturn();

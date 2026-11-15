@@ -253,7 +253,7 @@ const result = await page.evaluate(async () => {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', [csrf.headerName]: csrf.token },
-        body: JSON.stringify({ title: 'Cross-Origin Week6' })
+        body: JSON.stringify({ title: 'Cross-Origin Week6', body: 'Synthetic CORS probe', clientRequestId: crypto.randomUUID() })
     });
     return response.status;
 });
@@ -306,7 +306,7 @@ const status = await page.evaluate(async () => (await fetch('/api/tickets', {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: 'No CSRF Probe' })
+    body: JSON.stringify({ title: 'No CSRF Probe', body: 'Synthetic CSRF probe', clientRequestId: crypto.randomUUID() })
 })).status);
 if (status !== 403) throw new Error('MISSING_CSRF_WAS_NOT_REJECTED');
 '@

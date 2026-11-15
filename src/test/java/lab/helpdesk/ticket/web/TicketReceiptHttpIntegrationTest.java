@@ -106,7 +106,8 @@ class TicketReceiptHttpIntegrationTest {
     void authenticated_author_and_original_body_are_committed_through_http(String username)
             throws Exception {
         String original = "  로그인 링크가 만료됩니다.\n새 링크를 요청합니다.  ";
-        MvcResult result = create(sessionFor(username), payload(original))
+        Map<String, Object> request = payload(original);
+        MvcResult result = create(sessionFor(username), request)
                 .andExpect(status().isCreated())
                 .andExpect(handler().handlerType(TicketReceiptController.class))
                 .andExpect(jsonPath("$.status").value("OPEN"))
@@ -125,7 +126,8 @@ class TicketReceiptHttpIntegrationTest {
                 SELECT j.status FROM ai_suggestion_jobs j
                 JOIN ticket_messages m ON m.id = j.input_message_id WHERE m.ticket_id = ?
                 """, String.class, ticketId)).isEqualTo("PENDING");
-        verify(receipts).receive("접수 문의", original, lab.helpdesk.identity.IdentityFixtures.actor(username));
+        verify(receipts).receive("접수 문의", original, requestId(request),
+                lab.helpdesk.identity.IdentityFixtures.actor(username));
     }
 
     @Test
@@ -187,7 +189,8 @@ class TicketReceiptHttpIntegrationTest {
         assertRowCounts(1);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT author_username FROM ticket_messages", String.class)).isEqualTo(USER_NAME);
-        verify(receipts).receive("접수 문의", "작성자 신뢰 경계 실험", lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
+        verify(receipts).receive("접수 문의", "작성자 신뢰 경계 실험", requestId(request),
+                lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
     }
 
     @Test
@@ -280,10 +283,12 @@ class TicketReceiptHttpIntegrationTest {
                 """);
         try {
             String original = "SYNTHETIC_MESSAGE_ROW_NOT_FOR_LOG";
-            create(sessionFor(USER_NAME), payload(original))
+            var request = payload(original);
+            create(sessionFor(USER_NAME), request)
                     .andExpect(status().isInternalServerError())
                     .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
-            verify(receipts).receive("접수 문의", original, lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
+            verify(receipts).receive("접수 문의", original, requestId(request),
+                    lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
             assertRowCounts(0);
             assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
                     "event=TICKET_RECEIPT_COMMITTED");
@@ -301,11 +306,13 @@ class TicketReceiptHttpIntegrationTest {
                 """);
         try {
             String original = "SYNTHETIC_PRIVATE_BODY_NOT_FOR_LOG";
-            create(sessionFor(USER_NAME), payload(original))
+            var request = payload(original);
+            create(sessionFor(USER_NAME), request)
                     .andExpect(status().isInternalServerError())
                     .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
                     .andExpect(jsonPath("$.detail").value("an unexpected server error occurred"));
-            verify(receipts).receive("접수 문의", original, lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
+            verify(receipts).receive("접수 문의", original, requestId(request),
+                    lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
             assertRowCounts(0);
             assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
                     "event=TICKET_RECEIPT_COMMITTED");
@@ -317,6 +324,9 @@ class TicketReceiptHttpIntegrationTest {
     @Test
     void a_deferred_commit_failure_never_emits_a_committed_receipt(CapturedOutput output)
             throws Exception {
+        var session = sessionFor(USER_NAME);
+        String original = "SYNTHETIC_COMMIT_FAILURE_BODY_NOT_FOR_LOG";
+        var request = payload(original);
         // All INSERT statements can finish; the empty FK target rejects only at Commit.
         jdbcTemplate.execute("CREATE TABLE http_receipt_commit_guard (id bigint PRIMARY KEY)");
         jdbcTemplate.execute("""
@@ -325,12 +335,12 @@ class TicketReceiptHttpIntegrationTest {
                 DEFERRABLE INITIALLY DEFERRED
                 """);
         try {
-            String original = "SYNTHETIC_COMMIT_FAILURE_BODY_NOT_FOR_LOG";
-            create(sessionFor(USER_NAME), payload(original))
+            create(session, request)
                     .andExpect(status().isInternalServerError())
                     .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
                     .andExpect(jsonPath("$.detail").value("an unexpected server error occurred"));
-            verify(receipts).receive("접수 문의", original, lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
+            verify(receipts).receive("접수 문의", original, requestId(request),
+                    lab.helpdesk.identity.IdentityFixtures.actor(USER_NAME));
             assertRowCounts(0);
             assertThat(output.getAll()).doesNotContain(original, "Failing row contains",
                     "event=TICKET_RECEIPT_COMMITTED");
@@ -338,6 +348,68 @@ class TicketReceiptHttpIntegrationTest {
             jdbcTemplate.execute("ALTER TABLE ai_suggestion_jobs DROP CONSTRAINT http_receipt_commit_guard_fk");
             jdbcTemplate.execute("DROP TABLE http_receipt_commit_guard");
         }
+        create(session, request).andExpect(status().isCreated());
+        assertRowCounts(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tickets WHERE receipt_request_id = ?", Integer.class, requestId(request)))
+                .isOne();
+    }
+
+    @Test
+    void matching_post_returns_existing_id_and_location_and_logs_only_the_first_commit(CapturedOutput output)
+            throws Exception {
+        String body = "  같은 합성 문의\n원문 보존  ";
+        var request = payload(body);
+        var session = sessionFor(USER_NAME);
+        var created = create(session, request).andExpect(status().isCreated()).andReturn();
+        long ticketId = objectMapper.readTree(created.getResponse().getContentAsString()).path("id").asLong();
+        String location = "/api/tickets/" + ticketId;
+        assertThat(created.getResponse().getHeader(HttpHeaders.LOCATION)).isEqualTo(location);
+
+        create(session, request).andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.LOCATION, location))
+                .andExpect(jsonPath("$.id").value(ticketId));
+
+        request.put("body", body.strip());
+        create(session, request).andExpect(status().isConflict())
+                .andExpect(header().doesNotExist(HttpHeaders.LOCATION))
+                .andExpect(jsonPath("$.code").value("RECEIPT_REQUEST_CONFLICT"));
+        assertRowCounts(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT body FROM ticket_messages WHERE ticket_id = ?",
+                String.class, ticketId)).isEqualTo(body);
+        assertThat(output.getAll().lines().filter(line -> line.contains("event=TICKET_RECEIPT_COMMITTED")).count())
+                .isOne();
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"not-a-uuid", "1-1-1-1-1", "  11111111-1111-4111-8111-111111111111"})
+    void missing_or_noncanonical_uuid_is_rejected_before_storage(String key) throws Exception {
+        var request = payload("합성 문의");
+        if (key == null) {
+            request.remove("clientRequestId");
+        } else {
+            request.put("clientRequestId", key);
+        }
+        create(sessionFor(USER_NAME), request).andExpect(status().isBadRequest())
+                .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
+        assertNoReceipt();
+    }
+
+    @Test
+    void csrf_receipt_context_is_stable_within_a_session_and_changes_with_the_session_id() throws Exception {
+        var session = sessionFor(USER_NAME);
+        String originalContext = receiptContext(session);
+        assertThat(originalContext).isNotBlank().isNotEqualTo(session.getId());
+        assertThat(receiptContext(session)).isEqualTo(originalContext);
+        session.changeSessionId();
+        assertThat(receiptContext(session)).isNotBlank().isNotEqualTo(originalContext);
+    }
+
+    private String receiptContext(MockHttpSession session) throws Exception {
+        var response = mockMvc.perform(get("/api/csrf").session(session))
+                .andExpect(status().isOk()).andReturn().getResponse();
+        return objectMapper.readTree(response.getContentAsString()).path("receiptContext").asString();
     }
 
     private org.springframework.test.web.servlet.ResultActions create(
@@ -351,7 +423,12 @@ class TicketReceiptHttpIntegrationTest {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("title", "접수 문의");
         request.put("body", body);
+        request.put("clientRequestId", UUID.randomUUID().toString());
         return request;
+    }
+
+    private static UUID requestId(Map<String, Object> request) {
+        return UUID.fromString((String) request.get("clientRequestId"));
     }
 
     private MockHttpSession sessionFor(String username) throws Exception {
@@ -363,7 +440,8 @@ class TicketReceiptHttpIntegrationTest {
     }
 
     private void assertNoReceipt() {
-        verify(receipts, never()).receive(anyString(), anyString(), org.mockito.ArgumentMatchers.any(lab.helpdesk.identity.AuthenticatedActor.class));
+        verify(receipts, never()).receive(anyString(), anyString(), org.mockito.ArgumentMatchers.any(UUID.class),
+                org.mockito.ArgumentMatchers.any(lab.helpdesk.identity.AuthenticatedActor.class));
         assertRowCounts(0);
     }
 

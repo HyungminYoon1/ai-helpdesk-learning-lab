@@ -22,7 +22,9 @@ function isCsrfInfo(value) {
         && typeof value.headerName === "string"
         && /^[A-Za-z0-9-]+$/.test(value.headerName)
         && typeof value.token === "string"
-        && value.token.length > 0;
+        && value.token.length > 0
+        && (value.receiptContext === undefined || value.receiptContext === null
+            || (typeof value.receiptContext === "string" && value.receiptContext.length > 0));
 }
 
 // Java String.strip()/isBlank()의 edge whitespace와 같은 범위를 사용한다.
@@ -31,31 +33,137 @@ export function measuredMessage(value) {
     return value.replace(/^[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+$/gu, "");
 }
 
-export function createTicketClient({ fetchImpl, view }) {
+export function createTicketClient({
+    fetchImpl,
+    view,
+    newRequestId = () => globalThis.crypto?.randomUUID?.()
+}) {
     let latestReadRequestId = 0;
     let activeReadController = null;
     let creating = false;
+    let pendingReceipt = null;
+    let receiptLookupRequired = false;
 
-    function showHttpFailure(response) {
+    function httpFailure(response) {
         if (response.status === 401) {
-            view.render({ kind: "login-required" });
-        } else if (response.status === 403) {
-            view.render({ kind: "forbidden" });
-        } else if (response.status === 404) {
-            view.render({ kind: "not-found" });
-        } else if (response.status === 400) {
-            view.render({ kind: "bad-request" });
-        } else if (!response.ok) {
-            view.render({ kind: "http-error", status: response.status });
-        } else {
-            return false;
+            return { kind: "login-required" };
+        }
+        if (response.status === 403) {
+            return { kind: "forbidden" };
+        }
+        if (response.status === 404) {
+            return { kind: "not-found" };
+        }
+        if (response.status === 400) {
+            return { kind: "bad-request" };
+        }
+        return response.ok ? null : { kind: "http-error", status: response.status };
+    }
+
+    function startReceiptRequest(kind) {
+        creating = true;
+        activeReadController?.abort();
+        activeReadController = null;
+        latestReadRequestId++;
+        view.render({ kind });
+    }
+
+    function showUnknownReceipt() {
+        view.render({ kind: "unknown-outcome", canConfirm: pendingReceipt !== null });
+    }
+
+    function requireReceiptLookup(kind = "receipt-check-list") {
+        pendingReceipt = null;
+        receiptLookupRequired = true;
+        view.render({ kind });
+    }
+
+    async function loadCsrf() {
+        let response;
+        try {
+            response = await fetchImpl("/api/csrf", { credentials: "same-origin", cache: "no-store" });
+        } catch {
+            return { failure: { kind: "request-unavailable" } };
+        }
+        const failure = httpFailure(response);
+        if (failure) {
+            return { failure };
         }
 
-        return true;
+        try {
+            const csrf = await response.json();
+            if (isCsrfInfo(csrf)) {
+                return { csrf };
+            }
+        } catch {
+            // Without a usable CSRF response, the POST has not been sent.
+        }
+        return { failure: { kind: "invalid-response" } };
+    }
+
+    async function sendReceipt(payload, csrf, confirming) {
+        let response;
+        try {
+            response = await fetchImpl("/api/tickets", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    [csrf.headerName]: csrf.token
+                },
+                body: JSON.stringify(payload)
+            });
+        } catch {
+            if (!receiptLookupRequired) {
+                showUnknownReceipt();
+            }
+            return;
+        }
+
+        if (receiptLookupRequired) {
+            return;
+        }
+        const failure = httpFailure(response);
+        if (failure) {
+            if (pendingReceipt && response.status === 409) {
+                requireReceiptLookup("receipt-conflict");
+            } else if (confirming && (response.status === 401 || response.status === 403)) {
+                requireReceiptLookup();
+            } else if (confirming || (pendingReceipt && response.status >= 500)) {
+                showUnknownReceipt();
+            } else {
+                pendingReceipt = null;
+                view.render(failure);
+            }
+            return;
+        }
+
+        let ticket;
+        try {
+            ticket = await response.json();
+        } catch {
+            // A response body that cannot be read leaves the result unclear.
+        }
+
+        if (receiptLookupRequired) {
+            return;
+        }
+        if (!isTicket(ticket) || (pendingReceipt && response.status !== 201 && response.status !== 200)) {
+            if (pendingReceipt) {
+                showUnknownReceipt();
+            } else {
+                view.render({ kind: "invalid-response" });
+            }
+            return;
+        }
+
+        pendingReceipt = null;
+        view.addTicket(ticket);
+        view.render({ kind: response.status === 200 ? "receipt-confirmed" : "created", ticket });
     }
 
     async function readTicket(id) {
-        if (creating) {
+        if (creating || pendingReceipt || receiptLookupRequired) {
             return;
         }
 
@@ -93,7 +201,9 @@ export function createTicketClient({ fetchImpl, view }) {
                 return;
             }
 
-            if (showHttpFailure(response)) {
+            const failure = httpFailure(response);
+            if (failure) {
+                view.render(failure);
                 return;
             }
 
@@ -128,7 +238,7 @@ export function createTicketClient({ fetchImpl, view }) {
     }
 
     async function createTicket(title, messageBody) {
-        if (creating) {
+        if (creating || pendingReceipt || receiptLookupRequired) {
             return;
         }
 
@@ -137,8 +247,7 @@ export function createTicketClient({ fetchImpl, view }) {
             return;
         }
 
-        // undefined는 이전 in-memory 제목 전용 실험 호출에만 사용한다.
-        // PostgreSQL은 body 누락을 서버에서도 거부한다.
+        // The old in-memory example allows a title-only request.
         if (messageBody !== undefined) {
             if (typeof messageBody !== "string") {
                 view.render({ kind: "invalid-body" });
@@ -151,86 +260,66 @@ export function createTicketClient({ fetchImpl, view }) {
             }
         }
 
-        creating = true;
-        activeReadController?.abort();
-        activeReadController = null;
-        latestReadRequestId++;
-        view.render({ kind: "creating" });
-
+        startReceiptRequest("creating");
         try {
-            let csrfResponse;
-
-            try {
-                csrfResponse = await fetchImpl("/api/csrf", {
-                    credentials: "same-origin"
-                });
-            } catch {
-                view.render({ kind: "request-unavailable" });
+            const { csrf, failure } = await loadCsrf();
+            if (failure) {
+                view.render({ ...failure, beforeSubmission: true });
                 return;
             }
 
-            if (showHttpFailure(csrfResponse)) {
-                return;
+            const payload = messageBody === undefined ? { title } : { title, body: messageBody };
+            if (csrf.receiptContext) {
+                const requestId = newRequestId();
+                if (typeof requestId !== "string" || requestId.length === 0) {
+                    view.render({ kind: "receipt-id-unavailable" });
+                    return;
+                }
+                payload.clientRequestId = requestId;
+                pendingReceipt = { payload, csrf };
             }
-
-            let csrf;
-
-            try {
-                csrf = await csrfResponse.json();
-            } catch {
-                view.render({ kind: "invalid-response" });
-                return;
-            }
-
-            if (!isCsrfInfo(csrf)) {
-                view.render({ kind: "invalid-response" });
-                return;
-            }
-
-            let response;
-
-            try {
-                response = await fetchImpl("/api/tickets", {
-                    method: "POST",
-                    credentials: "same-origin",
-                    headers: {
-                        "Content-Type": "application/json",
-                        [csrf.headerName]: csrf.token
-                    },
-                    body: JSON.stringify(messageBody === undefined
-                        ? { title }
-                        : { title, body: messageBody })
-                });
-            } catch {
-                // The server may already have committed the POST.
-                view.render({ kind: "unknown-outcome" });
-                return;
-            }
-
-            if (showHttpFailure(response)) {
-                return;
-            }
-
-            let body;
-
-            try {
-                body = await response.json();
-            } catch {
-                view.render({ kind: "invalid-response" });
-                return;
-            }
-
-            if (!isTicket(body)) {
-                view.render({ kind: "invalid-response" });
-                return;
-            }
-
-            view.addTicket(body);
-            view.render({ kind: "created", ticket: body });
+            await sendReceipt(payload, csrf, false);
         } finally {
             creating = false;
         }
     }
 
-    return { readTicket, createTicket };
+    async function confirmReceipt() {
+        if (creating || !pendingReceipt) {
+            return;
+        }
+        const receipt = pendingReceipt;
+        startReceiptRequest("confirming-receipt");
+
+        try {
+            const { csrf, failure } = await loadCsrf();
+            if (receipt !== pendingReceipt) {
+                return;
+            }
+            if (failure) {
+                if (failure.kind === "login-required" || failure.kind === "forbidden") {
+                    requireReceiptLookup();
+                } else {
+                    showUnknownReceipt();
+                }
+                return;
+            }
+            if (csrf.receiptContext !== receipt.csrf.receiptContext) {
+                requireReceiptLookup();
+                return;
+            }
+            // The original token also protects against a session switch after the GET.
+            await sendReceipt(receipt.payload, receipt.csrf, true);
+        } finally {
+            creating = false;
+        }
+    }
+
+    function resetReceiptAfterPageRestore() {
+        if (pendingReceipt) {
+            requireReceiptLookup();
+        }
+    }
+
+    return { readTicket, createTicket, confirmReceipt, resetReceiptAfterPageRestore };
 }

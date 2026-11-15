@@ -187,7 +187,7 @@ class TicketStatusHttpIntegrationTest {
         assertThat(count()).isEqualTo(1);
     }
     @Test void unknown_requester_is_not_inferred_by_new_resolution()throws Exception {
-        prepare();jdbc.update("UPDATE tickets SET requester_user_id=NULL WHERE id=?",ticket);var before=snapshot();
+        prepare();jdbc.update("UPDATE tickets SET requester_user_id=NULL, receipt_request_id=NULL WHERE id=?",ticket);var before=snapshot();
         assertCode(send(A,resolve(UUID.randomUUID(),1,1,inquiry),409),"REQUESTER_UNCONFIRMED");
         assertThat(snapshot()).isEqualTo(before);
     }

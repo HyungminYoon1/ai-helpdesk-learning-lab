@@ -178,7 +178,11 @@ function Login-Local {
 }
 
 function New-TicketContent {
-    $payload = @{ title = 'Compose 저장 확인'; body = '로그인 링크가 만료되어 문의합니다. 합성 학습 데이터입니다.' } | ConvertTo-Json -Compress
+    $payload = @{
+        title = 'Compose 저장 확인'
+        body = '로그인 링크가 만료되어 문의합니다. 합성 학습 데이터입니다.'
+        clientRequestId = [Guid]::NewGuid().ToString()
+    } | ConvertTo-Json -Compress
     return [System.Net.Http.StringContent]::new($payload, [System.Text.Encoding]::UTF8, 'application/json')
 }
 

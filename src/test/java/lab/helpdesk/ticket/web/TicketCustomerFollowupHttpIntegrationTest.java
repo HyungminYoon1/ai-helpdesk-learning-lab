@@ -131,7 +131,7 @@ class TicketCustomerFollowupHttpIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content(payload("denied",UUID.randomUUID())))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("IDENTITY_UNLINKED"));
         assertThat(snapshot()).isEqualTo(before);
-        jdbc.update("UPDATE tickets SET requester_user_id=NULL WHERE id=?",ticket);
+        jdbc.update("UPDATE tickets SET requester_user_id=NULL, receipt_request_id=NULL WHERE id=?",ticket);
         follow(ticket,"denied",UUID.randomUUID(),A,404);
         assertThat(messageCount()).isOne();
     }

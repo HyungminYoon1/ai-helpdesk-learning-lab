@@ -255,7 +255,7 @@ class TicketAssignmentHttpIntegrationTest {
         UUID key=UUID.randomUUID();
         jdbc.update("INSERT INTO ticket_messages(ticket_id,body,author_username,author_user_id,message_type,client_request_id) VALUES (?,'reply',?,?, 'OFFICIAL_REPLY',?)",ticket,A,a,key);
         reply(A,null,key,200);reply(A,1L,key,409);reply(A,null,UUID.randomUUID(),400);
-        jdbc.update("UPDATE tickets SET service_id=NULL WHERE id=?",ticket);
+        jdbc.update("UPDATE tickets SET service_id=NULL, receipt_request_id=NULL WHERE id=?",ticket);
         mvc.perform(get("/api/tickets/{id}/assignment",ticket).with(as(A))).andExpect(status().isNotFound());
         mvc.perform(get("/api/tickets/{id}/messages",ticket).with(as(C))).andExpect(status().isOk());
     }
@@ -305,7 +305,9 @@ class TicketAssignmentHttpIntegrationTest {
                 Map.of("helpdesk.support.receipt-service-code","")));
         try {
             mvc.perform(post("/api/tickets").with(as(C)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"title\":\"not stored\",\"body\":\"not stored\"}"))
+                    .content("""
+                            {"title":"not stored","body":"not stored","clientRequestId":"%s"}
+                            """.formatted(UUID.randomUUID())))
                     .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("SUPPORT_NOT_CONFIGURED"));
             assertThat(jdbc.queryForObject("SELECT count(*) FROM tickets",Long.class)).isOne();
         } finally { environment.getPropertySources().remove(source); }
