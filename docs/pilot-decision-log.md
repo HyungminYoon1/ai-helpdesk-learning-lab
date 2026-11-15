@@ -7,7 +7,14 @@
 - 기존 접수는 제목과 본문으로 Ticket, Message와 AI Job을 매번 저장한다. 브라우저의 중복 클릭 방지, 내용으로 중복을 추정하는 방식, 제출 UUID를 DB에 기록하는 방식을 비교했다.
 - 인증 고객의 영속 ID와 접수 UUID를 Ticket 생성 전에 식별해 PostgreSQL의 `UNIQUE` 제약으로 중복을 막는다. 제출 기록과 업무 행을 같은 트랜잭션에 넣으면 겹친 요청과 응답 유실에서도 한 번의 저장을 확인할 수 있다. [AWS 재시도 설계 지침](https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/)
 - 화면 메모리가 원래 제출을 유지하는 동안 명시적으로 재확인한다. 화면 상태가 사라지면 내 문의와 운영자 확인으로 이어진다. 문의 원문을 브라우저에 지속 저장하는 방식은 그 보관과 접근을 별도로 설계할 때 검토한다.
-- 구현 영향은 최초 접수 API·Service·저장소·Migration과 [접수 화면](../src/main/resources/static/ticket-ui.mjs)이다. 구현 전에 제출의 비교 기준, 키 보존 기간과 기존 호출자 전환을 확정하고 출시 기준 G1에서 확인한다.
+- 구현 영향은 최초 접수 API·Service·저장소·Migration과 [접수 화면](../src/main/resources/static/ticket-ui.mjs)이다. 제출의 비교 기준과 기존 호출자의 전환을 정하고 G1에서 확인한다. 실데이터의 접수 키 보관·삭제는 G0의 운영 정책에 포함한다.
+
+### D01-1 2026-11-15 최초 접수 구현 권장안
+
+- 별도 접수 키 테이블과 Ticket 행에 키를 저장하는 방식을 비교했다. 이번 범위에서는 인증 고객의 영속 ID와 UUID를 Ticket 행에 함께 기록하는 안을 권장한다. Ticket이 있어야 접수가 성립하며, 이미 저장하는 제목과 최초 Message를 비교에 사용할 수 있어 내용 사본이나 접수 중간 상태를 따로 관리할 필요가 줄어든다.
+- 이전 Migration과 기존 문의는 보존한다. 이미 등록된 문의에는 접수 UUID를 추정해 채우지 않는다. 새 고객 접수의 UUID를 검증하고, 같은 UUID의 충돌은 제목·본문의 원문으로 구분한다. 접수 키는 인증된 고객 ID와 UUID를 함께 사용해 조회한다.
+- 기존 `POST /api/tickets`의 경로와 성공 응답 형식을 유지한다. PostgreSQL의 화면·검증 스크립트를 함께 전환할 수 있으면 전환 후 UUID를 필수로 받는다. 다른 호출자가 확인되면 전환 시점이나 별도의 호환 경로를 먼저 정한다.
+- 변경 대상은 접수 DTO와 Controller, [접수 Service](../src/main/java/lab/helpdesk/ticket/application/TicketReceiptApplicationService.java)와 JDBC 저장소, 다음 Flyway Migration, [접수 화면](../src/main/resources/static/ticket-ui.mjs)과 검증 코드다. 구현 시 V13 업그레이드와 동시 제출을 검증한다. 실데이터에 적용할 보관 기간, 삭제 후 재전송 처리와 계정 회수 후 접근은 G0/G2/G3에서 확인한다.
 
 ## D02 운영자 초대와 권한 회수
 
