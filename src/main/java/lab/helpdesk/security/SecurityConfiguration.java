@@ -1,5 +1,7 @@
 package lab.helpdesk.security;
 
+import lab.helpdesk.cognito.CognitoWebSecurity;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -10,7 +12,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
 @Configuration
@@ -23,13 +27,22 @@ public class SecurityConfiguration {
 
     @Bean
     SecurityFilterChain securityFilterChain(
-            HttpSecurity http)
+            HttpSecurity http,
+            ObjectProvider<CognitoWebSecurity.LoginConfigurer> cognitoConfig)
             throws Exception {
 
+        CognitoWebSecurity.LoginConfigurer cognito = cognitoConfig.getIfAvailable();
         RequestMatcher apiRequest =
                 PathPatternRequestMatcher.pathPattern("/api/**");
         RequestMatcher managementRequest =
                 PathPatternRequestMatcher.pathPattern("/actuator/**");
+        RequestMatcher customerPages = new OrRequestMatcher(
+                PathPatternRequestMatcher.pathPattern("/tickets.html"),
+                PathPatternRequestMatcher.pathPattern("/my-tickets.html"),
+                PathPatternRequestMatcher.pathPattern("/conversation.html"));
+        RequestMatcher staffPages = new OrRequestMatcher(
+                PathPatternRequestMatcher.pathPattern("/assignments.html"),
+                PathPatternRequestMatcher.pathPattern("/ai-suggestions.html"));
         RequestMatcher ticketCreateRequest =
                 PathPatternRequestMatcher.pathPattern(
                         HttpMethod.POST,
@@ -44,7 +57,8 @@ public class SecurityConfiguration {
 
         http
                 .cors(Customizer.withDefaults())
-                .authorizeHttpRequests(authorize -> authorize
+                .authorizeHttpRequests(authorize -> {
+                    authorize
                         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.HEAD, "/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/metrics/http.server.requests")
@@ -69,8 +83,16 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/tickets/{id}/messages").hasAnyRole("USER", "AGENT")
                         .requestMatchers("/api/tickets/{id}/customer-messages").hasAnyRole("USER", "AGENT")
                         .requestMatchers("/api/my/tickets").hasAnyRole("USER", "AGENT")
-                        .requestMatchers(apiRequest).authenticated()
-                        .anyRequest().permitAll())
+                        .requestMatchers("/api/account-invitations").hasRole("ACCOUNT_ADMIN");
+                    if (cognito == null) {
+                        authorize.requestMatchers(apiRequest).authenticated();
+                    } else {
+                        authorize.requestMatchers(apiRequest).hasRole("USER");
+                        authorize.requestMatchers(customerPages).hasRole("USER");
+                        authorize.requestMatchers(staffPages).hasRole("AGENT");
+                    }
+                    authorize.anyRequest().permitAll();
+                })
                 .exceptionHandling(exceptions -> exceptions
                         .defaultAuthenticationEntryPointFor(
                                 new HttpStatusEntryPoint(
@@ -78,8 +100,14 @@ public class SecurityConfiguration {
                                 apiRequest)
                         .defaultAuthenticationEntryPointFor(
                                 new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
-                                managementRequest))
-                .formLogin(Customizer.withDefaults());
+                                managementRequest));
+        if (cognito == null) {
+            http.formLogin(Customizer.withDefaults());
+        } else {
+            http.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
+                    new LoginUrlAuthenticationEntryPoint("/login"), new OrRequestMatcher(customerPages, staffPages)));
+            cognito.configure(http);
+        }
 
         return http.build();
     }

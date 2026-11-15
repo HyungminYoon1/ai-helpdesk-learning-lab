@@ -1,10 +1,12 @@
 # AI Helpdesk Learning Lab
 
-> 상태: V13 상태 변경과 명시적 재개에 이어 V14 최초 문의 재확인을 연결했다. 로컬에서 Maven 기본 1,234건과 패키징 후 2건, Node 421건과 Lint, 접수 재확인 브라우저 실험이 통과했다.
+> 상태: V14 최초 문의 재확인에 이어 V15에서 Cognito 초대와 단계별 로그인을 연결했다. 로컬에서 Maven 기본 1,245건, 패키징 후 2건, Node 421건과 ESLint를 통과했다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
 수료 후 개발 순서와 첫 파일럿 출시 기준을 정리했다. [개발 로드맵](./docs/roadmap.md)
+
+첫 파일럿 계정은 Cognito에서 이메일을 확인한 뒤 새 TOTP 로그인으로 초대를 수락한다. [계정 설정과 로컬 검증](./docs/pilot-account-design.md#helpdesk-연동)
 
 V14의 PostgreSQL `POST /api/tickets`는 `title`, `body`와 UUID 형식의 `clientRequestId`를 받는다. 새 제출은 `201`, 같은 고객이 같은 UUID와 원문으로 재확인하면 기존 문의 번호와 `200`, 같은 UUID에 다른 내용을 보내면 `409 RECEIPT_REQUEST_CONFLICT`다. 화면에서 접수 결과가 불명확하면 '접수 결과 확인'을 누른다. 페이지를 다시 열거나 재로그인한 경우에는 '내 문의'에서 확인한다. [접수 계약과 검증 범위](./docs/roadmap.md#1-최초-문의의-중복-접수-방지)
 

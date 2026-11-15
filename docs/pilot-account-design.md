@@ -56,4 +56,31 @@ OIDC 제공자가 사용자를 생성해 보내는 안내와 Helpdesk 초대는 
 
 실험 결과로 제공자를 확정했다. 실행 근거의 범위는 Cognito와 로컬 OIDC 콜백이며 Helpdesk 초대 수락 트랜잭션, 세션 무효화와 서비스 역할 검사는 실제 App을 연결한 G2에서 확인한다. 주소와 인증 정보는 검증 기록에서 제외했다.
 
+## Helpdesk 연동
+
+`postgres,cognito` Profile을 사용하면 `/login`에서 Cognito 로그인을 시작한다. 처음 초대받은 사람은 Helpdesk 초대 코드를 입력한다. 첫 OIDC 콜백은 서버 세션에 이메일 검증용 상태만 남긴다. Cognito 토큰이나 그룹 Claim에서 Helpdesk 역할을 부여하지 않는다.
+
+이메일 검증 뒤 App에서 Cognito 로그아웃을 거쳐 두 번째 Authorization Code 요청을 시작한다. 이 요청의 `state`와 Spring Security가 검증한 `nonce`에 대응하는 토큰에서 같은 발급자, 사용자 ID, 이메일 및 검증 상태를 확인한다. 서명된 `auth_time`은 첫 로그인보다 늦고 두 번째 인가 요청이 시작된 초 이후여야 한다. 토큰 갱신이나 공유된 Hosted UI 세션에서 인증 시각이 유지되면 재로그인으로 인정하지 않는다. [Cognito ID 토큰](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-id-token.html)
+
+재로그인 전과 콜백 및 초대 수락에서 Pool의 TOTP 필수 설정과 App Client의 직접 Cognito 로그인 및 Authorization Code 구성을 다시 읽는다. 다른 MFA 방식, 연동 제공자나 설정 조회 실패가 있으면 인증을 진행할 수 없다. 새 로그인 확인 뒤 CSRF가 붙은 `POST /onboarding/accept`에서 초대 사용과 DB 신원, 서비스 역할을 함께 저장한다. Commit 뒤 브라우저 세션 ID와 CSRF 표식을 교체하고 Helpdesk 인증을 설정한다.
+
+초대는 발급 시각부터 24시간 유효하다. 같은 수신 주소에 재발급하면 미사용 초대를 회수한다. 첫 등록 절차의 세션 상태는 15분 동안 유지된다. 이미 연결된 사용자는 가입 코드 없이 직접 로그인하며, 서비스 직원 권한은 보호 API 요청에서 현재 활성 멤버십을 다시 읽는다.
+
+### 설정과 첫 운영자
+
+| 설정 | 값의 범위 |
+|---|---|
+| `helpdesk.cognito.issuer` | 서울 Pool의 HTTPS OIDC Issuer. |
+| `helpdesk.cognito.domain` | 해당 Pool의 기본 Cognito Hosted UI HTTPS Origin. |
+| `helpdesk.cognito.app-origin` | Helpdesk의 HTTPS Origin. 로컬 콜백 검증에는 Loopback HTTP를 사용할 수 있다. |
+| `helpdesk.cognito.client-id` | 해당 Pool의 App Client ID. |
+| `helpdesk.cognito.client-secret` | 비밀값을 사용하는 Client일 때 서버에만 전달하는 선택 값. |
+| `helpdesk.cognito.bootstrap-subject` | 확인한 첫 계정 관리자의 Cognito `sub`. 초기 연결 뒤 제거할 수 있다. |
+
+Cognito App Client의 콜백은 `/login/oauth2/code/cognito`다. Allowed sign-out URL에는 App Origin의 `/onboarding/resume`과 `/login`을 등록한다. `openid`, `email`, `aws.cognito.signin.user.admin` Scope를 허용한다. App 실행 Role에는 지정한 Pool에서 `cognito-idp:GetUserPoolMfaConfig`와 `cognito-idp:DescribeUserPoolClient`만 필요하다. 후자는 해당 Pool의 App Client 메타데이터에 접근할 수 있으므로 전용 Pool ARN에 제한한다. 서버의 Cognito 앱 클라이언트 인증 정보와 사용자 Token을 기록하지 않는다. [Cognito 권한 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cognito-idp.html)
+
+첫 운영자는 신원을 확인한 뒤 코드 없이 같은 이메일 확인과 TOTP 재로그인 절차를 밟는다. DB가 처음 연결한 관리자 한 명을 기억한다. [지원 서비스 준비](../README.md#로컬-서비스-준비) 후 운영자는 인증과 CSRF가 필요한 `POST /api/account-invitations`에 `email`과 `role`을 보낸다. `CUSTOMER`는 두 필드로 발급한다. `AGENT` 또는 `SUPERVISOR`는 `serviceId`와 `displayName`도 지정한다. 운영자가 Cognito에서 사용자를 초대하고, Helpdesk에서 받은 코드를 해당 수신자에게 전달한다. 응답은 코드와 만료 시각을 한 번 반환하며 DB는 해시를 보관한다.
+
+로컬 통합 검증은 서명된 토큰을 발급하는 Loopback OIDC 서버와 PostgreSQL 17을 사용했다. PKCE, 서명과 nonce, 첫 세션의 API 차단, 이전 인증 시각과 다른 신원 거절, TOTP 정책 오류 차단, Commit 실패 및 동시 초대 수락을 확인했다. 실제 Cognito에 연결한 프로덕션 설정과 사용자 흐름은 출시 후보에서 다시 검증한다.
+
 [계정 정책의 결정과 대안](./pilot-decision-log.md#d02-운영자-초대와-권한-회수)
