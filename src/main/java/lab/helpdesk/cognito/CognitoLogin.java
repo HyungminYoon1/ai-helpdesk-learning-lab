@@ -18,6 +18,7 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 final class CognitoLogin {
@@ -50,15 +51,14 @@ final class CognitoLogin {
         contexts.saveContext(context, request, response);
     }
 
-    OncePerRequestFilter checkAccount() {
+    OncePerRequestFilter checkAccount(RequestMatcher accountRequests) {
         return new OncePerRequestFilter() {
             @Override
             protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
                     throws ServletException, IOException {
                 Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-                String path = request.getRequestURI().substring(request.getContextPath().length());
                 if (auth != null && auth.getPrincipal() instanceof AccountUserDetails principal
-                        && (path.startsWith("/api/") || path.startsWith("/actuator/metrics"))) {
+                        && accountRequests.matches(request)) {
                     try {
                         var account = accounts.find(principal.accountKey());
                         if (account.isEmpty()) {

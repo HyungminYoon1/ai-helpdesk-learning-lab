@@ -173,9 +173,14 @@ class CognitoOnboardingHttpIntegrationTest {
                 .andExpect(redirectedUrl("/my-tickets.html"));
         assertThat(acceptedCount()).isEqualTo(1);
         returning.get("/api/services").andExpect(status().isOk());
+        returning.get("/assignments.html").andExpect(status().isOk());
+        returning.get("/ai-suggestions.html").andExpect(status().isOk());
 
         jdbc.update("UPDATE support_service_memberships SET active = false WHERE service_id = ?", service);
+        returning.get("/assignments.html").andExpect(status().isForbidden());
+        returning.get("/ai-suggestions.html").andExpect(status().isForbidden());
         returning.get("/api/services").andExpect(status().isForbidden());
+        returning.get("/my-tickets.html").andExpect(status().isOk());
         returning.get("/api/my/tickets").andExpect(status().isOk());
     }
 

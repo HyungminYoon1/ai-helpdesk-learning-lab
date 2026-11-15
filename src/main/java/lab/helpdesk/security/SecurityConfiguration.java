@@ -36,6 +36,8 @@ public class SecurityConfiguration {
                 PathPatternRequestMatcher.pathPattern("/api/**");
         RequestMatcher managementRequest =
                 PathPatternRequestMatcher.pathPattern("/actuator/**");
+        RequestMatcher requestMetrics = PathPatternRequestMatcher.pathPattern(
+                HttpMethod.GET, "/actuator/metrics/http.server.requests");
         RequestMatcher customerPages = new OrRequestMatcher(
                 PathPatternRequestMatcher.pathPattern("/tickets.html"),
                 PathPatternRequestMatcher.pathPattern("/my-tickets.html"),
@@ -61,7 +63,7 @@ public class SecurityConfiguration {
                     authorize
                         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.HEAD, "/actuator/health").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/actuator/metrics/http.server.requests")
+                        .requestMatchers(requestMetrics)
                         .hasRole("AGENT")
                         .requestMatchers("/actuator", "/actuator/**").denyAll()
                         .requestMatchers(ticketCreateRequest)
@@ -104,9 +106,10 @@ public class SecurityConfiguration {
         if (cognito == null) {
             http.formLogin(Customizer.withDefaults());
         } else {
+            RequestMatcher accountPages = new OrRequestMatcher(customerPages, staffPages);
             http.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
-                    new LoginUrlAuthenticationEntryPoint("/login"), new OrRequestMatcher(customerPages, staffPages)));
-            cognito.configure(http);
+                    new LoginUrlAuthenticationEntryPoint("/login"), accountPages));
+            cognito.configure(http, new OrRequestMatcher(apiRequest, accountPages, requestMetrics));
         }
 
         return http.build();

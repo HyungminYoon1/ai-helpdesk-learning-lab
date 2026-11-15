@@ -25,6 +25,7 @@ import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.WebUtils;
 import software.amazon.awssdk.regions.Region;
@@ -105,7 +106,7 @@ public class CognitoWebSecurity {
             this.registrations = registrations;
         }
 
-        public void configure(HttpSecurity http) throws Exception {
+        public void configure(HttpSecurity http, RequestMatcher accountRequests) throws Exception {
             var delegate = new DefaultOAuth2AuthorizationRequestResolver(registrations, "/oauth2/authorization");
             delegate.setAuthorizationRequestCustomizer(OAuth2AuthorizationRequestCustomizers.withPkce());
             var resolver = new OAuth2AuthorizationRequestResolver() {
@@ -144,7 +145,7 @@ public class CognitoWebSecurity {
                                     redirectError(response, SIGN_IN_REQUIRED)))
                     .logout(logout -> logout.logoutSuccessHandler((request, response, auth) ->
                             response.sendRedirect(logoutUrl("/login"))))
-                    .addFilterBefore(login.checkAccount(), AuthorizationFilter.class);
+                    .addFilterBefore(login.checkAccount(accountRequests), AuthorizationFilter.class);
         }
 
         String logoutUrl(String appPath) {

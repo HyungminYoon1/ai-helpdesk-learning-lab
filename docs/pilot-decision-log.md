@@ -50,6 +50,7 @@
 - Cognito 토큰을 곧바로 앱 세션으로 쓰는 안과, 온보딩 상태를 분리해 이메일 확인 및 두 번째 로그인을 검증하는 안을 비교했다. Spring Security에 Code·PKCE·nonce 처리를 맡기고 재로그인과 초대 수락이 완료될 때 Helpdesk 세션을 발급한다.
 - Hosted UI 로그아웃을 거쳐 새 `state`를 생성하고 `auth_time`, 동일 `iss`·`sub`, 검증된 이메일을 확인한다. Cognito에는 지원하는 MFA를 설정하며 App은 지정 Pool의 필수 TOTP와 Cognito 전용 Client 설정을 재조회해 이 전제를 확인한다.
 - V15에서 초대 해시·발급/수락 시각·운영자와 수신 계정을 저장한다. 한 주소의 미사용 초대는 재발급 시 회수하고, 초대 사용·신원 연결·서비스 역할 부여는 한 트랜잭션으로 저장한다. 최초 계정 관리자도 온보딩을 통과하며 DB에서 단일 초기 관리자만 허용한다.
+- 권한 회수를 검토하면서 API만 활성 멤버십을 다시 읽는 방식과 화면에도 같은 기준을 적용하는 방식을 비교했다. 기존 세션으로 권한 회수 전의 직원 화면이 열리지 않도록 [보안 설정](../src/main/java/lab/helpdesk/security/SecurityConfiguration.java)의 보호 경로 기준을 [계정 검사](../src/main/java/lab/helpdesk/cognito/CognitoLogin.java)에도 적용한다. 로컬에서 같은 세션의 직원 화면과 API 차단, 고객 기능 유지 여부를 검사하고 G2에서 브라우저로 재확인한다.
 - 검증용 서울 Pool의 합성 계정 두 개, 앱 클라이언트와 도메인, Pool, 임시 IAM 역할을 삭제하고 AWS 조회로 확인했다. 연동은 [로컬 OIDC·PostgreSQL 검증](./pilot-account-design.md#helpdesk-연동)에서 확인했다. 운영 App 연결과 복구·비활성화 운영 절차는 G2 출시 후보에서 확인한다.
 
 ## D03 첫 운영 DB와 학습 데이터
