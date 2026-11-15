@@ -182,3 +182,20 @@ $helpdeskJavaExit = $LASTEXITCODE
 이후 전체 확인은 Surefire 1,223건/Failsafe 2건, 실패/오류/Skip 0, BUILD SUCCESS/exit 0이었다. 이때 남은 self-attaching/동적 경고 각 한 건은 별도 Failsafe JVM에서 발생한 것을 로그로 확인했다. Failsafe에도 같은 시작 설정을 적용한 뒤 initialize와 Failsafe 두 목표만 실행해 해당 두 건을 동적 로딩 차단 조건에서 재검증했다. 두 건/실패·오류·Skip 0, BUILD SUCCESS/exit 0과 해당 경고 0건이었다. 마지막 Failsafe 설정 뒤 전체 verify를 다시 실행한 것으로 기록하지 않는다.
 
 전체 확인의 근거는 full-verify 아래, 마지막 Failsafe의 근거는 validated-failsafe-jdk25 아래에 분리했다. 후자의 첫 시도는 Codex 셸의 기존 JAVA_HOME 경로가 유효하지 않아 Maven 실행 전에 중단됐다. 이 실패와 오래된 XML 복사본을 별도로 표시하고, 해당 실행에서만 설치된 JDK 25.0.5를 지정해 재개했다. 원래 환경값은 복원했으며 시스템 환경변수 값은 변경하거나 기록하지 않았다. 전체 확인은 Java 25.0.4, 마지막 Failsafe 확인은 25.0.5이므로 조건도 구분한다.
+
+## 8 최초 문의 접수 재확인
+
+Docker가 실행된 환경에서 로컬 PostgreSQL과 실제 브라우저를 연결해 확인한다. 테스트는 각 실행의 새 Testcontainer와 합성 고객 계정을 사용한다.
+
+```powershell
+.\mvnw.cmd -B -ntp '-Dtest=TicketReceiptIntegrationTest,TicketReceiptMigrationIntegrationTest,TicketReceiptHttpIntegrationTest' test
+$helpdeskPwsh = (Get-Command pwsh -ErrorAction Stop).Source
+.\mvnw.cmd -B -ntp '-Dtest=TicketReceiptRecoveryBrowserExperiment' "-Dhelpdesk.browser.pwsh=$helpdeskPwsh" test
+```
+
+- DB에서 같은 고객·UUID의 첫 저장이 Commit 또는 Rollback될 때 두 번째 요청이 대기하는 것을 관찰한다. V13에서 V14로 올라가도 기존 문의·최초 Message·Job을 유지하는지 확인한다.
+- 정상 접수는 `201`이다. 같은 원문으로 재확인하면 같은 문의 번호와 `Location`을 담은 `200`을 반환한다. DB가 Commit을 거부하면 `500`이고 저장 건수는 0이다. 원래 UUID를 재사용해 Commit하면 `201`이 된다.
+- 실제 브라우저 실험은 합성 접수의 `201`을 서버에서 받은 뒤 브라우저 응답만 끊는다. 첫 건은 버튼으로 재확인해 `200`을 받는다. 두 번째는 같은 브라우저의 다른 탭에서 고객을 전환한 뒤 추가 POST 없이 '내 문의'로 안내되는지 확인한다. 원래 고객으로 다시 로그인하면 저장된 두 문의가 보이고, DB의 Ticket·Message·Job은 각 두 건이다.
+- 브라우저 증거는 `output/playwright/pilot-ticket-receipt-*/evidence.json`에 남긴다. HTTP 상태와 합성 문의 번호, 같은 제출 여부를 기록한다. 두 Job은 `PENDING`이며 Provider 상호작용은 0건이어야 한다.
+
+2026-11-15 실행에서 Maven 기본 1,234건과 패키징 후 검사 2건, Node 421건, ESLint, 별도 브라우저 실험 1건이 통과했다. 실험의 응답은 `201, 200, 201` 순서였다. 두 번째 고객의 목록은 비어 있었고 원래 고객의 목록과 DB에 두 문의가 남았다. 두 AI Job의 처리 시도와 Provider 상호작용은 0건이었다.
