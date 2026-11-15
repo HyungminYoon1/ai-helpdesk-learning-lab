@@ -5,6 +5,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,6 +39,41 @@ class JdbcCognitoAccounts {
     Optional<Account> find(UUID accountKey) {
         return jdbc.query(ACCOUNT_SELECT + " WHERE i.account_key = ?",
                 JdbcCognitoAccounts::account, accountKey).stream().findFirst();
+    }
+
+    List<AccountSummary> listAccounts() {
+        return jdbc.query("""
+                SELECT i.account_key, a.first_administrator, a.status, a.session_version,
+                       (SELECT v.email FROM helpdesk_account_invitations v WHERE v.accepted_by = a.user_id
+                        ORDER BY v.accepted_at DESC LIMIT 1) AS invited_email
+                FROM helpdesk_cognito_accounts a
+                JOIN helpdesk_user_identities i ON i.id = a.user_id
+                ORDER BY a.user_id
+                """, (row, index) -> new AccountSummary(row.getObject("account_key", UUID.class),
+                        row.getString("invited_email"), row.getBoolean("first_administrator"),
+                        AccountStatus.valueOf(row.getString("status")), row.getLong("session_version")));
+    }
+
+    Optional<Account> lockForStatusChange(UUID accountKey) {
+        return jdbc.query(ACCOUNT_SELECT + " WHERE i.account_key = ? FOR UPDATE OF a",
+                JdbcCognitoAccounts::account, accountKey).stream().findFirst();
+    }
+
+    long changeStatus(Account target, AccountStatus status, long administratorId, String reason) {
+        long version = target.sessionVersion() + 1;
+        OffsetDateTime changedAt = jdbc.queryForObject("""
+                UPDATE helpdesk_cognito_accounts
+                SET status = ?, session_version = ?,
+                    reactivated_at = CASE WHEN ? = 'ACTIVE' THEN statement_timestamp() END
+                WHERE user_id = ?
+                RETURNING statement_timestamp()
+                """, OffsetDateTime.class, status.name(), version, status.name(), target.userId());
+        jdbc.update("""
+                INSERT INTO helpdesk_account_status_events
+                    (target_user_id, administrator_user_id, from_status, to_status, session_version, reason, changed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, target.userId(), administratorId, target.status().name(), status.name(), version, reason, changedAt);
+        return version;
     }
 
     boolean firstAdministratorExists() {

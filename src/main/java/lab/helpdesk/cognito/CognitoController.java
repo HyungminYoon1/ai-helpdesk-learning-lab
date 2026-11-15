@@ -2,7 +2,9 @@ package lab.helpdesk.cognito;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
@@ -17,7 +19,9 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.transaction.TransactionException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -101,6 +105,21 @@ class CognitoController {
                 request.serviceId(), request.displayName(), Instant.now()));
     }
 
+    @GetMapping("/api/accounts")
+    ResponseEntity<List<AccountSummary>> listAccounts(Authentication authentication) {
+        var administrator = AuthenticatedActorFactory.from(authentication);
+        return response(HttpStatus.OK, accounts.listAccounts(administrator.accountKey()));
+    }
+
+    @PutMapping("/api/accounts/{accountKey}/status")
+    ResponseEntity<CognitoAccounts.StatusResult> changeStatus(@PathVariable UUID accountKey,
+            @RequestBody ChangeStatus request, Authentication authentication) {
+        var administrator = AuthenticatedActorFactory.from(authentication);
+        var result = accounts.changeStatus(administrator.accountKey(), accountKey, request.status(),
+                request.expectedSessionVersion(), request.reason());
+        return response(HttpStatus.OK, result);
+    }
+
     @ExceptionHandler(CognitoFailure.class)
     ResponseEntity<Map<String, String>> rejected(CognitoFailure failure) {
         return response(failure.code().status, Map.of("code", failure.code().name()));
@@ -122,4 +141,7 @@ class CognitoController {
     private record Issue(String email, String role, Long serviceId, String displayName) {
         @Override public String toString() { return "IssueInvitation[redacted]"; }
     }
+
+    private record ChangeStatus(AccountStatus status, Long expectedSessionVersion,
+            CognitoAccounts.StatusChangeReason reason) { }
 }

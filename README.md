@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: V14 최초 문의 재확인에 이어 V15에서 Cognito 초대와 단계별 로그인을 연결했다. 로컬에서 Maven 기본 1,245건, 패키징 후 2건, Node 421건과 ESLint를 통과했다.
+> 상태: Cognito 초대와 단계별 로그인에 이어 V17에서 관리자 계정 상태 변경과 감사 이력을 연결했다. 로컬 OIDC와 PostgreSQL로 비활성화 뒤 세션 차단과 재활성화 뒤 새 인증을 검증했다.
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 

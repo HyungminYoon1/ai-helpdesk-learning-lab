@@ -59,6 +59,12 @@
 - Cognito 콜백이 돌아올 때 현재 계정 상태를 확인하고, 재활성화 시각 뒤에 서명된 `auth_time`만 새 인증으로 인정한다. 이전 Cognito 로그인으로 돌아오면 지정된 Hosted UI의 로그아웃 경로를 거쳐 다시 로그인하게 한다.
 - [V16 마이그레이션](../src/main/resources/db/migration/V16__add_cognito_account_state_and_session_version.sql), [세션 검사](../src/main/java/lab/helpdesk/cognito/CognitoLogin.java), [로그인 처리](../src/main/java/lab/helpdesk/cognito/CognitoOnboarding.java)에 적용했다. 로컬 OIDC와 PostgreSQL로 로그인 경계를 검사하고, G2에서 실제 Cognito 로그인과 여러 브라우저 세션으로 재확인한다.
 
+### D02-6 2026-11-15 관리자 계정 상태 변경과 감사 이력
+
+- 관리자 명령을 마지막 요청의 값으로 덮어쓰는 방식과, 조회한 버전을 확인한 뒤 변경하는 방식을 비교했다. 목록에서 확인한 계정 키와 세션 버전으로 요청하고 대상 계정의 행 잠금 아래에서 버전을 검사한다. 같은 상태의 재요청은 버전이 같으면 조회 결과를 반환하고, 이전 버전이면 현재 DB 상태를 다시 확인하도록 충돌을 반환한다.
+- 계정 변경과 감사 이력을 한 트랜잭션으로 저장한다. 사유는 고정 코드로 남기고, 계정 키와 초대 당시 주소는 활성 계정 관리자에게만 제공한다. 파일럿의 첫 관리자는 단일 계정이므로 이 API에서 비활성화를 거부한다. 문의 소유권과 작성 이력의 참조는 내부 계정 ID로 보존한다.
+- [관리자 API와 사용 계약](./pilot-account-design.md#계정-관리자-api), [계정 서비스](../src/main/java/lab/helpdesk/cognito/CognitoAccounts.java), [V17 감사 이력](../src/main/resources/db/migration/V17__record_cognito_account_status_changes.sql)에 적용했다. 로컬에서 관리자 권한, CSRF, 버전 충돌, 커밋 실패와 이전 세션 차단을 확인한다. 실제 Cognito 로그인과 첫 관리자 복구는 G2에서 점검한다.
+
 ## D03 첫 운영 DB와 학습 데이터
 
 - 학습용 V8 스냅샷을 출발점으로 복원하는 안과 빈 전용 DB에 전체 Migration을 적용하는 안을 비교했다. V9와 V10은 기존 문의의 고객 소유권과 지원 서비스를 추정해 채우지 않는다.

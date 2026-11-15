@@ -6,6 +6,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
@@ -64,6 +65,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
@@ -106,6 +108,7 @@ class CognitoOnboardingHttpIntegrationTest {
 
     @BeforeEach
     void resetStorage() {
+        jdbc.update("DELETE FROM helpdesk_account_status_events");
         jdbc.update("DELETE FROM helpdesk_account_invitations");
         jdbc.update("DELETE FROM support_service_memberships");
         jdbc.update("DELETE FROM helpdesk_cognito_accounts");
@@ -227,12 +230,7 @@ class CognitoOnboardingHttpIntegrationTest {
         second.get("/api/my/tickets").andExpect(status().isUnauthorized());
 
         newLogin.begin(null);
-        var stale = newLogin.login(newLogin.authorize(), EMPLOYEE, EMAIL, true, reactivation)
-                .andExpect(status().is3xxRedirection()).andReturn();
-        URI logout = URI.create(stale.getResponse().getRedirectedUrl());
-        assertThat(logout.getHost()).isEqualTo(settings.domain().getHost());
-        assertThat(logout.getPath()).isEqualTo("/logout");
-        assertThat(parameters(logout.getRawQuery()).get("logout_uri")).isEqualTo(settings.appOrigin() + "/login");
+        expectCognitoLogout(newLogin.login(newLogin.authorize(), EMPLOYEE, EMAIL, true, reactivation), "/login");
         newLogin.get("/api/my/tickets").andExpect(status().isUnauthorized());
 
         newLogin.begin(null);
@@ -318,6 +316,134 @@ class CognitoOnboardingHttpIntegrationTest {
         assertThat(acceptedCount()).isEqualTo(1);
     }
 
+    @Test
+    void onlyTheAccountAdministratorCanDisableAndReactivateWithoutRestoringOldSessions() throws Exception {
+        var employee = linkedEmployee();
+        var administrator = accounts.find(new CognitoAccounts.Identity(settings.issuer(), ADMIN, BOOTSTRAP_EMAIL))
+                .orElseThrow();
+        String path = accountStatusPath(employee.accountKey());
+        Instant oldLogin = Instant.now().minusSeconds(60);
+        Browser admin = new Browser();
+        admin.signIn(ADMIN, BOOTSTRAP_EMAIL, oldLogin).andExpect(redirectedUrl("/my-tickets.html"));
+        Browser first = new Browser();
+        first.signIn(EMPLOYEE, EMAIL, oldLogin).andExpect(redirectedUrl("/my-tickets.html"));
+        Browser second = new Browser();
+        second.signIn(EMPLOYEE, EMAIL, oldLogin).andExpect(redirectedUrl("/my-tickets.html"));
+        second.get("/api/services").andExpect(status().isOk());
+
+        admin.get("/api/accounts").andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$[1].accountKey").value(employee.accountKey().toString()))
+                .andExpect(jsonPath("$[1].invitedEmail").value(EMAIL))
+                .andExpect(jsonPath("$[1].status").value("ACTIVE"))
+                .andExpect(jsonPath("$[1].sessionVersion").value(0));
+        new Browser().get("/api/accounts").andExpect(status().isUnauthorized());
+        first.get("/api/accounts").andExpect(status().isForbidden());
+        first.putJson(path, changeStatus("DISABLED", 0, "SECURITY_REVIEW")).andExpect(status().isForbidden());
+        mvc.perform(put(path).session(admin.session).contentType(MediaType.APPLICATION_JSON)
+                .content(changeStatus("DISABLED", 0, "SECURITY_REVIEW"))).andExpect(status().isForbidden());
+        admin.putJson(path, """
+                {"status":"DISABLED","reason":"SECURITY_REVIEW"}
+                """).andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+        admin.putJson(accountStatusPath(administrator.accountKey()), changeStatus("DISABLED", 0, "SECURITY_REVIEW"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("FIRST_ADMINISTRATOR_PROTECTED"));
+        admin.putJson(path, changeStatus("DISABLED", 0, "SECURITY_REVIEW"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DISABLED"))
+                .andExpect(jsonPath("$.sessionVersion").value(1));
+        admin.putJson(path, changeStatus("DISABLED", 0, "SECURITY_REVIEW"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ACCOUNT_STATUS_VERSION_CONFLICT"));
+        admin.putJson(path, changeStatus("DISABLED", 1, "SECURITY_REVIEW"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.sessionVersion").value(1));
+        first.get("/api/my/tickets").andExpect(status().isUnauthorized());
+        Browser rejoining = new Browser();
+        rejoining.signIn(EMPLOYEE, EMAIL, Instant.now())
+                .andExpect(redirectedUrl("/cognito.html?error=ACCOUNT_DISABLED"));
+
+        admin.putJson(path, changeStatus("ACTIVE", 1, "ADMINISTRATIVE_REVIEW"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.sessionVersion").value(2));
+        second.get("/api/services").andExpect(status().isUnauthorized());
+        expectCognitoLogout(rejoining.signIn(EMPLOYEE, EMAIL, oldLogin), "/login");
+        rejoining.get("/api/services").andExpect(status().isUnauthorized());
+        var reactivatedAt = jdbc.queryForObject(
+                "SELECT reactivated_at FROM helpdesk_cognito_accounts WHERE user_id = ?",
+                OffsetDateTime.class, employee.userId()).toInstant();
+        rejoining.signIn(EMPLOYEE, EMAIL, reactivatedAt.plusSeconds(1))
+                .andExpect(redirectedUrl("/my-tickets.html"));
+        rejoining.get("/api/services").andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(service));
+        assertThat(accounts.find(employee.accountKey()).orElseThrow().userId()).isEqualTo(employee.userId());
+        assertThat(jdbc.queryForList("""
+                SELECT from_status || ':' || to_status || ':' || reason
+                FROM helpdesk_account_status_events
+                WHERE target_user_id = ? AND administrator_user_id = ? ORDER BY session_version
+                """, String.class, employee.userId(), administrator.userId()))
+                .containsExactly("ACTIVE:DISABLED:SECURITY_REVIEW", "DISABLED:ACTIVE:ADMINISTRATIVE_REVIEW");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM helpdesk_account_status_events", Long.class)).isEqualTo(2);
+    }
+
+    @Test
+    void rejectedStatusCommitLeavesThePreviousStateAndSessionValid() throws Exception {
+        var employee = linkedEmployee();
+        Browser admin = new Browser();
+        admin.signIn(ADMIN, BOOTSTRAP_EMAIL, Instant.now()).andExpect(redirectedUrl("/my-tickets.html"));
+        Browser staff = new Browser();
+        staff.signIn(EMPLOYEE, EMAIL, Instant.now()).andExpect(redirectedUrl("/my-tickets.html"));
+        String path = accountStatusPath(employee.accountKey());
+        String disable = changeStatus("DISABLED", 0, "SECURITY_REVIEW");
+
+        jdbc.execute("""
+                CREATE FUNCTION reject_status_change_for_test() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'synthetic status commit rejection' USING ERRCODE = '23514'; END;
+                $$
+                """);
+        try {
+            jdbc.execute("""
+                    CREATE CONSTRAINT TRIGGER reject_status_change_at_commit
+                    AFTER INSERT ON helpdesk_account_status_events DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW EXECUTE FUNCTION reject_status_change_for_test()
+                    """);
+            admin.putJson(path, disable).andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.code").value("ACCOUNT_STORAGE_UNAVAILABLE"));
+            var account = accounts.find(employee.accountKey()).orElseThrow();
+            assertThat(account.status()).isEqualTo(AccountStatus.ACTIVE);
+            assertThat(account.sessionVersion()).isZero();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM helpdesk_account_status_events", Long.class)).isZero();
+            staff.get("/api/services").andExpect(status().isOk());
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS reject_status_change_at_commit ON helpdesk_account_status_events");
+            jdbc.execute("DROP FUNCTION reject_status_change_for_test()");
+        }
+
+        admin.putJson(path, disable).andExpect(status().isOk()).andExpect(jsonPath("$.sessionVersion").value(1));
+        staff.get("/api/services").andExpect(status().isUnauthorized());
+    }
+
+    private JdbcCognitoAccounts.Account linkedEmployee() {
+        var admin = accounts.accept(null, new CognitoAccounts.Identity(settings.issuer(), ADMIN, BOOTSTRAP_EMAIL),
+                ADMIN, Instant.now());
+        var invite = accounts.issue(admin.accountKey(), EMAIL, "AGENT", service, "Test Employee", Instant.now());
+        return accounts.accept(CognitoAccounts.hashToken(invite.token()),
+                new CognitoAccounts.Identity(settings.issuer(), EMPLOYEE, EMAIL), null, Instant.now());
+    }
+
+    private static String accountStatusPath(UUID accountKey) {
+        return "/api/accounts/" + accountKey + "/status";
+    }
+
+    private static String changeStatus(String status, long version, String reason) {
+        return """
+                {"status":"%s","expectedSessionVersion":%d,"reason":"%s"}
+                """.formatted(status, version, reason);
+    }
+
+    private void expectCognitoLogout(ResultActions response, String returnPath) throws Exception {
+        String location = response.andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
+        URI logout = URI.create(location);
+        assertThat(logout.getHost()).isEqualTo(settings.domain().getHost());
+        assertThat(logout.getPath()).isEqualTo("/logout");
+        assertThat(parameters(logout.getRawQuery()).get("logout_uri")).isEqualTo(settings.appOrigin() + returnPath);
+    }
+
     private Browser invitedBrowser() throws Exception {
         var admin = accounts.accept(null, new CognitoAccounts.Identity(settings.issuer(), ADMIN, BOOTSTRAP_EMAIL),
                 ADMIN, Instant.now());
@@ -362,19 +488,22 @@ class CognitoOnboardingHttpIntegrationTest {
             return withCsrf(post(path).session(session).contentType(MediaType.APPLICATION_JSON).content(body));
         }
 
+        ResultActions putJson(String path, String body) throws Exception {
+            return withCsrf(put(path).session(session).contentType(MediaType.APPLICATION_JSON).content(body));
+        }
+
+        ResultActions signIn(String subject, String email, Instant authenticatedAt) throws Exception {
+            begin(null);
+            return login(authorize(), subject, email, true, authenticatedAt);
+        }
+
         private ResultActions withCsrf(MockHttpServletRequestBuilder request) throws Exception {
             var csrf = body(get("/onboarding/state").andExpect(status().isOk()).andReturn());
             return mvc.perform(request.param(csrf.path("csrfName").asText(), csrf.path("csrfToken").asText()));
         }
 
         void startReauth() throws Exception {
-            String location = postForm("/onboarding/reauth").andExpect(status().is3xxRedirection())
-                    .andReturn().getResponse().getRedirectedUrl();
-            URI logout = URI.create(location);
-            assertThat(logout.getHost()).isEqualTo(settings.domain().getHost());
-            assertThat(logout.getPath()).isEqualTo("/logout");
-            assertThat(parameters(logout.getRawQuery()).get("logout_uri"))
-                    .isEqualTo(settings.appOrigin() + "/onboarding/resume");
+            expectCognitoLogout(postForm("/onboarding/reauth"), "/onboarding/resume");
             get("/onboarding/resume").andExpect(redirectedUrl(CognitoSettings.AUTHORIZE_PATH));
         }
 

@@ -85,7 +85,8 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/tickets/{id}/messages").hasAnyRole("USER", "AGENT")
                         .requestMatchers("/api/tickets/{id}/customer-messages").hasAnyRole("USER", "AGENT")
                         .requestMatchers("/api/my/tickets").hasAnyRole("USER", "AGENT")
-                        .requestMatchers("/api/account-invitations").hasRole("ACCOUNT_ADMIN");
+                        .requestMatchers("/api/account-invitations", "/api/accounts", "/api/accounts/**")
+                                .hasRole("ACCOUNT_ADMIN");
                     if (cognito == null) {
                         authorize.requestMatchers(apiRequest).authenticated();
                     } else {
