@@ -1,0 +1,59 @@
+# 첫 파일럿 개인 계정 설계
+
+[개발 로드맵](./roadmap.md#2-개인별-계정과-서비스-권한-운영)의 계정 운영 계약이다. 2026-11-15에 OIDC 사용, 초대·복구·비활성화 정책과 첫 계정 관리자를 확정했다. 서울 검증을 마친 뒤 Cognito Lite를 첫 파일럿 OIDC 제공자로 확정했다.
+
+## 인증과 서비스 권한
+
+- 현재 [배포 인증](../src/main/java/lab/helpdesk/security/DeploymentSecurityConfiguration.java)은 설정 기반 학습 계정을 생성한다. 파일럿은 개인별 OIDC 로그인으로 전환한다. Spring Security에서 Authorization Code + PKCE로 처리하고, 서명·발급자·대상·만료 및 로그인 요청의 상태값과 nonce를 검증한다. 브라우저는 기존 서버 세션과 CSRF 보호를 사용한다. OIDC 토큰은 필요한 경우 서버에서만 다룬다.
+- 신원 연결 키는 발급자 `iss`와 해당 발급자가 부여한 사용자 식별자 `sub`의 조합이다. Helpdesk 내부의 영속 사용자 ID로 연결한다. 이메일 검증은 초대 대상 확인에 사용하며, 이메일이나 표시 이름으로 기존 사용자를 자동 연결하지 않는다. 문의 소유권과 작성·배정 이력은 내부 ID를 계속 참조한다.
+- 계정 사용 여부, 계정 관리 역할과 서비스별 직원 권한은 Helpdesk DB에서 판단한다. 제공자 그룹이나 토큰 속성만으로 앱 권한을 부여하지 않는다. 직원과 계정 관리자의 다중 인증(MFA)은 OIDC 제공자에서 강제한다.
+- **첫 계정 관리자는 프로젝트 운영자 본인**이다. 새 파일럿 설치에서 본인의 OIDC 신원을 확인하고 승인한 `iss`·`sub`에 초기 계정 관리 역할을 한 번 부여한다. 계정 관리 역할은 직원 역할, 서비스 지원관리자 권한 및 AWS 권한과 별개로 부여한다. 초기 설정은 감사 기록에 남기고 공개 등록 경로에서 사용할 수 없게 한다. 식별자 값은 운영 기록에서만 관리한다.
+
+## 초대와 회수
+
+| 작업 | 처리 계약 |
+|---|---|
+| 초대 발급 | 계정 관리자가 받을 주소와 부여할 역할·서비스 범위를 정한다. 앱 초대 값은 충분한 엔트로피를 가진 무작위 값으로 생성해 해시만 저장한다. 유효 기간은 발급 후 24시간이며, 재발급 시 해당 초대의 이전 미사용 토큰을 폐기한다. |
+| 초대 수락 | 인증된 신원의 `email_verified=true`와 초대 주소가 일치하고 초대가 유효할 때 수락한다. 초대 사용 처리와 사용자 신원 연결 및 권한 부여를 하나의 트랜잭션으로 저장한다. 다른 신원에 이미 연결된 사용자나 재사용·만료한 초대에는 권한을 주지 않는다. Cognito는 이메일 확인 뒤의 재로그인 조건도 적용한다. |
+| 복구 | 비밀번호 재설정과 분실한 MFA 수단의 복구는 제공자의 검증 절차를 이용한다. 앱에서 접근을 다시 열기 전 계정 관리자가 신원과 사유를 확인하고 감사 이력을 남긴다. 제공자 계정을 새로 만들어 `iss`·`sub`가 달라지는 경우 기존 문의와 이력을 다른 사람에게 넘기지 않도록 별도의 신원 재검증과 명시적 승인을 거친다. |
+| 계정 비활성화 | Helpdesk에 비활성 상태와 세션 버전 변경을 저장한다. 커밋 이후 시작하는 보호 요청은 서버가 계정 상태와 세션 버전을 확인해 이미 발급된 세션도 거부하고, 이후 로그인에도 같은 상태를 적용한다. 재활성화 뒤에는 새로 로그인해야 한다. |
+| 서비스 역할 회수 | 커밋 이후 해당 서비스에서의 직원 조회·쓰기·저장 결과 재확인을 기존 세션에서도 막는다. 계정 자체가 활성이고 해당 문의를 접수한 본인이라면 고객 권한은 유지한다. |
+| 감사 기록 | 누가 어느 계정에 어떤 초대·복구·회수를 언제 시도했는지와 결과를 추적한다. 비밀번호, MFA 코드, 초대 원문, 세션 값과 OIDC 토큰은 기록하지 않는다. |
+
+OIDC 제공자가 사용자를 생성해 보내는 안내와 Helpdesk 초대는 각자 유효 기간과 성공 조건을 가진다. Helpdesk는 **앱 초대 수락이 커밋된 뒤** 서비스 권한을 부여한다. 사용자 생성이나 이메일만 확인된 상태에서 보호 API에 접근할 수 있는지도 검증한다. [서비스 권한 계약](./ticket-assignment.md), [OWASP 세션 관리 지침](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
+
+## 제공자 비교
+
+한 조직의 서비스 한 개에 고객 최대 10명, 담당 직원 2명, 지원관리자 1명이 참여하는 계획을 기준으로 비교했다. 첫 계정 관리자가 별도 계정이면 최대 14명이다. 비용은 2026-11-15 확인한 공개 USD 요금 기준이다. MAU는 월간 활성 사용자다. 서비스 운영 인프라, 발송비와 세금은 별도다.
+
+| 후보 | 외부 고객 초대 | 직원 MFA | 파일럿 인증 비용 |
+|---|---|---|---|
+| Amazon Cognito User Pools Lite | 관리자가 직접 사용자 생성, 이메일로 임시 비밀번호 안내. 공개 가입을 끄고 검증된 이메일로 Helpdesk 초대를 수락한다. | User Pool에서 인증 앱의 일회용 코드(TOTP)를 필수로 설정한다. 단일 Pool의 직접 로그인 사용자 모두에게 적용되므로 고객도 등록해야 한다. | 계정 또는 AWS 조직의 직접 로그인 무료 사용량 10,000 MAU에 여유가 있으면 월 $0 예상. 기본 사용료 기준이며 이메일 비용은 발송 구성에 따라 별도다. [요금](https://aws.amazon.com/cognito/pricing/), [관리자 초대](https://docs.aws.amazon.com/cognito/latest/developerguide/how-to-create-user-accounts.html), [MFA 설정](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-mfa.html) |
+| Auth0 B2C Essentials | 개인 이메일 계정을 프로비저닝하고 검증할 수 있다. 누구에게 서비스 권한을 줄지는 Helpdesk 초대로 결정한다. | Pro MFA가 포함된다. Post-Login Action을 사용해 직원만 추가 인증하는 구성을 검토할 수 있다. 직원 구분 근거와 요금제에서 실제 동작하는지 확인해야 한다. | 500 MAU 기준 월 $35부터. [요금](https://auth0.com/pricing), [이메일 검증](https://auth0.com/docs/manage-users/user-accounts/verify-emails), [조건부 MFA](https://developer.auth0.com/resources/labs/actions/secure-user-accounts-with-auth0-actions-and-custom-mfa) |
+| Microsoft Entra Workforce + External ID B2B | 외부 주소를 조직 테넌트의 게스트로 초대할 수 있다. 개인 주소로 로그인했을 때 앱의 이메일 검증 계약을 충족하는지 확인해야 한다. | Conditional Access로 직원 및 관리자 그룹에 MFA 정책을 적용할 수 있다. | 신규 Entra ID P1 구매 시 $7/인/월(연간 약정). 직원·관리자 3~4석 기준 월 환산 $21~28, 이미 P1이 포함된 조직은 추가 구독료가 없을 수 있다. 게스트 과금은 External ID 조건을 별도로 확인한다. [요금](https://www.microsoft.com/en-us/security/microsoft-entra-pricing), [게스트 초대](https://learn.microsoft.com/en-us/entra/external-id/add-users-administrator), [Conditional Access](https://learn.microsoft.com/en-us/entra/identity/conditional-access/overview), [게스트 과금](https://learn.microsoft.com/en-us/entra/external-id/external-identities-pricing) |
+
+## 채택 구성과 출시 전 확인
+
+**첫 파일럿은 서울 리전의 Cognito Lite User Pool 한 개로 진행한다.** Cognito에 생성한 계정과 기본 Hosted UI를 사용한다. 직원과 계정 관리자뿐 아니라 고객도 TOTP를 사용한다. [Cognito 요금제 기능](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-sign-in-feature-plans.html), [서울 엔드포인트](https://docs.aws.amazon.com/general/latest/gr/cognito.html)
+
+1. 관리자 초대로 받은 임시 비밀번호를 변경한다. 첫 OIDC 로그인으로 시작한 세션은 온보딩 범위로 제한하고, 이메일 확인 코드 발송과 검증에 사용한다. Cognito는 MFA가 필수여도 새 계정의 첫 로그인에서 토큰을 발급할 수 있다. [Cognito 첫 로그인과 MFA](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-mfa.html), [이메일 검증 코드 API](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_GetUserAttributeVerificationCode.html)
+2. 이메일 확인 뒤 기존 Hosted UI 세션을 끝내고 서버가 시작한 새 로그인에서 TOTP 등록 또는 인증을 완료한다. 초대 수락은 이 로그인에 대응하는 새 토큰의 `iss`·`sub`, `email_verified=true`와 초대 주소를 확인한 뒤 처리한다. G2에서는 최초 로그인 토큰이나 같은 Hosted UI 세션을 재사용해도 보호 기능에 들어갈 수 없는지 검증한다.
+3. MFA 기기 분실 시 운영자가 신원과 요청 사유를 확인한 뒤 Cognito 세션과 기존 TOTP 등록을 회수한다. 같은 계정에 새 TOTP를 등록해 복구한다. 인증 앱에 같은 이름이 표시될 수 있으므로 등록 즉시 구분 가능한 이름을 사용하도록 안내한다. 운영 App의 세션 회수, 역할 및 감사 검사는 G2에서 검증한다. [기존 TOTP 등록 제거 API](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminDeleteSoftwareToken.html)
+4. G2에서는 다른 이메일, 만료·재발급 초대, 동시 수락, 고객 및 서비스 간 접근, 역할 회수 뒤 본인 문의 조회, 비활성화 뒤 기존 세션 차단을 검증한다. 첫 관리자의 역할 범위와 분실 복구 절차도 점검한다. G0에서는 실제 파일럿 참여 규모의 비용과 기본 발송 한도를 확인한다. [출시 승인표](./roadmap.md#출시-승인표), [Cognito 발송 한도](https://docs.aws.amazon.com/cognito/latest/developerguide/quotas.html)
+
+## 서울 Cognito 검증 기록
+
+2026-11-15에 서울의 임시 Lite User Pool 한 개, 공개 PKCE 앱 클라이언트 한 개, 기본 Hosted UI 도메인 한 개에서 검증했다. 공개 가입 차단, 필수 TOTP, Loopback 콜백과 OIDC S256을 확인했다. 처음 로그인한 사람이 TOTP 등록 전에 토큰을 받을 수 있는 동작을 확인해 위의 온보딩 제한을 설계에 반영했다.
+
+| 확인 항목 | 관찰 결과 |
+|---|---|
+| 초대 수락 | Cognito 기본 메일을 사용해 한 Gmail 받은편지함의 두 별칭으로 합성 고객·직원을 초대했다. 두 계정이 임시 비밀번호를 바꾸고 첫 로그인에 성공했다. 직원의 최신 초대는 같은 계정에 한 번 재발송한 뒤 수신을 확인했다. |
+| 이메일 검증 | 두 계정에서 본인이 메일로 받은 인증 코드를 제출해 Cognito 검증을 완료했다. 새 OIDC 토큰에서 두 계정의 `email_verified=true`를 확인했다. 이미 성공한 고객 코드의 후속 제출은 HTTP 400이었다. |
+| TOTP 등록 | 고객과 직원의 기존 TOTP 등록을 제거하는 API가 두 계정 모두에서 성공했다. 고객 재로그인과 직원의 MFA 화면에서 인증 앱 코드 흐름을 확인했다. |
+| 기기 분실 복구 | 지정한 합성 계정 두 개에서 기존 Cognito 세션과 TOTP 등록을 회수했다. Pool의 필수 MFA를 유지하며 새 TOTP 등록 후 각 계정의 복구 로그인에 성공했다. 인가 코드를 PKCE로 교환하고 ID 토큰의 서명·발급자·대상·nonce를 검증했다. 각 토큰의 `iss`·`sub`가 해당 계정의 최초 토큰과 같았다. |
+
+기존 배포 사용자의 Cognito 목록 요청이 거부됐고 사람이 맡을 수 있는 기존 검증 역할은 확인되지 않았다. 사용자가 승인한 임시 IAM 역할로 Pool을 만들고, 생성 권한을 회수한 뒤 해당 Pool에만 Cognito 권한을 부여했다. 역할에는 MFA, 서울 리전과 유효시간을 적용했다. 비용은 무료 사용량에 여유가 있을 때 인증 기본료 $0으로 추정했다. [Cognito 요금](https://aws.amazon.com/cognito/pricing/)
+
+실험 결과로 제공자를 확정했다. 실행 근거의 범위는 Cognito와 로컬 OIDC 콜백이며 Helpdesk 초대 수락 트랜잭션, 세션 무효화와 서비스 역할 검사는 실제 App을 연결한 G2에서 확인한다. 주소와 인증 정보는 검증 기록에서 제외했다.
+
+[계정 정책의 결정과 대안](./pilot-decision-log.md#d02-운영자-초대와-권한-회수)
