@@ -6,6 +6,8 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
@@ -182,6 +184,61 @@ class CognitoOnboardingHttpIntegrationTest {
         returning.get("/api/services").andExpect(status().isForbidden());
         returning.get("/my-tickets.html").andExpect(status().isOk());
         returning.get("/api/my/tickets").andExpect(status().isOk());
+    }
+
+    @Test
+    void disabledAccountsAndOldSessionsStayBlockedUntilAReactivatedAccountSignsInAgain() throws Exception {
+        var admin = accounts.accept(null, new CognitoAccounts.Identity(settings.issuer(), ADMIN, BOOTSTRAP_EMAIL),
+                ADMIN, Instant.now());
+        var invite = accounts.issue(admin.accountKey(), EMAIL, "CUSTOMER", null, null, Instant.now());
+        var customer = accounts.accept(CognitoAccounts.hashToken(invite.token()),
+                new CognitoAccounts.Identity(settings.issuer(), EMPLOYEE, EMAIL), null, Instant.now());
+
+        Instant previousLogin = Instant.now().minusSeconds(60);
+        Browser first = new Browser();
+        first.begin(null);
+        first.login(first.authorize(), EMPLOYEE, EMAIL, true, previousLogin)
+                .andExpect(redirectedUrl("/my-tickets.html"));
+        first.get("/api/my/tickets").andExpect(status().isOk());
+        Browser second = new Browser();
+        second.begin(null);
+        second.login(second.authorize(), EMPLOYEE, EMAIL, true, previousLogin)
+                .andExpect(redirectedUrl("/my-tickets.html"));
+        second.get("/my-tickets.html").andExpect(status().isOk());
+
+        jdbc.update("""
+                UPDATE helpdesk_cognito_accounts SET status = 'DISABLED', session_version = 1 WHERE user_id = ?
+                """, customer.userId());
+        first.get("/api/my/tickets").andExpect(status().isUnauthorized());
+        Browser newLogin = new Browser();
+        newLogin.begin(null);
+        newLogin.login(newLogin.authorize(), EMPLOYEE, EMAIL, true, Instant.now())
+                .andExpect(redirectedUrl("/cognito.html?error=ACCOUNT_DISABLED"));
+        newLogin.get("/api/my/tickets").andExpect(status().isUnauthorized());
+
+        Instant reactivation = Instant.now().minusSeconds(5).truncatedTo(ChronoUnit.SECONDS);
+        jdbc.update("""
+                UPDATE helpdesk_cognito_accounts
+                SET status = 'ACTIVE', session_version = 2, reactivated_at = ? WHERE user_id = ?
+                """, reactivation.atOffset(ZoneOffset.UTC), customer.userId());
+        // The second session was never used while the account was disabled.
+        var redirected = second.get("/my-tickets.html").andExpect(status().is3xxRedirection()).andReturn();
+        assertThat(URI.create(redirected.getResponse().getRedirectedUrl()).getPath()).isEqualTo("/login");
+        second.get("/api/my/tickets").andExpect(status().isUnauthorized());
+
+        newLogin.begin(null);
+        var stale = newLogin.login(newLogin.authorize(), EMPLOYEE, EMAIL, true, reactivation)
+                .andExpect(status().is3xxRedirection()).andReturn();
+        URI logout = URI.create(stale.getResponse().getRedirectedUrl());
+        assertThat(logout.getHost()).isEqualTo(settings.domain().getHost());
+        assertThat(logout.getPath()).isEqualTo("/logout");
+        assertThat(parameters(logout.getRawQuery()).get("logout_uri")).isEqualTo(settings.appOrigin() + "/login");
+        newLogin.get("/api/my/tickets").andExpect(status().isUnauthorized());
+
+        newLogin.begin(null);
+        newLogin.login(newLogin.authorize(), EMPLOYEE, EMAIL, true, Instant.now())
+                .andExpect(redirectedUrl("/my-tickets.html"));
+        newLogin.get("/api/my/tickets").andExpect(status().isOk());
     }
 
     @Test

@@ -10,13 +10,20 @@ public final class AccountUserDetails implements UserDetails, org.springframewor
     private static final long serialVersionUID = 1L;
     private final UserDetails delegate;
     private final UUID accountKey;
+    private final Long sessionVersion;
 
     public AccountUserDetails(UserDetails delegate, UUID accountKey) {
+        this(delegate, accountKey, null);
+    }
+
+    public AccountUserDetails(UserDetails delegate, UUID accountKey, Long sessionVersion) {
         this.delegate = java.util.Objects.requireNonNull(delegate);
         this.accountKey = java.util.Objects.requireNonNull(accountKey);
+        this.sessionVersion = sessionVersion;
     }
 
     public UUID accountKey() { return accountKey; }
+    public Long sessionVersion() { return sessionVersion; }
     @Override public String getUsername() { return delegate.getUsername(); }
     @Override public String getPassword() { return delegate.getPassword(); }
     @Override public Collection<? extends GrantedAuthority> getAuthorities() { return delegate.getAuthorities(); }

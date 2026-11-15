@@ -66,6 +66,12 @@ OIDC 제공자가 사용자를 생성해 보내는 안내와 Helpdesk 초대는 
 
 초대는 발급 시각부터 24시간 유효하다. 같은 수신 주소에 재발급하면 미사용 초대를 회수한다. 첫 등록 절차의 세션 상태는 15분 동안 유지된다. 이미 연결된 사용자는 가입 코드 없이 직접 로그인한다. 보호 API와 화면에서 현재 활성 멤버십을 다시 읽으므로, 직원 권한이 회수된 뒤에도 활성 계정은 고객 기능을 이용할 수 있다. 직원 화면에는 활성 직원 권한이 필요하고, 개별 문의와 서비스의 접근 범위는 각 API에서 확인한다.
 
+### 계정 상태와 세션 버전
+
+V16은 기존에 연결된 계정과 새 계정을 `ACTIVE`, 세션 버전 `0`으로 시작한다. 보호 화면과 API에서 기존 계정·권한 조회 결과를 사용해 활성 상태와 세션 발급 때 저장한 버전을 함께 대조한다. 비활성화 뒤 시작한 요청과 버전이 지난 세션은 인증을 잃는다. 이미 실행 중인 요청에는 해당 요청이 권한을 검사한 시점이 적용된다.
+
+로그인 콜백에서도 현재 계정 상태를 읽는다. 재활성화한 계정은 서명된 ID 토큰의 `auth_time`이 `reactivated_at`보다 늦어야 한다. 인증 시각이 그 기준과 같거나 더 이르면 Cognito 로그아웃을 거쳐 다음 로그인에서 새 인증을 받도록 안내한다. [Cognito ID 토큰](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-id-token.html) [Cognito 로그아웃](https://docs.aws.amazon.com/cognito/latest/developerguide/logout-endpoint.html)
+
 ### 설정과 첫 운영자
 
 | 설정 | 값의 범위 |

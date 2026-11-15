@@ -31,6 +31,7 @@ import org.springframework.web.util.WebUtils;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 
+import static lab.helpdesk.cognito.CognitoFailure.Code.ACCOUNT_RELOGIN_REQUIRED;
 import static lab.helpdesk.cognito.CognitoFailure.Code.SIGN_IN_REQUIRED;
 
 @Configuration(proxyBeanMethods = false)
@@ -190,7 +191,11 @@ public class CognitoWebSecurity {
                         response.sendRedirect("/cognito.html");
                     }
                 } catch (CognitoFailure ex) {
-                    redirectError(response, ex.code());
+                    if (ex.code() == ACCOUNT_RELOGIN_REQUIRED) {
+                        response.sendRedirect(logoutUrl("/login"));
+                    } else {
+                        redirectError(response, ex.code());
+                    }
                 } catch (DataAccessException ex) {
                     redirectError(response, CognitoFailure.Code.COGNITO_UNAVAILABLE);
                 } finally {

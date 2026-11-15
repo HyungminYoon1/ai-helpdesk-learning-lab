@@ -3,6 +3,7 @@ package lab.helpdesk.cognito;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -60,7 +61,9 @@ final class CognitoLogin {
                 if (auth != null && auth.getPrincipal() instanceof AccountUserDetails principal
                         && accountRequests.matches(request)) {
                     try {
-                        var account = accounts.find(principal.accountKey());
+                        var account = accounts.find(principal.accountKey())
+                                .filter(current -> current.status() == AccountStatus.ACTIVE
+                                        && Objects.equals(principal.sessionVersion(), current.sessionVersion()));
                         if (account.isEmpty()) {
                             clear(request, response);
                         } else {
@@ -83,7 +86,7 @@ final class CognitoLogin {
         if (account.accountAdmin()) grants.add(new SimpleGrantedAuthority("ROLE_ACCOUNT_ADMIN"));
 
         var user = User.withUsername(account.username()).password("").authorities(grants).build();
-        var principal = new AccountUserDetails(user, account.accountKey());
+        var principal = new AccountUserDetails(user, account.accountKey(), account.sessionVersion());
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(principal, null, grants));
         return context;

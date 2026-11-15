@@ -53,6 +53,12 @@
 - 권한 회수를 검토하면서 API만 활성 멤버십을 다시 읽는 방식과 화면에도 같은 기준을 적용하는 방식을 비교했다. 기존 세션으로 권한 회수 전의 직원 화면이 열리지 않도록 [보안 설정](../src/main/java/lab/helpdesk/security/SecurityConfiguration.java)의 보호 경로 기준을 [계정 검사](../src/main/java/lab/helpdesk/cognito/CognitoLogin.java)에도 적용한다. 로컬에서 같은 세션의 직원 화면과 API 차단, 고객 기능 유지 여부를 검사하고 G2에서 브라우저로 재확인한다.
 - 검증용 서울 Pool의 합성 계정 두 개, 앱 클라이언트와 도메인, Pool, 임시 IAM 역할을 삭제하고 AWS 조회로 확인했다. 연동은 [로컬 OIDC·PostgreSQL 검증](./pilot-account-design.md#helpdesk-연동)에서 확인했다. 운영 App 연결과 복구·비활성화 운영 절차는 G2 출시 후보에서 확인한다.
 
+### D02-5 2026-11-15 계정 상태와 세션 재발급
+
+- 보호 요청에서 계정 상태만 읽는 안과 세션 발급 버전도 대조하는 안을 비교했다. 상태와 버전을 함께 확인해, 비활성화 중에 요청을 보내지 않은 세션도 재활성화 뒤 다시 사용되지 않게 한다. 서비스 권한과 같은 DB 조회에서 판정한다.
+- Cognito 콜백이 돌아올 때 현재 계정 상태를 확인하고, 재활성화 시각 뒤에 서명된 `auth_time`만 새 인증으로 인정한다. 이전 Cognito 로그인으로 돌아오면 지정된 Hosted UI의 로그아웃 경로를 거쳐 다시 로그인하게 한다.
+- [V16 마이그레이션](../src/main/resources/db/migration/V16__add_cognito_account_state_and_session_version.sql), [세션 검사](../src/main/java/lab/helpdesk/cognito/CognitoLogin.java), [로그인 처리](../src/main/java/lab/helpdesk/cognito/CognitoOnboarding.java)에 적용했다. 로컬 OIDC와 PostgreSQL로 로그인 경계를 검사하고, G2에서 실제 Cognito 로그인과 여러 브라우저 세션으로 재확인한다.
+
 ## D03 첫 운영 DB와 학습 데이터
 
 - 학습용 V8 스냅샷을 출발점으로 복원하는 안과 빈 전용 DB에 전체 Migration을 적용하는 안을 비교했다. V9와 V10은 기존 문의의 고객 소유권과 지원 서비스를 추정해 채우지 않는다.

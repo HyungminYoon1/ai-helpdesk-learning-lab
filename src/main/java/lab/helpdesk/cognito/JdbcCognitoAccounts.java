@@ -17,6 +17,7 @@ import org.springframework.stereotype.Repository;
 class JdbcCognitoAccounts {
     private static final String ACCOUNT_SELECT = """
             SELECT a.user_id, i.account_key, i.login_username, a.first_administrator,
+                   a.status, a.session_version, a.reactivated_at,
                    EXISTS (SELECT 1 FROM support_service_memberships m
                            WHERE m.user_id = a.user_id AND m.active) AS agent
             FROM helpdesk_cognito_accounts a
@@ -93,15 +94,19 @@ class JdbcCognitoAccounts {
     }
 
     private static Account account(ResultSet row, int index) throws SQLException {
+        var reactivatedAt = row.getObject("reactivated_at", OffsetDateTime.class);
         return new Account(row.getLong("user_id"), row.getObject("account_key", UUID.class),
-                row.getString("login_username"), row.getBoolean("first_administrator"), row.getBoolean("agent"));
+                row.getString("login_username"), row.getBoolean("first_administrator"), row.getBoolean("agent"),
+                AccountStatus.valueOf(row.getString("status")), row.getLong("session_version"),
+                reactivatedAt == null ? null : reactivatedAt.toInstant());
     }
 
     private static OffsetDateTime utc(Instant instant) {
         return Objects.requireNonNull(instant).atOffset(ZoneOffset.UTC);
     }
 
-    record Account(long userId, UUID accountKey, String username, boolean accountAdmin, boolean agent) {
+    record Account(long userId, UUID accountKey, String username, boolean accountAdmin, boolean agent,
+            AccountStatus status, long sessionVersion, Instant reactivatedAt) {
         @Override public String toString() { return "CognitoAccount[redacted]"; }
     }
 

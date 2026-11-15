@@ -65,7 +65,13 @@ final class CognitoOnboarding {
                 if (flow.inviteHash() == null) {
                     Optional<JdbcCognitoAccounts.Account> linked = accounts.find(proof.identity());
                     if (linked.isPresent()) {
+                        var account = linked.get();
+                        if (account.status() != AccountStatus.ACTIVE) throw new CognitoFailure(ACCOUNT_DISABLED);
                         if (!proof.emailVerified()) throw new CognitoFailure(SIGN_IN_REQUIRED);
+                        if (account.reactivatedAt() != null && !proof.authenticatedAt().isAfter(account.reactivatedAt())) {
+                            session.removeAttribute(ATTRIBUTE);
+                            throw new CognitoFailure(ACCOUNT_RELOGIN_REQUIRED);
+                        }
                         provider.requireTotpOnly();
                         session.removeAttribute(ATTRIBUTE);
                         return linked;
