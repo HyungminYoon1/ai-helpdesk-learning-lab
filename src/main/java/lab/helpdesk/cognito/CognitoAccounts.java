@@ -138,12 +138,12 @@ class CognitoAccounts {
                 recovery.sessionVersion(), recovery.requestedAt()), created);
     }
 
-    private JdbcCognitoAccounts.Account lockTargetAccount(UUID accountKey) {
+    JdbcCognitoAccounts.Account lockTargetAccount(UUID accountKey) {
         repository.boundLockWait();
         return repository.lockForStatusChange(accountKey).orElseThrow(() -> new CognitoFailure(ACCOUNT_NOT_FOUND));
     }
 
-    private JdbcCognitoAccounts.Account requireAdministrator(UUID administrator) {
+    JdbcCognitoAccounts.Account requireAdministrator(UUID administrator) {
         return repository.find(administrator)
                 .filter(account -> account.accountAdmin() && account.status() == AccountStatus.ACTIVE)
                 .orElseThrow(() -> new CognitoFailure(ACCOUNT_ADMIN_REQUIRED));

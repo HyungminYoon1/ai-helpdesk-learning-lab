@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.web.util.WebUtils;
 
@@ -15,16 +16,22 @@ final class CognitoOnboarding {
     private final CognitoAccounts accounts;
     private final CognitoSettings settings;
     private final CognitoProvider provider;
+    private final CognitoRecoveries recoveries;
     private final Clock clock;
 
-    CognitoOnboarding(CognitoAccounts accounts, CognitoSettings settings, CognitoProvider provider, Clock clock) {
+    CognitoOnboarding(CognitoAccounts accounts, CognitoSettings settings, CognitoProvider provider,
+            CognitoRecoveries recoveries, Clock clock) {
         this.accounts = accounts;
         this.settings = settings;
         this.provider = provider;
+        this.recoveries = recoveries;
         this.clock = clock;
     }
 
-    enum Step { START, FIRST_LOGIN, VERIFY_EMAIL, EMAIL_CONFIRMED, LOGOUT, SECOND_LOGIN, ACCEPT }
+    enum Step {
+        START, FIRST_LOGIN, VERIFY_EMAIL, EMAIL_CONFIRMED, LOGOUT, SECOND_LOGIN, ACCEPT,
+        RECOVERY_LOGOUT, RECOVERY_LOGIN, RECOVERY_TOTP_ENROLLED, RECOVERY_VERIFIED
+    }
 
     Step step(HttpSession session) {
         if (session == null) return Step.START;
@@ -37,22 +44,29 @@ final class CognitoOnboarding {
     void begin(HttpSession session, String invite) {
         synchronized (WebUtils.getSessionMutex(session)) {
             String hash = invite == null || invite.isBlank() ? null : CognitoAccounts.hashToken(invite.strip());
-            save(session, new Flow(Step.FIRST_LOGIN, hash, clock.instant().plus(WINDOW), null, null, null));
+            save(session, new Flow(Step.FIRST_LOGIN, hash, clock.instant().plus(WINDOW), null, null, null, null));
+        }
+    }
+
+    void beginRecovery(HttpSession session, UUID recoveryId) {
+        synchronized (WebUtils.getSessionMutex(session)) {
+            save(session, new Flow(Step.RECOVERY_LOGOUT, null, clock.instant().plus(WINDOW), null, null, null,
+                    recoveryId));
         }
     }
 
     void authorize(HttpSession session, String state) {
         synchronized (WebUtils.getSessionMutex(session)) {
-            Flow flow = require(session, Step.FIRST_LOGIN, Step.SECOND_LOGIN);
+            Flow flow = require(session, Step.FIRST_LOGIN, Step.SECOND_LOGIN, Step.RECOVERY_LOGIN);
             save(session, new Flow(flow.step(), flow.inviteHash(), flow.deadline(),
-                    new Attempt(state, clock.instant()), flow.first(), null));
+                    new Attempt(state, clock.instant()), flow.first(), null, flow.recoveryId()));
         }
     }
 
     Optional<JdbcCognitoAccounts.Account> authenticate(HttpSession session, String state, Proof proof,
             String accessToken) {
         synchronized (WebUtils.getSessionMutex(session)) {
-            Flow flow = require(session, Step.FIRST_LOGIN, Step.SECOND_LOGIN);
+            Flow flow = require(session, Step.FIRST_LOGIN, Step.SECOND_LOGIN, Step.RECOVERY_LOGIN);
             Attempt attempt = flow.attempt();
             Instant now = clock.instant();
             if (attempt == null || state == null || !state.equals(attempt.state())
@@ -61,6 +75,15 @@ final class CognitoOnboarding {
             }
             // Consuming the saved request also makes a failed callback require a new authorization request.
             save(session, flow.at(flow.step(), flow.first(), null));
+            if (flow.step() == Step.RECOVERY_LOGIN) {
+                if (!proof.emailVerified() || !proof.authenticatedAt().isAfter(attempt.startedAt())) {
+                    throw new CognitoFailure(FRESH_AUTHENTICATION_REQUIRED);
+                }
+                boolean verified = recoveries.verifyAuthentication(flow.recoveryId(), proof.identity(),
+                        proof.authenticatedAt(), flow.first() == null ? null : flow.first().authenticatedAt());
+                save(session, flow.at(verified ? Step.RECOVERY_VERIFIED : Step.RECOVERY_TOTP_ENROLLED, proof, null));
+                return Optional.empty();
+            }
             if (flow.step() == Step.FIRST_LOGIN) {
                 if (flow.inviteHash() == null) {
                     Optional<JdbcCognitoAccounts.Account> linked = accounts.find(proof.identity());
@@ -119,16 +142,16 @@ final class CognitoOnboarding {
 
     void prepareLogout(HttpSession session) {
         synchronized (WebUtils.getSessionMutex(session)) {
-            Flow flow = require(session, Step.EMAIL_CONFIRMED);
+            Flow flow = require(session, Step.EMAIL_CONFIRMED, Step.RECOVERY_TOTP_ENROLLED);
             provider.requireTotpOnly();
-            save(session, flow.at(Step.LOGOUT, flow.first(), null));
+            save(session, flow.at(flow.recoveryId() == null ? Step.LOGOUT : Step.RECOVERY_LOGOUT, flow.first(), null));
         }
     }
 
     void resume(HttpSession session) {
         synchronized (WebUtils.getSessionMutex(session)) {
-            Flow flow = require(session, Step.LOGOUT, Step.SECOND_LOGIN);
-            save(session, flow.at(Step.SECOND_LOGIN, flow.first(), null));
+            Flow flow = require(session, Step.LOGOUT, Step.SECOND_LOGIN, Step.RECOVERY_LOGOUT, Step.RECOVERY_LOGIN);
+            save(session, flow.at(flow.recoveryId() == null ? Step.SECOND_LOGIN : Step.RECOVERY_LOGIN, flow.first(), null));
         }
     }
 
@@ -169,9 +192,10 @@ final class CognitoOnboarding {
     private record Attempt(String state, Instant startedAt) {
         @Override public String toString() { return "AuthenticationAttempt[redacted]"; }
     }
-    private record Flow(Step step, String inviteHash, Instant deadline, Attempt attempt, Proof first, String accessToken) {
+    private record Flow(Step step, String inviteHash, Instant deadline, Attempt attempt, Proof first, String accessToken,
+            UUID recoveryId) {
         Flow at(Step next, Proof proof, String token) {
-            return new Flow(next, inviteHash, deadline, null, proof, token);
+            return new Flow(next, inviteHash, deadline, null, proof, token, recoveryId);
         }
         @Override public String toString() { return "CognitoFlow[redacted]"; }
     }

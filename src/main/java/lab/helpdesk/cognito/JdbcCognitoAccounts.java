@@ -17,7 +17,7 @@ import org.springframework.stereotype.Repository;
 @Profile("postgres")
 class JdbcCognitoAccounts {
     private static final String ACCOUNT_SELECT = """
-            SELECT a.user_id, i.account_key, i.login_username, a.first_administrator,
+            SELECT a.user_id, i.account_key, i.login_username, a.first_administrator, a.issuer, a.subject,
                    a.status, a.session_version, a.reactivated_at,
                    EXISTS (SELECT 1 FROM support_service_memberships m
                            WHERE m.user_id = a.user_id AND m.active) AS agent
@@ -105,6 +105,15 @@ class JdbcCognitoAccounts {
                 """, OffsetDateTime.class, status.name(), version, status.name(), targetId);
     }
 
+    void restoreAfterRecovery(Account target, AccountStatus status, Instant proofAuthTime) {
+        jdbc.update("""
+                UPDATE helpdesk_cognito_accounts
+                SET status = ?, session_version = session_version + 1,
+                    reactivated_at = CASE WHEN ? = 'ACTIVE' THEN greatest(statement_timestamp(), ?) END
+                WHERE user_id = ?
+                """, status.name(), status.name(), utc(proofAuthTime), target.userId());
+    }
+
     boolean firstAdministratorExists() {
         return Boolean.TRUE.equals(jdbc.queryForObject("""
                 SELECT EXISTS (SELECT 1 FROM helpdesk_cognito_accounts WHERE first_administrator)
@@ -163,7 +172,7 @@ class JdbcCognitoAccounts {
         return new Account(row.getLong("user_id"), row.getObject("account_key", UUID.class),
                 row.getString("login_username"), row.getBoolean("first_administrator"), row.getBoolean("agent"),
                 AccountStatus.valueOf(row.getString("status")), row.getLong("session_version"),
-                reactivatedAt == null ? null : reactivatedAt.toInstant());
+                reactivatedAt == null ? null : reactivatedAt.toInstant(), row.getString("issuer"), row.getString("subject"));
     }
 
     private static OffsetDateTime utc(Instant instant) {
@@ -171,7 +180,7 @@ class JdbcCognitoAccounts {
     }
 
     record Account(long userId, UUID accountKey, String username, boolean accountAdmin, boolean agent,
-            AccountStatus status, long sessionVersion, Instant reactivatedAt) {
+            AccountStatus status, long sessionVersion, Instant reactivatedAt, String issuer, String subject) {
         @Override public String toString() { return "CognitoAccount[redacted]"; }
     }
 

@@ -14,6 +14,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.transaction.TransactionException;
@@ -30,15 +31,18 @@ import org.springframework.web.util.WebUtils;
 @RestController
 @Profile("cognito")
 class CognitoController {
+    private static final String RECOVERY_PATH = "/api/accounts/{accountKey}/recoveries/{recoveryId}";
     private final CognitoOnboarding onboarding;
     private final CognitoAccounts accounts;
+    private final CognitoRecoveries recoveries;
     private final CognitoLogin login;
     private final CognitoWebSecurity.LoginConfigurer security;
 
-    CognitoController(CognitoOnboarding onboarding, CognitoAccounts accounts, CognitoLogin login,
-            CognitoWebSecurity.LoginConfigurer security) {
+    CognitoController(CognitoOnboarding onboarding, CognitoAccounts accounts, CognitoRecoveries recoveries,
+            CognitoLogin login, CognitoWebSecurity.LoginConfigurer security) {
         this.onboarding = onboarding;
         this.accounts = accounts;
+        this.recoveries = recoveries;
         this.login = login;
         this.security = security;
     }
@@ -62,6 +66,17 @@ class CognitoController {
             onboarding.begin(session, invite);
             login.clear(request, response);
             response.sendRedirect(CognitoSettings.AUTHORIZE_PATH);
+        }
+    }
+
+    @PostMapping("/onboarding/recovery")
+    void beginRecovery(@RequestParam UUID recoveryId, HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        var session = request.getSession();
+        synchronized (WebUtils.getSessionMutex(session)) {
+            onboarding.beginRecovery(session, recoveryId);
+            login.clear(request, response);
+            response.sendRedirect(security.logoutUrl("/onboarding/resume"));
         }
     }
 
@@ -129,9 +144,43 @@ class CognitoController {
         return response(result.created() ? HttpStatus.CREATED : HttpStatus.OK, result.receipt());
     }
 
+    @GetMapping(RECOVERY_PATH)
+    ResponseEntity<CognitoRecoveries.Status> recoveryStatus(@PathVariable UUID accountKey, @PathVariable UUID recoveryId,
+            Authentication authentication) {
+        var administrator = AuthenticatedActorFactory.from(authentication);
+        return response(HttpStatus.OK, recoveries.status(administrator.accountKey(), accountKey, recoveryId));
+    }
+
+    @PostMapping(RECOVERY_PATH + "/prepare")
+    ResponseEntity<CognitoRecoveries.Status> prepareRecovery(@PathVariable UUID accountKey, @PathVariable UUID recoveryId,
+            @RequestBody(required = false) PrepareRecovery request, Authentication authentication) {
+        var administrator = AuthenticatedActorFactory.from(authentication);
+        return response(HttpStatus.OK, recoveries.prepare(administrator.accountKey(), accountKey, recoveryId,
+                request == null ? null : request.temporaryPassword()));
+    }
+
+    @PostMapping(RECOVERY_PATH + "/recheck")
+    ResponseEntity<CognitoRecoveries.Status> recheckRecovery(@PathVariable UUID accountKey, @PathVariable UUID recoveryId,
+            Authentication authentication) {
+        var administrator = AuthenticatedActorFactory.from(authentication);
+        return response(HttpStatus.OK, recoveries.recheck(administrator.accountKey(), accountKey, recoveryId));
+    }
+
+    @PostMapping(RECOVERY_PATH + "/approve")
+    ResponseEntity<CognitoRecoveries.Status> approveRecovery(@PathVariable UUID accountKey, @PathVariable UUID recoveryId,
+            Authentication authentication) {
+        var administrator = AuthenticatedActorFactory.from(authentication);
+        return response(HttpStatus.OK, recoveries.approve(administrator.accountKey(), accountKey, recoveryId));
+    }
+
     @ExceptionHandler(CognitoFailure.class)
     ResponseEntity<Map<String, String>> rejected(CognitoFailure failure) {
         return response(failure.code().status, Map.of("code", failure.code().name()));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<Map<String, String>> invalidRequest() {
+        return response(HttpStatus.BAD_REQUEST, Map.of("code", "INVALID_INPUT"));
     }
 
     @ExceptionHandler({DataAccessException.class, TransactionException.class})
@@ -156,4 +205,8 @@ class CognitoController {
 
     private record StartRecovery(UUID clientRequestId, Long expectedSessionVersion, RecoveryKind kind,
             CognitoAccounts.StatusChangeReason reason) { }
+
+    private record PrepareRecovery(String temporaryPassword) {
+        @Override public String toString() { return "PrepareRecovery[redacted]"; }
+    }
 }

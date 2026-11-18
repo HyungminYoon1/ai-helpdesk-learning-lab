@@ -5,6 +5,7 @@ import java.time.Clock;
 import java.time.Duration;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -26,9 +27,11 @@ import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequ
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.WebUtils;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.retries.StandardRetryStrategy;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 
 import static lab.helpdesk.cognito.CognitoFailure.Code.ACCOUNT_RELOGIN_REQUIRED;
@@ -51,14 +54,26 @@ public class CognitoWebSecurity {
                 .build();
     }
 
-    @Bean
-    CognitoProvider cognitoProvider(CognitoIdentityProviderClient client, CognitoSettings settings) {
-        return new AwsCognitoProvider(client, settings);
+    @Bean(destroyMethod = "close")
+    CognitoIdentityProviderClient cognitoRecoveryMutationClient() {
+        return CognitoIdentityProviderClient.builder()
+                .region(Region.AP_NORTHEAST_2)
+                .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofSeconds(8)).apiCallAttemptTimeout(Duration.ofSeconds(4))
+                        .retryStrategy(StandardRetryStrategy.builder().maxAttempts(1).build()))
+                .build();
     }
 
     @Bean
-    CognitoOnboarding cognitoOnboarding(CognitoAccounts accounts, CognitoSettings settings, CognitoProvider provider) {
-        return new CognitoOnboarding(accounts, settings, provider, Clock.systemUTC());
+    CognitoProvider cognitoProvider(@Qualifier("cognitoSdkClient") CognitoIdentityProviderClient client,
+            @Qualifier("cognitoRecoveryMutationClient") CognitoIdentityProviderClient recoveryMutations,
+            CognitoSettings settings) {
+        return new AwsCognitoProvider(client, recoveryMutations, settings);
+    }
+
+    @Bean
+    CognitoOnboarding cognitoOnboarding(CognitoAccounts accounts, CognitoSettings settings, CognitoProvider provider,
+            CognitoRecoveries recoveries) {
+        return new CognitoOnboarding(accounts, settings, provider, recoveries, Clock.systemUTC());
     }
 
     @Bean
@@ -196,7 +211,7 @@ public class CognitoWebSecurity {
                     } else {
                         redirectError(response, ex.code());
                     }
-                } catch (DataAccessException ex) {
+                } catch (DataAccessException | TransactionException ex) {
                     redirectError(response, CognitoFailure.Code.COGNITO_UNAVAILABLE);
                 } finally {
                     clients.removeAuthorizedClient(CognitoSettings.REGISTRATION_ID, auth, request, response);

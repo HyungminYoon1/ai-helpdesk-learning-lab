@@ -16,6 +16,10 @@
             <p>처음 초대받은 고객과 직원은 코드를 입력하세요. 기존 계정으로 로그인할 때는 비워두세요.</p>
             <button>로그인 시작</button>
         </form>
+        <form hidden id="start-recovery" method="post" action="/onboarding/recovery">
+            <label>복구 ID <input name="recoveryId" maxlength="36" autocomplete="off" required></label>
+            <button>계정 복구 인증</button>
+        </form>
         <form hidden id="send-code" method="post" action="/onboarding/email-code">
             <button>이메일 확인 코드 보내기</button>
         </form>

@@ -57,6 +57,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -65,8 +66,13 @@ import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -94,6 +100,7 @@ class CognitoOnboardingHttpIntegrationTest {
     private static final String EMAIL = "employee@example.invalid";
     private static final String BOOTSTRAP_EMAIL = "administrator@example.invalid";
     private static final String FIRST_CODE = "927014";
+    private static final String TEMPORARY_PASSWORD_BODY = "{\"temporaryPassword\":\"Synthetic-only-42!\"}";
 
     @Container
     @ServiceConnection
@@ -558,6 +565,194 @@ class CognitoOnboardingHttpIntegrationTest {
         var invite = accounts.issue(admin.accountKey(), EMAIL, "AGENT", service, "Test Employee", Instant.now());
         return accounts.accept(CognitoAccounts.hashToken(invite.token()),
                 new CognitoAccounts.Identity(settings.issuer(), EMPLOYEE, EMAIL), null, Instant.now());
+    }
+
+    @Test
+    void passwordRecoveryRequiresFreshProofAndApprovalBeforeASeparateLogin() throws Exception {
+        var employee = linkedEmployee();
+        Browser admin = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        Browser oldSession = signedInBrowser(EMPLOYEE, EMAIL);
+        String path = openRecovery(admin, employee.accountKey(), 0, "PASSWORD_RESET");
+        providerUser(true, false, true);
+        doAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(accounts.find(employee.accountKey()).orElseThrow().status()).isEqualTo(AccountStatus.RECOVERY_PENDING);
+            assertThat(jdbc.queryForObject("SELECT provider_mutation_at IS NOT NULL FROM helpdesk_account_recoveries",
+                    Boolean.class)).isTrue();
+            return null;
+        }).when(provider).setTemporaryPassword(eq(EMPLOYEE), anyString());
+
+        admin.postJson(path + "/prepare", "{}")
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_TEMPORARY_PASSWORD"));
+        admin.postJson(path + "/prepare", TEMPORARY_PASSWORD_BODY).andExpect(status().isOk())
+                .andExpect(jsonPath("$.phase").value("AWAITING_AUTHENTICATION"));
+        admin.postJson(path + "/prepare", "{}").andExpect(status().isOk());
+        verify(provider, times(1)).setTemporaryPassword(eq(EMPLOYEE), anyString());
+        verify(provider).signOutEverywhere(EMPLOYEE);
+        verify(provider, never()).removeTotp(anyString());
+        admin.postJson(path + "/approve", "{}").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_RECOVERY_PROOF_REQUIRED"));
+        oldSession.get("/api/services").andExpect(status().isUnauthorized());
+
+        Browser recovering = new Browser();
+        beginRecoveryAuthentication(recovering, path);
+        recovering.login(recovering.authorize(), EMPLOYEE, EMAIL, true, Instant.now().minusSeconds(60))
+                .andExpect(redirectedUrl("/cognito.html?error=FRESH_AUTHENTICATION_REQUIRED"));
+        recovering.login(recovering.authorize(), ADMIN, BOOTSTRAP_EMAIL, true, Instant.now().plusSeconds(2))
+                .andExpect(redirectedUrl("/cognito.html?error=ACCOUNT_RECOVERY_NOT_FOUND"));
+        providerUser(false, true, true);
+        recovering.login(recovering.authorize(), EMPLOYEE, EMAIL, true, Instant.now().plusSeconds(2))
+                .andExpect(redirectedUrl("/cognito.html?error=ACCOUNT_RECOVERY_NOT_READY"));
+        providerUser(true, false, true);
+        var proofTime = Instant.now().plusSeconds(2);
+        recovering.login(recovering.authorize(), EMPLOYEE, EMAIL, true, proofTime)
+                .andExpect(redirectedUrl("/cognito.html"));
+        recovering.get("/onboarding/state").andExpect(jsonPath("$.step").value("RECOVERY_VERIFIED"));
+        recovering.get("/api/services").andExpect(status().isUnauthorized());
+        admin.get(path).andExpect(jsonPath("$.phase").value("AUTHENTICATION_VERIFIED"));
+
+        jdbc.execute("""
+                CREATE FUNCTION reject_recovery_approval_for_test() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'synthetic approval commit rejection' USING ERRCODE = '23514'; END;
+                $$
+                """);
+        try {
+            jdbc.execute("""
+                    CREATE CONSTRAINT TRIGGER reject_recovery_approval_at_commit
+                    AFTER UPDATE ON helpdesk_account_recoveries DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW WHEN (NEW.completed_at IS NOT NULL)
+                    EXECUTE FUNCTION reject_recovery_approval_for_test()
+                    """);
+            admin.postJson(path + "/approve", "{}").andExpect(status().isServiceUnavailable());
+            admin.get(path).andExpect(jsonPath("$.phase").value("AUTHENTICATION_VERIFIED"));
+            assertThat(accounts.find(employee.accountKey()).orElseThrow().status()).isEqualTo(AccountStatus.RECOVERY_PENDING);
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS reject_recovery_approval_at_commit ON helpdesk_account_recoveries");
+            jdbc.execute("DROP FUNCTION reject_recovery_approval_for_test()");
+        }
+
+        admin.postJson(path + "/approve", "{}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.phase").value("COMPLETED")).andExpect(jsonPath("$.accountStatus").value("ACTIVE"));
+        admin.postJson(path + "/approve", "{}").andExpect(jsonPath("$.sessionVersion").value(2));
+        expectCognitoLogout(recovering.signIn(EMPLOYEE, EMAIL, proofTime), "/login");
+        recovering.signIn(EMPLOYEE, EMAIL, Instant.now().plusSeconds(5))
+                .andExpect(redirectedUrl("/my-tickets.html"));
+        recovering.get("/api/services").andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(service));
+        assertThat(accounts.find(employee.accountKey()).orElseThrow().userId()).isEqualTo(employee.userId());
+    }
+
+    @Test
+    void totpRecoveryRechecksAnAmbiguousDeletionAndRequiresLoginAfterEnrollment() throws Exception {
+        var employee = linkedEmployee();
+        Browser admin = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        String accountStatus = accountStatusPath(employee.accountKey());
+        admin.putJson(accountStatus, changeStatus("DISABLED", 0, "SECURITY_REVIEW")).andExpect(status().isOk());
+        String path = openRecovery(admin, employee.accountKey(), 1, "TOTP_RESET");
+        providerUser(true, false, true);
+        doThrow(new CognitoFailure(CognitoFailure.Code.COGNITO_UNAVAILABLE)).when(provider).removeTotp(EMPLOYEE);
+        admin.postJson(path + "/prepare", "{}").andExpect(status().isServiceUnavailable());
+        admin.get(path).andExpect(jsonPath("$.phase").value("PROVIDER_RESULT_UNCONFIRMED"));
+        admin.postJson(path + "/prepare", "{}").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_RECOVERY_PROVIDER_UNCONFIRMED"));
+        admin.postJson(path + "/recheck", "{}").andExpect(status().isConflict());
+        providerUser(true, false, false);
+        admin.postJson(path + "/recheck", "{}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.phase").value("AWAITING_AUTHENTICATION"));
+        verify(provider).signOutEverywhere(EMPLOYEE);
+        verify(provider, times(1)).removeTotp(EMPLOYEE);
+        verify(provider, never()).setTemporaryPassword(anyString(), anyString());
+
+        Browser recovering = new Browser();
+        beginRecoveryAuthentication(recovering, path);
+        recovering.login(recovering.authorize(), EMPLOYEE, EMAIL, true, Instant.now().plusSeconds(2))
+                .andExpect(redirectedUrl("/cognito.html?error=ACCOUNT_RECOVERY_NOT_READY"));
+        providerUser(true, false, true);
+        var enrollmentTime = Instant.now().plusSeconds(2);
+        recovering.login(recovering.authorize(), EMPLOYEE, EMAIL, true, enrollmentTime)
+                .andExpect(redirectedUrl("/cognito.html"));
+        recovering.get("/onboarding/state").andExpect(jsonPath("$.step").value("RECOVERY_TOTP_ENROLLED"));
+        admin.postJson(path + "/approve", "{}").andExpect(status().isConflict());
+        recovering.startReauth();
+        recovering.login(recovering.authorize(), EMPLOYEE, EMAIL, true, enrollmentTime)
+                .andExpect(redirectedUrl("/cognito.html?error=FRESH_AUTHENTICATION_REQUIRED"));
+        recovering.login(recovering.authorize(), EMPLOYEE, EMAIL, true, Instant.now().plusSeconds(5))
+                .andExpect(redirectedUrl("/cognito.html"));
+        recovering.get("/api/services").andExpect(status().isUnauthorized());
+        admin.postJson(path + "/approve", "{}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountStatus").value("DISABLED")).andExpect(jsonPath("$.sessionVersion").value(3));
+        recovering.signIn(EMPLOYEE, EMAIL, Instant.now().plusSeconds(6))
+                .andExpect(redirectedUrl("/cognito.html?error=ACCOUNT_DISABLED"));
+        admin.putJson(accountStatus, changeStatus("ACTIVE", 3, "ADMINISTRATIVE_REVIEW")).andExpect(status().isOk());
+        recovering.signIn(EMPLOYEE, EMAIL, Instant.now().plusSeconds(7)).andExpect(redirectedUrl("/my-tickets.html"));
+        recovering.get("/api/services").andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectedPasswordCanBeRetriedButAnAmbiguousResetIsOnlyRechecked() throws Exception {
+        var employee = linkedEmployee();
+        Browser admin = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        String path = openRecovery(admin, employee.accountKey(), 0, "PASSWORD_RESET");
+        providerUser(true, false, true);
+        doThrow(new CognitoFailure(CognitoFailure.Code.INVALID_TEMPORARY_PASSWORD))
+                .doThrow(new CognitoFailure(CognitoFailure.Code.COGNITO_UNAVAILABLE))
+                .when(provider).setTemporaryPassword(eq(EMPLOYEE), anyString());
+
+        admin.postJson(path + "/prepare", TEMPORARY_PASSWORD_BODY).andExpect(status().isBadRequest());
+        admin.get(path).andExpect(jsonPath("$.phase").value("REQUESTED"));
+        admin.postJson(path + "/prepare", TEMPORARY_PASSWORD_BODY).andExpect(status().isServiceUnavailable());
+        admin.postJson(path + "/prepare", TEMPORARY_PASSWORD_BODY).andExpect(status().isConflict());
+        admin.postJson(path + "/recheck", "{}").andExpect(status().isConflict());
+        providerUser(false, true, true);
+        admin.postJson(path + "/recheck", "{}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.phase").value("AWAITING_AUTHENTICATION"));
+        verify(provider, times(2)).setTemporaryPassword(eq(EMPLOYEE), anyString());
+    }
+
+    @Test
+    void parallelPreparationDoesNotExecuteTheSameProviderMutationTwice() throws Exception {
+        var employee = linkedEmployee();
+        Browser first = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        Browser second = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        String path = openRecovery(first, employee.accountKey(), 0, "TOTP_RESET");
+        providerUser(true, false, true);
+        var inProvider = new CountDownLatch(1);
+        var finishProvider = new CountDownLatch(1);
+        doAnswer(call -> {
+            inProvider.countDown();
+            if (!finishProvider.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("test mutation not released");
+            return null;
+        }).when(provider).removeTotp(EMPLOYEE);
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var prepare = executor.submit(() -> first.postJson(path + "/prepare", "{}").andReturn().getResponse().getStatus());
+            try {
+                assertThat(inProvider.await(5, TimeUnit.SECONDS)).isTrue();
+                second.postJson(path + "/prepare", "{}").andExpect(status().isConflict())
+                        .andExpect(jsonPath("$.code").value("ACCOUNT_RECOVERY_PROVIDER_UNCONFIRMED"));
+            } finally {
+                finishProvider.countDown();
+            }
+            assertThat(prepare.get(10, TimeUnit.SECONDS)).isEqualTo(200);
+        }
+        verify(provider, times(1)).removeTotp(EMPLOYEE);
+    }
+
+    private void providerUser(boolean confirmed, boolean passwordChangeRequired, boolean totpRegistered) {
+        when(provider.recoveryUser(settings.issuer(), EMPLOYEE)).thenReturn(
+                new CognitoProvider.RecoveryUser(EMPLOYEE, confirmed, passwordChangeRequired, totpRegistered));
+    }
+
+    private void beginRecoveryAuthentication(Browser browser, String path) throws Exception {
+        expectCognitoLogout(browser.postForm("/onboarding/recovery", "recoveryId", path.substring(path.lastIndexOf('/') + 1)),
+                "/onboarding/resume");
+        browser.get("/onboarding/resume").andExpect(redirectedUrl(CognitoSettings.AUTHORIZE_PATH));
+    }
+
+    private String openRecovery(Browser admin, UUID accountKey, long version, String kind) throws Exception {
+        String path = recoveryPath(accountKey);
+        var receipt = body(admin.postJson(path, recoveryRequest(UUID.randomUUID(), version, kind))
+                .andExpect(status().isCreated()).andReturn());
+        return path + "/" + receipt.path("recoveryId").asText();
     }
 
     private static String accountStatusPath(UUID accountKey) {

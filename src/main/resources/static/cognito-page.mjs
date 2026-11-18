@@ -1,13 +1,17 @@
 const status = document.querySelector('#login-status')
 const forms = Object.fromEntries(Array.from(document.forms, form => [form.id, form]))
 const screen = {
-  START: ['초대 코드를 입력하거나 Cognito 계정으로 로그인하세요.', 'start-login'],
-  FIRST_LOGIN: ['로그인을 마치려면 다시 시작하세요.', 'start-login'],
+  START: ['Cognito 계정으로 로그인하거나 관리자가 안내한 복구 ID를 입력하세요.', 'start-login', 'start-recovery'],
+  FIRST_LOGIN: ['로그인을 마치려면 다시 시작하세요.', 'start-login', 'start-recovery'],
   VERIFY_EMAIL: ['Cognito가 보낸 메일의 코드를 입력하세요.', 'send-code', 'verify-email'],
   EMAIL_CONFIRMED: ['이메일을 확인했습니다. 인증 앱으로 새 로그인에 응답하세요.', 'reauthenticate'],
   LOGOUT: ['인증 앱으로 로그인하려면 다시 시작하세요.', 'start-login'],
   SECOND_LOGIN: ['인증 앱으로 로그인하려면 다시 시작하세요.', 'start-login'],
   ACCEPT: ['재로그인을 확인했습니다. Helpdesk 계정을 활성화하세요.', 'accept-invite'],
+  RECOVERY_LOGOUT: ['복구 인증을 마치려면 다시 시작하세요.', 'start-recovery'],
+  RECOVERY_LOGIN: ['복구 인증을 마치려면 다시 시작하세요.', 'start-recovery'],
+  RECOVERY_TOTP_ENROLLED: ['새 인증기를 등록했습니다. 새 코드로 다시 로그인하세요.', 'reauthenticate'],
+  RECOVERY_VERIFIED: ['새 인증을 확인했습니다. 관리자의 접근 재개 승인 뒤 다시 로그인하세요.', 'start-login'],
 }
 const callbackErrors = {
   FRESH_AUTHENTICATION_REQUIRED: '인증 앱을 사용한 새 로그인을 확인해야 합니다.',
@@ -15,6 +19,8 @@ const callbackErrors = {
   SIGN_IN_REQUIRED: 'Cognito 로그인을 완료해주세요.',
   ACCOUNT_DISABLED: 'Helpdesk 계정이 비활성화되어 있습니다. 계정 관리자에게 문의해주세요.',
   ACCOUNT_RECOVERY_PENDING: 'Helpdesk 계정 복구가 진행 중입니다. 계정 관리자에게 문의해주세요.',
+  ACCOUNT_RECOVERY_NOT_FOUND: '복구 ID와 로그인 계정을 확인해주세요.',
+  ACCOUNT_RECOVERY_NOT_READY: '계정 관리자가 Cognito 처리를 마친 뒤 복구 인증을 다시 진행해주세요.',
   COGNITO_UNAVAILABLE: '로그인 제공자를 확인할 수 없습니다. 다시 시도해주세요.',
 }
 
