@@ -77,6 +77,12 @@
 - 처음 시작할 때는 이전 상태와 감사 이력, 계정 잠금과 세션 버전 증가를 한 트랜잭션으로 저장한다. 비활성 계정을 복구 전에 다시 열 필요가 없도록 `DISABLED`에서도 시작하고 이전 상태를 기록한다. 복구 대기의 해제와 첫 관리자의 복구는 별도의 승인 경로를 따른다.
 - [V18 마이그레이션](../src/main/resources/db/migration/V18__start_cognito_account_recovery.sql)과 [복구 시작 서비스](../src/main/java/lab/helpdesk/cognito/CognitoAccounts.java)에 적용했다. 로컬 통합 테스트로 저장 경계와 중복 접수를 확인했다. 후속 검토는 Cognito 호출과 결과 재확인, 새 인증과 접근 재개 승인이다. [V18 API](./pilot-account-design.md#v18-복구-요청-api)
 
+### D02-9 2026-11-18 V19 Cognito 처리와 접근 재개
+
+- DB 트랜잭션에서 Cognito를 호출하는 방식과 호출 전후에 상태를 각각 커밋하는 방식을 검토했다. 후자를 적용해 외부 응답을 기다리는 동안 계정 행 잠금을 풀어 둔다. 자격 증명 변경의 응답이 없으면 Cognito의 현재 상태를 조회하고, 변경 요청을 다시 보내는 대신 관찰 가능한 결과로 복구를 이어간다.
+- 비밀번호 복구는 관리자가 전달할 임시 비밀번호를 요청에서 받고 Cognito가 새 비밀번호를 받도록 했다. TOTP 교체에서는 기존 등록을 제거하고 등록 뒤 다시 인증한 결과를 확인한다. 같은 Pool의 기존 신원과 새 인증 시각을 대조한 뒤 관리자가 접근을 승인한다. 원래 비활성인 계정에는 복구 승인 뒤에도 별도 재활성화 절차를 적용한다.
+- [V19 마이그레이션](../src/main/resources/db/migration/V19__complete_cognito_account_recovery.sql), [복구 서비스](../src/main/java/lab/helpdesk/cognito/CognitoRecoveries.java), [Cognito 연동](../src/main/java/lab/helpdesk/cognito/AwsCognitoProvider.java)과 기존 로그인 화면에 반영했다. 실제 Pool 권한과 첫 관리자용 독립 AWS 경로는 G2에서 점검한다. [V19 운영 절차](./pilot-account-design.md#v19-cognito-처리와-접근-재개)
+
 ## D03 첫 운영 DB와 학습 데이터
 
 - 학습용 V8 스냅샷을 출발점으로 복원하는 안과 빈 전용 DB에 전체 Migration을 적용하는 안을 비교했다. V9와 V10은 기존 문의의 고객 소유권과 지원 서비스를 추정해 채우지 않는다.

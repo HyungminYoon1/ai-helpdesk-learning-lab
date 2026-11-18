@@ -83,7 +83,7 @@ V16은 기존에 연결된 계정과 새 계정을 `ACTIVE`, 세션 버전 `0`�
 | `helpdesk.cognito.client-secret` | 비밀값을 사용하는 Client일 때 서버에만 전달하는 선택 값. |
 | `helpdesk.cognito.bootstrap-subject` | 확인한 첫 계정 관리자의 Cognito `sub`. 초기 연결 뒤 제거할 수 있다. |
 
-Cognito App Client의 콜백은 `/login/oauth2/code/cognito`다. Allowed sign-out URL에는 App Origin의 `/onboarding/resume`과 `/login`을 등록한다. `openid`, `email`, `aws.cognito.signin.user.admin` Scope를 허용한다. App 실행 Role에는 지정한 Pool에서 `cognito-idp:GetUserPoolMfaConfig`와 `cognito-idp:DescribeUserPoolClient`만 필요하다. 후자는 해당 Pool의 App Client 메타데이터에 접근할 수 있으므로 전용 Pool ARN에 제한한다. 서버의 Cognito 앱 클라이언트 인증 정보와 사용자 Token을 기록하지 않는다. [Cognito 권한 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cognito-idp.html)
+Cognito App Client의 콜백은 `/login/oauth2/code/cognito`다. Allowed sign-out URL에는 App Origin의 `/onboarding/resume`과 `/login`을 등록한다. `openid`, `email`, `aws.cognito.signin.user.admin` Scope를 허용한다. 기본 로그인은 `cognito-idp:GetUserPoolMfaConfig`와 `cognito-idp:DescribeUserPoolClient`를 사용한다. V19 복구 사용 시에는 `DescribeUserPool`, `AdminGetUser`, `AdminUserGlobalSignOut`, `AdminSetUserPassword`, `AdminDeleteSoftwareToken`이 추가로 필요하다. 권한은 App 실행 Role의 지정 Pool ARN 범위로 제한한다. 서버의 Cognito 앱 클라이언트 인증 정보와 사용자 Token을 기록하지 않는다. [Cognito 권한 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cognito-idp.html)
 
 첫 운영자는 신원을 확인한 뒤 코드 없이 같은 이메일 확인과 TOTP 재로그인 절차를 밟는다. DB가 처음 연결한 관리자 한 명을 기억한다. [지원 서비스 준비](../README.md#로컬-서비스-준비) 후 운영자는 인증과 CSRF가 필요한 `POST /api/account-invitations`에 `email`과 `role`을 보낸다. `CUSTOMER`는 두 필드로 발급한다. `AGENT` 또는 `SUPERVISOR`는 `serviceId`와 `displayName`도 지정한다. 운영자가 Cognito에서 사용자를 초대하고, Helpdesk에서 받은 코드를 해당 수신자에게 전달한다. 응답은 코드와 만료 시각을 한 번 반환하며 DB는 해시를 보관한다.
 
@@ -115,7 +115,7 @@ V17 감사 이력은 계정 ID, 관리자 ID, 이전·이후 상태, 새 버전,
 
 ## Cognito 계정 복구 구현 계획
 
-2026-11-16에 정리한 첫 파일럿의 후속 구현안이다. 2026-11-18에는 V18 복구 접수와 접근 차단까지 구현했다. 복구 대상은 이미 Helpdesk 내부 ID와 Cognito `iss` 및 `sub`가 연결된 계정이다. 제공자 계정을 새로 만들어 `sub`가 달라진 경우에는 별도의 신원 재검증과 연결 승인을 거친다.
+2026-11-16에 정리한 첫 파일럿의 복구 절차다. 2026-11-18에는 V18 접수와 차단을 푸시하고 CI를 확인했다. V19에서 일반 계정의 Cognito 처리부터 재인증과 접근 재개까지 로컬 흐름을 연결했다. 복구 대상은 이미 Helpdesk 내부 ID와 Cognito `iss` 및 `sub`가 연결된 계정이다. 제공자 계정을 새로 만들어 `sub`가 달라진 경우에는 별도의 신원 재검증과 연결 승인을 거친다.
 
 1. 계정 관리자가 본인과 사유를 확인한다. 복구 요청을 만들고 계정을 `RECOVERY_PENDING`으로 바꾸면서 세션 버전과 감사 이력을 한 트랜잭션으로 저장한다. 커밋 뒤 기존 세션과 일반 로그인을 차단하고, 그 복구 요청에 연결된 인증만 허용한다. 복구 대기는 별도의 완료 승인으로만 해제한다. AWS 호출은 DB 커밋 뒤 실행하며, 호출에 실패하면 복구 대기를 유지한다.
 2. 비밀번호를 잃은 경우 Cognito의 `admin_only` 설정을 사용하는 안을 권장한다. `AdminSetUserPassword(Permanent=false)`로 임시 비밀번호를 설정하고 본인을 확인한 비공개 경로로 전달한다. 사용자는 Cognito 화면에서 새 비밀번호를 정하고 기존 TOTP로 인증한다. [Cognito 복구 설정](https://docs.aws.amazon.com/cognito/latest/developerguide/managing-users-passwords.html) [임시 비밀번호 API](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminSetUserPassword.html)
@@ -128,11 +128,26 @@ V17 감사 이력은 계정 ID, 관리자 ID, 이전·이후 상태, 새 버전,
 
 같은 관리자와 대상에 대해 같은 UUID와 내용으로 다시 요청하면 기존 접수 결과를 `200`으로 반환한다. 같은 UUID에 다른 내용을 담으면 `409 ACCOUNT_RECOVERY_REQUEST_CONFLICT`다. 진행 중인 복구가 있는 대상에 새 요청을 보내거나 일반 상태 변경으로 접근을 재개하려고 하면 `409 ACCOUNT_RECOVERY_PENDING`이다. 첫 계정 관리자에 대한 일반 복구 요청은 `409 FIRST_ADMINISTRATOR_PROTECTED`로 거부한다.
 
-이력은 요청한 관리자, 대상, 복구 유형, 사유, 접수 시각과 이전 상태를 저장한다. 이미 `DISABLED`인 계정도 그 상태에서 바로 복구 대기로 전환할 수 있다. 기존 비활성화 해제에는 별도의 재활성화 승인 기준을 적용한다. `201`은 Helpdesk 접수와 접근 차단이 커밋됐다는 뜻이다. Cognito 처리, 새 인증 검증과 접근 재개는 다음 구현 단계다.
+이력은 요청한 관리자, 대상, 복구 유형, 사유, 접수 시각과 이전 상태를 저장한다. 이미 `DISABLED`인 계정도 그 상태에서 바로 복구 대기로 전환할 수 있다. 기존 비활성화 해제에는 별도의 재활성화 승인 기준을 적용한다. `201`은 Helpdesk 접수와 접근 차단이 커밋됐다는 뜻이다.
 
 로컬 OIDC와 PostgreSQL에서 세션 차단, 정상 로그인 거부, 관리자 권한과 CSRF, 재요청과 동시 접수, 커밋 실패 시 계정 상태와 이력의 롤백을 검증했다. [HTTP 통합 테스트](../src/test/java/lab/helpdesk/cognito/CognitoOnboardingHttpIntegrationTest.java)
 
 합성 데이터가 있는 V17 DB에 V18을 적용해 첫 계정 관리자, 비활성 상태와 기존 감사 이력, 문의 소유권이 보존되는 것을 확인했다. 전체 로컬 검증은 Maven 1,254건, Node 421건과 ESLint를 통과했다.
+
+V18 `9843216`의 CI는 두 번째 실행에서 통과했다. 첫 실행은 Docker 이미지 빌드 중 Maven Central 다운로드가 `429`를 반환했다. [V18 CI 실행 기록](https://github.com/HyungminYoon1/ai-helpdesk-learning-lab/actions/runs/44304631623)
+
+### V19 Cognito 처리와 접근 재개
+
+관리자 API의 기준 경로는 `/api/accounts/{accountKey}/recoveries/{recoveryId}`다. 변경 요청에는 CSRF를 적용한다. `GET`은 복구 요청의 현재 단계와 시작 또는 완료 시점의 계정 상태 및 세션 버전을 반환한다.
+
+1. `POST …/prepare`에서 Cognito 처리를 시작한다. 비밀번호 복구 본문에는 본인 확인 후 전달할 `temporaryPassword`를 넣는다. TOTP 교체는 빈 본문 또는 빈 JSON으로 요청한다. 일치하는 Pool과 대상 `sub`, 필수 TOTP를 확인한 뒤 전역 로그아웃을 실행하고, 복구 유형에 맞는 자격 증명 변경만 실행한다. 임시 비밀번호는 Helpdesk 요청 처리 중에만 사용한다.
+2. Cognito 호출 앞뒤로 짧은 DB 트랜잭션을 열어 진행 상태를 기록한다. 자격 증명 변경 요청을 보내기 전에 그 시점을 커밋한다. AWS SDK의 변경 요청은 한 번만 전송한다. `PROVIDER_RESULT_UNCONFIRMED`에서는 `POST …/recheck`로 `AdminGetUser`의 결과를 대조한다. 비밀번호는 필수 변경 상태, TOTP는 기존 등록의 소실이 확인되어야 다음 단계로 넘어간다. 결과를 확인할 수 없는 동안에는 복구 대기를 유지한다. `PREPARING`에서 서버가 종료되면 1분 뒤 준비를 다시 요청할 수 있다. 비밀번호 정책 거절로 변경이 실패한 때도 다시 요청할 수 있다.
+3. `AWAITING_AUTHENTICATION`에서 사용자는 Helpdesk 로그인 화면에 복구 ID를 입력한다. Hosted UI 로그아웃 뒤 시작한 OIDC 요청의 `auth_time`이 요청 시작과 Cognito 처리 확인 시각보다 늦어야 한다. 기존 `iss`과 `sub`, 이메일 확인과 TOTP 등록 상태도 대조한다. TOTP 교체에서는 등록을 확인한 로그인과 새 코드로 다시 인증한 로그인을 차례로 요구한다. `AUTHENTICATION_VERIFIED`에서 관리자에게 확인을 요청한다.
+4. 관리자가 `POST …/approve`를 보내면 대상 상태 변경, 세션 버전 증가, 승인자를 함께 커밋한다. 이미 완료한 같은 요청에 재승인을 보내면 기록된 결과를 반환한다. 원래 활성 계정에는 승인 시점과 복구 인증 시각을 모두 지난 새 로그인에서 세션을 발급한다. 원래 비활성 계정은 승인 결과가 `DISABLED`이며, 별도의 재활성화 뒤 새로 로그인한다.
+
+로컬에서는 서명된 OIDC 토큰과 합성 Cognito 응답으로 두 복구 유형을 검증했다. 승인 전 보호 API 차단, 승인 커밋 실패의 롤백, 중복 변경 차단과 응답 유실 뒤 상태 대조도 확인했다. 실제 Cognito 화면에서의 암호 변경과 인증기 교체, 지정 Pool 권한 및 임시 비밀번호 전달 절차는 G2 검증 대상으로 둔다. [HTTP 통합 테스트](../src/test/java/lab/helpdesk/cognito/CognitoOnboardingHttpIntegrationTest.java) [AWS SDK 테스트](../src/test/java/lab/helpdesk/cognito/AwsCognitoProviderTest.java)
+
+전체 로컬 검증은 Maven 1,262건, Node 421건과 ESLint를 통과했다. 격리 PostgreSQL에서 V18의 복구 대기 요청과 기존 문의를 준비한 후 V19를 적용해 계정 잠금, 세션 버전과 문의 소유권이 보존되는지 확인했다.
 
 ### 첫 계정 관리자의 인증기 분실
 

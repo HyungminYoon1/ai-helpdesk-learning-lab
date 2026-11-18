@@ -1,6 +1,6 @@
 # AI Helpdesk Learning Lab
 
-> 상태: V18에서 Cognito 계정 복구 접수와 기존 세션 차단을 추가했다. 다음 구현은 Cognito 자격 증명 복구와 새 인증 확인이다. [계정 복구 계획](./docs/pilot-account-design.md#cognito-계정-복구-구현-계획)
+> 상태: V18의 복구 접수와 세션 차단은 CI를 통과했다. V19에서 일반 계정의 Cognito 비밀번호 및 TOTP 복구와 접근 재개를 로컬에서 검증했다. [계정 복구 절차](./docs/pilot-account-design.md#v19-cognito-처리와-접근-재개)
 > 현재 Cloud 상태: 2026-10-22 승인 후 원본 RDS·ALB/리스너·Route 53 실습 Zone/두 Record·Cloudflare 서비스 CNAME을 삭제했다. 실행/보류 App Task·활성 Service는 0개이며 두 수동 Snapshot은 개별 상세에서 Available을 확인했다. Secret·Log 365일·Image·ACM/검증 CNAME·Target Group·네트워크는 보존했다. 다음 개발은 로컬에서 진행하며 재배포 때는 Snapshot에서 새 DB 복원·새 ALB·DNS 재연결이 필요하다. [정리 결과](./deploy/iam/closeout.md#2026-10-22-실제-정리-결과) · [재배포 순서](./deploy/ecs/README.md#2026-10-22-장기-휴지기와-다음-배포)
 > 실행 기준: Java 25
 
