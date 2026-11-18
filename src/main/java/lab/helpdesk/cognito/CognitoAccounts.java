@@ -96,19 +96,51 @@ class CognitoAccounts {
     public StatusResult changeStatus(UUID administrator, UUID accountKey, AccountStatus status,
             Long expectedSessionVersion, StatusChangeReason reason) {
         var operator = requireAdministrator(administrator);
-        if (status == null || expectedSessionVersion == null || expectedSessionVersion < 0 || reason == null) {
+        if (status == null || status == AccountStatus.RECOVERY_PENDING || expectedSessionVersion == null
+                || expectedSessionVersion < 0 || reason == null) {
             throw new CognitoFailure(INVALID_INPUT);
         }
-        repository.boundLockWait();
-        var target = repository.lockForStatusChange(accountKey)
-                .orElseThrow(() -> new CognitoFailure(ACCOUNT_NOT_FOUND));
+        var target = lockTargetAccount(accountKey);
         if (target.sessionVersion() != expectedSessionVersion) {
             throw new CognitoFailure(ACCOUNT_STATUS_VERSION_CONFLICT);
         }
+        if (target.status() == AccountStatus.RECOVERY_PENDING) throw new CognitoFailure(ACCOUNT_RECOVERY_PENDING);
         if (target.status() == status) return new StatusResult(accountKey, status, target.sessionVersion());
         if (target.accountAdmin()) throw new CognitoFailure(FIRST_ADMINISTRATOR_PROTECTED);
         long version = repository.changeStatus(target, status, operator.userId(), reason.name());
         return new StatusResult(accountKey, status, version);
+    }
+
+    @Transactional
+    public RecoveryStart startRecovery(UUID administrator, UUID accountKey, UUID clientRequestId,
+            Long expectedSessionVersion, RecoveryKind kind, StatusChangeReason reason) {
+        var operator = requireAdministrator(administrator);
+        if (clientRequestId == null || expectedSessionVersion == null || expectedSessionVersion < 0
+                || kind == null || reason == null) {
+            throw new CognitoFailure(INVALID_INPUT);
+        }
+        var target = lockTargetAccount(accountKey);
+        if (target.accountAdmin()) throw new CognitoFailure(FIRST_ADMINISTRATOR_PROTECTED);
+
+        var recovery = repository.findRecovery(target.userId(), operator.userId(), clientRequestId).orElse(null);
+        boolean created = recovery == null;
+        if (created) {
+            if (target.status() == AccountStatus.RECOVERY_PENDING) throw new CognitoFailure(ACCOUNT_RECOVERY_PENDING);
+            if (target.sessionVersion() != expectedSessionVersion) {
+                throw new CognitoFailure(ACCOUNT_STATUS_VERSION_CONFLICT);
+            }
+            recovery = repository.startRecovery(target, operator.userId(), clientRequestId, kind, reason.name());
+        } else if (recovery.kind() != kind || !recovery.reason().equals(reason.name())
+                || recovery.sessionVersion() - 1 != expectedSessionVersion) {
+            throw new CognitoFailure(ACCOUNT_RECOVERY_REQUEST_CONFLICT);
+        }
+        return new RecoveryStart(new RecoveryReceipt(recovery.id(), accountKey, recovery.kind(),
+                recovery.sessionVersion(), recovery.requestedAt()), created);
+    }
+
+    private JdbcCognitoAccounts.Account lockTargetAccount(UUID accountKey) {
+        repository.boundLockWait();
+        return repository.lockForStatusChange(accountKey).orElseThrow(() -> new CognitoFailure(ACCOUNT_NOT_FOUND));
     }
 
     private JdbcCognitoAccounts.Account requireAdministrator(UUID administrator) {
@@ -184,4 +216,9 @@ class CognitoAccounts {
     enum StatusChangeReason { OWNER_REQUEST, SERVICE_ACCESS_ENDED, SECURITY_REVIEW, ADMINISTRATIVE_REVIEW }
 
     record StatusResult(UUID accountKey, AccountStatus status, long sessionVersion) { }
+
+    record RecoveryReceipt(UUID recoveryId, UUID accountKey, RecoveryKind kind, long sessionVersion,
+            Instant requestedAt) { }
+
+    record RecoveryStart(RecoveryReceipt receipt, boolean created) { }
 }

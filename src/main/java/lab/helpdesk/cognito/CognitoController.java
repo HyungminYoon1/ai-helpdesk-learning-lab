@@ -120,6 +120,15 @@ class CognitoController {
         return response(HttpStatus.OK, result);
     }
 
+    @PostMapping("/api/accounts/{accountKey}/recoveries")
+    ResponseEntity<CognitoAccounts.RecoveryReceipt> startRecovery(@PathVariable UUID accountKey,
+            @RequestBody StartRecovery request, Authentication authentication) {
+        var administrator = AuthenticatedActorFactory.from(authentication);
+        var result = accounts.startRecovery(administrator.accountKey(), accountKey, request.clientRequestId(),
+                request.expectedSessionVersion(), request.kind(), request.reason());
+        return response(result.created() ? HttpStatus.CREATED : HttpStatus.OK, result.receipt());
+    }
+
     @ExceptionHandler(CognitoFailure.class)
     ResponseEntity<Map<String, String>> rejected(CognitoFailure failure) {
         return response(failure.code().status, Map.of("code", failure.code().name()));
@@ -143,5 +152,8 @@ class CognitoController {
     }
 
     private record ChangeStatus(AccountStatus status, Long expectedSessionVersion,
+            CognitoAccounts.StatusChangeReason reason) { }
+
+    private record StartRecovery(UUID clientRequestId, Long expectedSessionVersion, RecoveryKind kind,
             CognitoAccounts.StatusChangeReason reason) { }
 }

@@ -66,6 +66,9 @@ final class CognitoOnboarding {
                     Optional<JdbcCognitoAccounts.Account> linked = accounts.find(proof.identity());
                     if (linked.isPresent()) {
                         var account = linked.get();
+                        if (account.status() == AccountStatus.RECOVERY_PENDING) {
+                            throw new CognitoFailure(ACCOUNT_RECOVERY_PENDING);
+                        }
                         if (account.status() != AccountStatus.ACTIVE) throw new CognitoFailure(ACCOUNT_DISABLED);
                         if (!proof.emailVerified()) throw new CognitoFailure(SIGN_IN_REQUIRED);
                         if (account.reactivatedAt() != null && !proof.authenticatedAt().isAfter(account.reactivatedAt())) {

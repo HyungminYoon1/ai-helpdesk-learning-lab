@@ -2,5 +2,6 @@ package lab.helpdesk.cognito;
 
 enum AccountStatus {
     ACTIVE,
-    DISABLED
+    DISABLED,
+    RECOVERY_PENDING
 }

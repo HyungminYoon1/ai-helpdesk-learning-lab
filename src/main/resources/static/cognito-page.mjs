@@ -14,6 +14,7 @@ const callbackErrors = {
   INVITATION_UNAVAILABLE: '이 계정으로 수락할 수 있는 초대를 확인해주세요.',
   SIGN_IN_REQUIRED: 'Cognito 로그인을 완료해주세요.',
   ACCOUNT_DISABLED: 'Helpdesk 계정이 비활성화되어 있습니다. 계정 관리자에게 문의해주세요.',
+  ACCOUNT_RECOVERY_PENDING: 'Helpdesk 계정 복구가 진행 중입니다. 계정 관리자에게 문의해주세요.',
   COGNITO_UNAVAILABLE: '로그인 제공자를 확인할 수 없습니다. 다시 시도해주세요.',
 }
 

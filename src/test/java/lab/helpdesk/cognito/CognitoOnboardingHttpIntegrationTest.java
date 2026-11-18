@@ -16,6 +16,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -108,6 +111,7 @@ class CognitoOnboardingHttpIntegrationTest {
 
     @BeforeEach
     void resetStorage() {
+        jdbc.update("DELETE FROM helpdesk_account_recoveries");
         jdbc.update("DELETE FROM helpdesk_account_status_events");
         jdbc.update("DELETE FROM helpdesk_account_invitations");
         jdbc.update("DELETE FROM support_service_memberships");
@@ -418,6 +422,136 @@ class CognitoOnboardingHttpIntegrationTest {
         staff.get("/api/services").andExpect(status().isUnauthorized());
     }
 
+    @Test
+    void recoveryStartCommitsOnceAndBlocksExistingSessionsAndNormalLogin() throws Exception {
+        var employee = linkedEmployee();
+        var administrator = accounts.find(new CognitoAccounts.Identity(settings.issuer(), ADMIN, BOOTSTRAP_EMAIL))
+                .orElseThrow();
+        Browser admin = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        Browser staff = signedInBrowser(EMPLOYEE, EMAIL);
+        String path = recoveryPath(employee.accountKey());
+        UUID requestId = UUID.randomUUID();
+        String request = recoveryRequest(requestId, 0, "TOTP_RESET");
+
+        var receipt = body(admin.postJson(path, request).andExpect(status().isCreated())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.accountKey").value(employee.accountKey().toString()))
+                .andExpect(jsonPath("$.kind").value("TOTP_RESET"))
+                .andExpect(jsonPath("$.sessionVersion").value(1))
+                .andExpect(jsonPath("$.requestedAt").exists()).andReturn());
+        assertThat(UUID.fromString(receipt.path("recoveryId").asText())).isNotNull();
+        assertThat(body(admin.postJson(path, request).andExpect(status().isOk()).andReturn())).isEqualTo(receipt);
+        admin.postJson(path, recoveryRequest(requestId, 0, "PASSWORD_RESET"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ACCOUNT_RECOVERY_REQUEST_CONFLICT"));
+        admin.postJson(path, recoveryRequest(UUID.randomUUID(), 1, "TOTP_RESET"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ACCOUNT_RECOVERY_PENDING"));
+
+        assertThat(jdbc.queryForMap("""
+                SELECT administrator_user_id, client_request_id, previous_status, session_version, kind, reason
+                FROM helpdesk_account_recoveries WHERE target_user_id = ?
+                """, employee.userId())).containsEntry("administrator_user_id", administrator.userId())
+                .containsEntry("client_request_id", requestId).containsEntry("previous_status", "ACTIVE")
+                .containsEntry("session_version", 1L).containsEntry("kind", "TOTP_RESET")
+                .containsEntry("reason", "SECURITY_REVIEW");
+        admin.get("/api/accounts").andExpect(status().isOk())
+                .andExpect(jsonPath("$[1].status").value("RECOVERY_PENDING"));
+        staff.get("/api/services").andExpect(status().isUnauthorized());
+        new Browser().signIn(EMPLOYEE, EMAIL, Instant.now())
+                .andExpect(redirectedUrl("/cognito.html?error=ACCOUNT_RECOVERY_PENDING"));
+        admin.putJson(accountStatusPath(employee.accountKey()), changeStatus("ACTIVE", 1, "ADMINISTRATIVE_REVIEW"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ACCOUNT_RECOVERY_PENDING"));
+    }
+
+    @Test
+    void recoveryStartRequiresCsrfAndAccountAdminAndPreservesThePriorDisabledState() throws Exception {
+        var employee = linkedEmployee();
+        var administrator = accounts.find(new CognitoAccounts.Identity(settings.issuer(), ADMIN, BOOTSTRAP_EMAIL))
+                .orElseThrow();
+        Browser admin = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        Browser staff = signedInBrowser(EMPLOYEE, EMAIL);
+        String path = recoveryPath(employee.accountKey());
+        String request = recoveryRequest(UUID.randomUUID(), 0, "PASSWORD_RESET");
+
+        staff.postJson(path, request).andExpect(status().isForbidden());
+        mvc.perform(post(path).session(admin.session).contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isForbidden());
+        admin.postJson(recoveryPath(administrator.accountKey()), request).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("FIRST_ADMINISTRATOR_PROTECTED"));
+        admin.putJson(accountStatusPath(employee.accountKey()), changeStatus("RECOVERY_PENDING", 0, "SECURITY_REVIEW"))
+                .andExpect(status().isBadRequest());
+        admin.putJson(accountStatusPath(employee.accountKey()), changeStatus("DISABLED", 0, "SECURITY_REVIEW"))
+                .andExpect(status().isOk());
+        admin.postJson(path, request).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_STATUS_VERSION_CONFLICT"));
+        admin.postJson(path, recoveryRequest(UUID.randomUUID(), 1, "PASSWORD_RESET"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.sessionVersion").value(2));
+
+        assertThat(jdbc.queryForObject("""
+                SELECT previous_status FROM helpdesk_account_recoveries WHERE target_user_id = ?
+                """, String.class, employee.userId())).isEqualTo("DISABLED");
+    }
+
+    @Test
+    void concurrentRecoveryStartsForOneAccountCommitOnlyOneRequest() throws Exception {
+        var employee = linkedEmployee();
+        Browser first = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        Browser second = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        String path = recoveryPath(employee.accountKey());
+        var release = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var password = executor.submit(() -> {
+                if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test request not released");
+                return first.postJson(path, recoveryRequest(UUID.randomUUID(), 0, "PASSWORD_RESET"))
+                        .andReturn().getResponse().getStatus();
+            });
+            var totp = executor.submit(() -> {
+                if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test request not released");
+                return second.postJson(path, recoveryRequest(UUID.randomUUID(), 0, "TOTP_RESET"))
+                        .andReturn().getResponse().getStatus();
+            });
+            release.countDown();
+            assertThat(List.of(password.get(10, TimeUnit.SECONDS), totp.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(201, 409);
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM helpdesk_account_recoveries", Long.class)).isEqualTo(1);
+        assertThat(accounts.find(employee.accountKey()).orElseThrow().sessionVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void recoveryCommitFailureRollsBackAccountStateAndAudit() throws Exception {
+        var employee = linkedEmployee();
+        Browser admin = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        Browser staff = signedInBrowser(EMPLOYEE, EMAIL);
+        String path = recoveryPath(employee.accountKey());
+        String request = recoveryRequest(UUID.randomUUID(), 0, "TOTP_RESET");
+
+        jdbc.execute("""
+                CREATE FUNCTION reject_recovery_for_test() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'synthetic recovery commit rejection' USING ERRCODE = '23514'; END;
+                $$
+                """);
+        try {
+            jdbc.execute("""
+                    CREATE CONSTRAINT TRIGGER reject_recovery_at_commit
+                    AFTER INSERT ON helpdesk_account_recoveries DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW EXECUTE FUNCTION reject_recovery_for_test()
+                    """);
+            admin.postJson(path, request).andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.code").value("ACCOUNT_STORAGE_UNAVAILABLE"));
+            var account = accounts.find(employee.accountKey()).orElseThrow();
+            assertThat(account.status()).isEqualTo(AccountStatus.ACTIVE);
+            assertThat(account.sessionVersion()).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM helpdesk_account_recoveries", Long.class)).isZero();
+            staff.get("/api/services").andExpect(status().isOk());
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS reject_recovery_at_commit ON helpdesk_account_recoveries");
+            jdbc.execute("DROP FUNCTION reject_recovery_for_test()");
+        }
+
+        admin.postJson(path, request).andExpect(status().isCreated()).andExpect(jsonPath("$.sessionVersion").value(1));
+        staff.get("/api/services").andExpect(status().isUnauthorized());
+    }
+
     private JdbcCognitoAccounts.Account linkedEmployee() {
         var admin = accounts.accept(null, new CognitoAccounts.Identity(settings.issuer(), ADMIN, BOOTSTRAP_EMAIL),
                 ADMIN, Instant.now());
@@ -428,6 +562,22 @@ class CognitoOnboardingHttpIntegrationTest {
 
     private static String accountStatusPath(UUID accountKey) {
         return "/api/accounts/" + accountKey + "/status";
+    }
+
+    private Browser signedInBrowser(String subject, String email) throws Exception {
+        Browser browser = new Browser();
+        browser.signIn(subject, email, Instant.now()).andExpect(redirectedUrl("/my-tickets.html"));
+        return browser;
+    }
+
+    private static String recoveryPath(UUID accountKey) {
+        return "/api/accounts/" + accountKey + "/recoveries";
+    }
+
+    private static String recoveryRequest(UUID requestId, long version, String kind) {
+        return """
+                {"clientRequestId":"%s","expectedSessionVersion":%d,"kind":"%s","reason":"SECURITY_REVIEW"}
+                """.formatted(requestId, version, kind);
     }
 
     private static String changeStatus(String status, long version, String reason) {

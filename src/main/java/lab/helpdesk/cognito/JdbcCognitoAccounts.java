@@ -61,19 +61,48 @@ class JdbcCognitoAccounts {
 
     long changeStatus(Account target, AccountStatus status, long administratorId, String reason) {
         long version = target.sessionVersion() + 1;
-        OffsetDateTime changedAt = jdbc.queryForObject("""
-                UPDATE helpdesk_cognito_accounts
-                SET status = ?, session_version = ?,
-                    reactivated_at = CASE WHEN ? = 'ACTIVE' THEN statement_timestamp() END
-                WHERE user_id = ?
-                RETURNING statement_timestamp()
-                """, OffsetDateTime.class, status.name(), version, status.name(), target.userId());
+        OffsetDateTime changedAt = updateStatus(target.userId(), status, version);
         jdbc.update("""
                 INSERT INTO helpdesk_account_status_events
                     (target_user_id, administrator_user_id, from_status, to_status, session_version, reason, changed_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, target.userId(), administratorId, target.status().name(), status.name(), version, reason, changedAt);
         return version;
+    }
+
+    Optional<Recovery> findRecovery(long targetId, long administratorId, UUID clientRequestId) {
+        return jdbc.query("""
+                SELECT id, kind, reason, session_version, requested_at
+                FROM helpdesk_account_recoveries
+                WHERE target_user_id = ? AND administrator_user_id = ? AND client_request_id = ?
+                """, (row, index) -> new Recovery(row.getObject("id", UUID.class),
+                        RecoveryKind.valueOf(row.getString("kind")), row.getString("reason"),
+                        row.getLong("session_version"), row.getObject("requested_at", OffsetDateTime.class).toInstant()),
+                targetId, administratorId, clientRequestId).stream().findFirst();
+    }
+
+    Recovery startRecovery(Account target, long administratorId, UUID clientRequestId, RecoveryKind kind, String reason) {
+        UUID id = UUID.randomUUID();
+        long version = target.sessionVersion() + 1;
+        OffsetDateTime requestedAt = updateStatus(target.userId(), AccountStatus.RECOVERY_PENDING, version);
+        jdbc.update("""
+                INSERT INTO helpdesk_account_recoveries
+                    (id, target_user_id, administrator_user_id, client_request_id, previous_status,
+                     session_version, kind, reason, requested_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, id, target.userId(), administratorId, clientRequestId, target.status().name(),
+                version, kind.name(), reason, requestedAt);
+        return new Recovery(id, kind, reason, version, requestedAt.toInstant());
+    }
+
+    private OffsetDateTime updateStatus(long targetId, AccountStatus status, long version) {
+        return jdbc.queryForObject("""
+                UPDATE helpdesk_cognito_accounts
+                SET status = ?, session_version = ?,
+                    reactivated_at = CASE WHEN ? = 'ACTIVE' THEN statement_timestamp() END
+                WHERE user_id = ?
+                RETURNING statement_timestamp()
+                """, OffsetDateTime.class, status.name(), version, status.name(), targetId);
     }
 
     boolean firstAdministratorExists() {
@@ -149,4 +178,6 @@ class JdbcCognitoAccounts {
     record Invitation(String email, Long serviceId, String supportRole, String displayName, Instant expiresAt) {
         @Override public String toString() { return "CognitoInvitation[redacted]"; }
     }
+
+    record Recovery(UUID id, RecoveryKind kind, String reason, long sessionVersion, Instant requestedAt) { }
 }
