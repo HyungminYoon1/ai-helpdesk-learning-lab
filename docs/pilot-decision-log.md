@@ -65,6 +65,18 @@
 - 계정 변경과 감사 이력을 한 트랜잭션으로 저장한다. 사유는 고정 코드로 남기고, 계정 키와 초대 당시 주소는 활성 계정 관리자에게만 제공한다. 파일럿의 첫 관리자는 단일 계정이므로 이 API에서 비활성화를 거부한다. 문의 소유권과 작성 이력의 참조는 내부 계정 ID로 보존한다.
 - [관리자 API와 사용 계약](./pilot-account-design.md#계정-관리자-api), [계정 서비스](../src/main/java/lab/helpdesk/cognito/CognitoAccounts.java), [V17 감사 이력](../src/main/resources/db/migration/V17__record_cognito_account_status_changes.sql)에 적용했다. 로컬에서 관리자 권한, CSRF, 버전 충돌, 커밋 실패와 이전 세션 차단을 확인한다. 실제 Cognito 로그인과 첫 관리자 복구는 G2에서 점검한다.
 
+### D02-7 2026-11-16 관리자 승인형 Cognito 복구 계획
+
+- 이메일 코드로 사용자가 시작하는 복구와 관리자가 본인 확인 뒤 시작하는 복구를 검토했다. 파일럿은 Helpdesk에서 계정을 잠그고 기존 세션을 먼저 차단할 수 있도록 `admin_only`와 관리자 승인형 임시 비밀번호를 권장한다. Cognito가 자격 증명 변경과 MFA 검증을 맡고, Helpdesk는 복구 진행과 접근 재개 승인을 기록한다. [Cognito 복구 설정](https://docs.aws.amazon.com/cognito/latest/developerguide/managing-users-passwords.html)
+- 첫 계정 관리자가 인증기를 잃으면 일반 관리자 작업에 필요한 Helpdesk 세션을 만들 수 없다. 지정 Pool과 기존 첫 관리자 신원으로 범위를 좁힌 독립 AWS 운영자 경로를 출시 전에 준비하는 안을 선택했다.
+- 영향 범위는 계정 상태와 감사 이력, Cognito 연동, 재인증과 첫 관리자 운영 절차다. 로컬에서는 복구 시작 커밋 실패, AWS 응답 유실, 이전 세션 차단을 검증한다. G2에서는 격리 Cognito Lite를 Helpdesk에 연결해 첫 관리자 세션이 없는 상태부터 복구를 끝까지 수행한다. [후속 구현 계획](./pilot-account-design.md#cognito-계정-복구-구현-계획)
+
+### D02-8 2026-11-18 V18 복구 요청과 세션 차단
+
+- 재시도마다 새 이력을 만드는 방식과 기존 제출을 다시 읽는 방식을 검토했다. 관리자와 대상, 제출 UUID로 기존 결과를 찾고 원래 요청 내용이 일치할 때 같은 접수를 반환한다. 대상 계정 행을 잠그고 진행 중인 복구가 한 건이도록 DB에서도 제약한다.
+- 처음 시작할 때는 이전 상태와 감사 이력, 계정 잠금과 세션 버전 증가를 한 트랜잭션으로 저장한다. 비활성 계정을 복구 전에 다시 열 필요가 없도록 `DISABLED`에서도 시작하고 이전 상태를 기록한다. 복구 대기의 해제와 첫 관리자의 복구는 별도의 승인 경로를 따른다.
+- [V18 마이그레이션](../src/main/resources/db/migration/V18__start_cognito_account_recovery.sql)과 [복구 시작 서비스](../src/main/java/lab/helpdesk/cognito/CognitoAccounts.java)에 적용했다. 로컬 통합 테스트로 저장 경계와 중복 접수를 확인했다. 후속 검토는 Cognito 호출과 결과 재확인, 새 인증과 접근 재개 승인이다. [V18 API](./pilot-account-design.md#v18-복구-요청-api)
+
 ## D03 첫 운영 DB와 학습 데이터
 
 - 학습용 V8 스냅샷을 출발점으로 복원하는 안과 빈 전용 DB에 전체 Migration을 적용하는 안을 비교했다. V9와 V10은 기존 문의의 고객 소유권과 지원 서비스를 추정해 채우지 않는다.

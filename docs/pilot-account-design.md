@@ -97,7 +97,7 @@ Cognito App Client의 콜백은 `/login/oauth2/code/cognito`다. Allowed sign-ou
 {"status":"DISABLED","expectedSessionVersion":0,"reason":"SECURITY_REVIEW"}
 ```
 
-상태는 `ACTIVE`와 `DISABLED`다. 사유는 계정 소유자 요청 `OWNER_REQUEST`, 서비스 이용 종료 `SERVICE_ACCESS_ENDED`, 보안 검토 `SECURITY_REVIEW`, 운영 검토 `ADMINISTRATIVE_REVIEW` 중 하나를 쓴다. 정해진 코드로 인해 감사 이력에 자유 텍스트가 저장되지 않는다.
+이 API가 받는 상태는 `ACTIVE`와 `DISABLED`다. 사유는 계정 소유자 요청 `OWNER_REQUEST`, 서비스 이용 종료 `SERVICE_ACCESS_ENDED`, 보안 검토 `SECURITY_REVIEW`, 운영 검토 `ADMINISTRATIVE_REVIEW` 중 하나를 쓴다. 정해진 코드로 인해 감사 이력에 자유 텍스트가 저장되지 않는다.
 
 서버는 대상 계정 행을 잠그고 예상 버전을 비교한다. 성공하면 상태와 세션 버전, 변경 이력을 함께 커밋한 뒤 `200`으로 반환한다. 같은 버전과 같은 상태를 다시 보내면 현재 결과를 반환한다. 버전이 다르면 `409 ACCOUNT_STATUS_VERSION_CONFLICT`를 돌려준다. 응답을 잃었거나 충돌이 발생하면 목록에서 현재 상태와 버전을 다시 읽고, 필요할 때 새 버전으로 변경을 요청한다. 첫 계정 관리자를 비활성화하는 요청은 `409 FIRST_ADMINISTRATOR_PROTECTED`로 거부한다.
 
@@ -110,5 +110,34 @@ V17 감사 이력은 계정 ID, 관리자 ID, 이전·이후 상태, 새 버전,
 관리자 테스트에서는 두 세션을 만든 뒤 비활성화해 기존 요청과 새 로그인이 거부되는 것을 확인했다. 비활성화 동안 쓰지 않았던 세션도 재활성화 후 차단됐고, 이전 Cognito 인증 시각을 가진 토큰으로도 접근이 열리지 않았다. 새 서명 토큰으로 로그인한 뒤에는 동일 계정으로 서비스를 조회했다. DB가 커밋을 거부한 경우에는 상태와 버전, 이력이 이전 상태로 돌아가고 해당 세션은 계속 사용할 수 있었다. [HTTP 통합 테스트](../src/test/java/lab/helpdesk/cognito/CognitoOnboardingHttpIntegrationTest.java)
 
 격리 PostgreSQL 17에서 합성 계정과 문의가 있는 V15 스키마에 V16과 V17을 적용했다. 계정은 `ACTIVE`와 버전 `0`으로 시작했고 문의의 기존 소유권을 확인했다.
+
+2026-11-16에 `366c2aa`와 `6afe150`의 계정 상태 및 세션 검사를 최종 검토했다. 관련 로컬 테스트 42건을 재실행해 모두 통과했다. 두 커밋을 포함한 Lab `main`의 `6afe150`에서 Java 및 PostgreSQL 테스트, JavaScript 테스트, ESLint와 검증용 Docker 이미지 빌드가 통과했다. [GitHub Actions 실행 기록](https://github.com/HyungminYoon1/ai-helpdesk-learning-lab/actions/runs/43727098874)
+
+## Cognito 계정 복구 구현 계획
+
+2026-11-16에 정리한 첫 파일럿의 후속 구현안이다. 2026-11-18에는 V18 복구 접수와 접근 차단까지 구현했다. 복구 대상은 이미 Helpdesk 내부 ID와 Cognito `iss` 및 `sub`가 연결된 계정이다. 제공자 계정을 새로 만들어 `sub`가 달라진 경우에는 별도의 신원 재검증과 연결 승인을 거친다.
+
+1. 계정 관리자가 본인과 사유를 확인한다. 복구 요청을 만들고 계정을 `RECOVERY_PENDING`으로 바꾸면서 세션 버전과 감사 이력을 한 트랜잭션으로 저장한다. 커밋 뒤 기존 세션과 일반 로그인을 차단하고, 그 복구 요청에 연결된 인증만 허용한다. 복구 대기는 별도의 완료 승인으로만 해제한다. AWS 호출은 DB 커밋 뒤 실행하며, 호출에 실패하면 복구 대기를 유지한다.
+2. 비밀번호를 잃은 경우 Cognito의 `admin_only` 설정을 사용하는 안을 권장한다. `AdminSetUserPassword(Permanent=false)`로 임시 비밀번호를 설정하고 본인을 확인한 비공개 경로로 전달한다. 사용자는 Cognito 화면에서 새 비밀번호를 정하고 기존 TOTP로 인증한다. [Cognito 복구 설정](https://docs.aws.amazon.com/cognito/latest/developerguide/managing-users-passwords.html) [임시 비밀번호 API](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminSetUserPassword.html)
+3. TOTP 기기를 잃은 경우 `AdminUserGlobalSignOut`으로 Cognito 세션을 회수하고 `AdminDeleteSoftwareToken`으로 기존 등록을 제거한다. 사용자는 새 인증기를 등록한 다음 새 코드로 다시 로그인한다. AWS 응답이 유실되면 복구 대기를 유지하고 현재 등록 상태를 확인한다. 삭제 재시도는 새 등록을 열기 전 단계로 제한한다. [전역 로그아웃](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) [TOTP 등록 제거](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminDeleteSoftwareToken.html)
+4. Hosted UI 로그아웃을 거쳐 새 인가 요청을 시작한다. 서명된 ID 토큰의 `auth_time`으로 복구 처리 이후의 인증인지 확인하고, `iss`와 `sub`를 기존 계정 연결과 대조한다. 접근 재개 승인 뒤 새 정상 로그인에서 Helpdesk 세션을 발급한다. 감사 이력에는 요청자, 대상, 사유, 시각과 결과를 남긴다. [Hosted UI 로그아웃](https://docs.aws.amazon.com/cognito/latest/developerguide/logout-endpoint.html) [ID 토큰의 인증 시각](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-id-token.html)
+
+### V18 복구 요청 API
+
+활성 계정 관리자는 CSRF 표식과 함께 `POST /api/accounts/{accountKey}/recoveries`에 `clientRequestId`, `expectedSessionVersion`, `kind`, `reason`을 보낸다. `kind`는 `PASSWORD_RESET` 또는 `TOTP_RESET`이며, `reason`은 계정 상태 변경과 같은 사유 코드를 사용한다. 대상 계정의 상태, 증가한 세션 버전과 요청 이력이 함께 커밋된 뒤 `201`과 `recoveryId`를 반환한다.
+
+같은 관리자와 대상에 대해 같은 UUID와 내용으로 다시 요청하면 기존 접수 결과를 `200`으로 반환한다. 같은 UUID에 다른 내용을 담으면 `409 ACCOUNT_RECOVERY_REQUEST_CONFLICT`다. 진행 중인 복구가 있는 대상에 새 요청을 보내거나 일반 상태 변경으로 접근을 재개하려고 하면 `409 ACCOUNT_RECOVERY_PENDING`이다. 첫 계정 관리자에 대한 일반 복구 요청은 `409 FIRST_ADMINISTRATOR_PROTECTED`로 거부한다.
+
+이력은 요청한 관리자, 대상, 복구 유형, 사유, 접수 시각과 이전 상태를 저장한다. 이미 `DISABLED`인 계정도 그 상태에서 바로 복구 대기로 전환할 수 있다. 기존 비활성화 해제에는 별도의 재활성화 승인 기준을 적용한다. `201`은 Helpdesk 접수와 접근 차단이 커밋됐다는 뜻이다. Cognito 처리, 새 인증 검증과 접근 재개는 다음 구현 단계다.
+
+로컬 OIDC와 PostgreSQL에서 세션 차단, 정상 로그인 거부, 관리자 권한과 CSRF, 재요청과 동시 접수, 커밋 실패 시 계정 상태와 이력의 롤백을 검증했다. [HTTP 통합 테스트](../src/test/java/lab/helpdesk/cognito/CognitoOnboardingHttpIntegrationTest.java)
+
+합성 데이터가 있는 V17 DB에 V18을 적용해 첫 계정 관리자, 비활성 상태와 기존 감사 이력, 문의 소유권이 보존되는 것을 확인했다. 전체 로컬 검증은 Maven 1,254건, Node 421건과 ESLint를 통과했다.
+
+### 첫 계정 관리자의 인증기 분실
+
+파일럿 전에 Helpdesk 로그인과 독립된 AWS 운영자 경로를 준비한다. Cognito 인증기와 별도로 보관한 AWS MFA 수단으로 로그인하고 복구 작업을 실행할 수 있는지 연습한다. 필요한 Cognito 권한은 지정 Pool로 제한하고, 복구 작업에서 DB의 첫 관리자와 연결된 신원인지 확인한다. [AWS MFA 관리](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_enable.html) [Cognito IAM 권한 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cognito-idp.html)
+
+분실 시 AWS 운영자 경로에서 복구를 시작한다. Helpdesk 접근 잠금부터 Cognito 세션 회수, TOTP 재등록, 새 인증 검증까지 같은 복구 흐름을 사용한다. AWS 실행 주체와 내부 복구 기록을 연결한다. 기존 첫 관리자 신원으로 인증을 마친 뒤 그 계정의 접근을 재개한다.
 
 [계정 정책의 결정과 대안](./pilot-decision-log.md#d02-운영자-초대와-권한-회수)
