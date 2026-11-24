@@ -61,14 +61,18 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import software.amazon.awssdk.services.sts.StsClient;
+import software.amazon.awssdk.services.sts.model.GetCallerIdentityResponse;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -112,6 +116,7 @@ class CognitoOnboardingHttpIntegrationTest {
     @Autowired private LocalIssuer issuer;
     @Autowired private SupportRepository support;
     @Autowired private CognitoAccounts accounts;
+    @Autowired private CognitoRecoveries recoveries;
     @Autowired private CognitoSettings settings;
     @MockitoBean private CognitoProvider provider;
     private long service;
@@ -735,6 +740,93 @@ class CognitoOnboardingHttpIntegrationTest {
             assertThat(prepare.get(10, TimeUnit.SECONDS)).isEqualTo(200);
         }
         verify(provider, times(1)).removeTotp(EMPLOYEE);
+    }
+
+    @Test
+    void independentAwsOperatorRestoresOnlyTheFirstAdministratorAfterFreshTotpAuthentication() throws Exception {
+        var employee = linkedEmployee();
+        var first = accounts.find(new CognitoAccounts.Identity(settings.issuer(), ADMIN, BOOTSTRAP_EMAIL)).orElseThrow();
+        Browser oldAdmin = signedInBrowser(ADMIN, BOOTSTRAP_EMAIL);
+        String employeeRecovery = openRecovery(oldAdmin, employee.accountKey(), 0, "TOTP_RESET");
+        employeeRecovery = employeeRecovery.substring(employeeRecovery.lastIndexOf('/') + 1);
+
+        var sts = mock(StsClient.class);
+        String roleArn = "arn:aws:iam::123456789012:role/helpdesk-recovery";
+        String startArn = "arn:aws:sts::123456789012:assumed-role/helpdesk-recovery/synthetic-start";
+        String approvalArn = "arn:aws:sts::123456789012:assumed-role/helpdesk-recovery/synthetic-approval";
+        var command = new FirstAdministratorRecoveryCommand(new AwsRecoveryOperator(sts, settings, roleArn), recoveries);
+        String requestId = UUID.randomUUID().toString();
+        when(sts.getCallerIdentity()).thenReturn(caller("arn:aws:sts::123456789012:assumed-role/other-role/synthetic"));
+        assertThatThrownBy(() -> command.execute("start", requestId, "0"))
+                .hasMessage("FIRST_ADMINISTRATOR_OPERATOR_REQUIRED");
+        assertThat(accounts.find(first.accountKey()).orElseThrow().status()).isEqualTo(AccountStatus.ACTIVE);
+
+        when(sts.getCallerIdentity()).thenReturn(caller(startArn));
+        assertThat(command.execute("status").sessionVersion()).isZero();
+        var mismatchedSettings = new CognitoSettings(settings.issuer(), settings.domain(), settings.appOrigin(),
+                settings.clientId(), null, EMPLOYEE);
+        var wrongTarget = new FirstAdministratorRecoveryCommand(new AwsRecoveryOperator(sts, mismatchedSettings, roleArn),
+                recoveries);
+        assertThatThrownBy(() -> wrongTarget.execute("start", requestId, "0"))
+                .hasMessage("FIRST_ADMINISTRATOR_TARGET_MISMATCH");
+        var opened = command.execute("start", requestId, "0");
+        String id = opened.recoveryId().toString();
+        assertThat(opened.kind()).isEqualTo(RecoveryKind.TOTP_RESET);
+        assertThat(opened.accountStatus()).isEqualTo(AccountStatus.RECOVERY_PENDING);
+        assertThat(opened.sessionVersion()).isEqualTo(1);
+        assertThat(command.execute("status").recoveryId()).isEqualTo(opened.recoveryId());
+        oldAdmin.get("/api/accounts").andExpect(status().isUnauthorized());
+        String otherId = employeeRecovery;
+        assertThatThrownBy(() -> command.execute("prepare", otherId)).hasMessage("ACCOUNT_RECOVERY_NOT_FOUND");
+
+        when(provider.recoveryUser(settings.issuer(), ADMIN)).thenReturn(
+                new CognitoProvider.RecoveryUser(ADMIN, true, false, true));
+        doThrow(new CognitoFailure(CognitoFailure.Code.COGNITO_RECOVERY_PERMISSION_DENIED)).doNothing()
+                .when(provider).removeTotp(ADMIN);
+        assertThatThrownBy(() -> command.execute("prepare", id)).hasMessage("COGNITO_RECOVERY_PERMISSION_DENIED");
+        var rejected = command.execute("status", id);
+        assertThat(rejected.recoveryId()).isEqualTo(opened.recoveryId());
+        assertThat(rejected.phase()).isEqualTo(CognitoRecoveries.Phase.REQUESTED);
+        assertThat(rejected.sessionVersion()).isEqualTo(1);
+        assertThat(command.execute("prepare", id).phase()).isEqualTo(CognitoRecoveries.Phase.AWAITING_AUTHENTICATION);
+        verify(provider, times(2)).removeTotp(ADMIN);
+        verify(provider, never()).removeTotp(EMPLOYEE);
+        assertThatThrownBy(() -> command.execute("approve", id)).hasMessage("ACCOUNT_RECOVERY_PROOF_REQUIRED");
+
+        Browser recovering = new Browser();
+        beginRecoveryAuthentication(recovering, id);
+        var enrollmentTime = Instant.now().plusSeconds(2);
+        recovering.login(recovering.authorize(), ADMIN, BOOTSTRAP_EMAIL, true, enrollmentTime)
+                .andExpect(redirectedUrl("/cognito.html"));
+        recovering.get("/onboarding/state").andExpect(jsonPath("$.step").value("RECOVERY_TOTP_ENROLLED"));
+        assertThatThrownBy(() -> command.execute("approve", id)).hasMessage("ACCOUNT_RECOVERY_PROOF_REQUIRED");
+        recovering.startReauth();
+        var verificationTime = Instant.now().plusSeconds(5);
+        recovering.login(recovering.authorize(), ADMIN, BOOTSTRAP_EMAIL, true, verificationTime)
+                .andExpect(redirectedUrl("/cognito.html"));
+        recovering.get("/api/accounts").andExpect(status().isUnauthorized());
+
+        when(sts.getCallerIdentity()).thenReturn(caller(approvalArn));
+        assertThat(command.execute("start", requestId, "0").recoveryId()).isEqualTo(opened.recoveryId());
+        var completed = command.execute("approve", id);
+        assertThat(completed.phase()).isEqualTo(CognitoRecoveries.Phase.COMPLETED);
+        assertThat(completed.accountStatus()).isEqualTo(AccountStatus.ACTIVE);
+        assertThat(completed.sessionVersion()).isEqualTo(2);
+        assertThat(command.execute("approve", id)).isEqualTo(completed);
+        assertThat(jdbc.queryForMap("""
+                SELECT administrator_user_id, approved_by, aws_requested_by, aws_approved_by
+                FROM helpdesk_account_recoveries WHERE id = ?
+                """, opened.recoveryId())).containsEntry("administrator_user_id", null).containsEntry("approved_by", null)
+                .containsEntry("aws_requested_by", startArn).containsEntry("aws_approved_by", approvalArn);
+        expectCognitoLogout(recovering.signIn(ADMIN, BOOTSTRAP_EMAIL, verificationTime), "/login");
+        recovering.signIn(ADMIN, BOOTSTRAP_EMAIL, Instant.now().plusSeconds(8))
+                .andExpect(redirectedUrl("/my-tickets.html"));
+        recovering.get("/api/accounts").andExpect(status().isOk());
+        assertThat(accounts.find(first.accountKey()).orElseThrow().userId()).isEqualTo(first.userId());
+    }
+
+    private static GetCallerIdentityResponse caller(String arn) {
+        return GetCallerIdentityResponse.builder().account("123456789012").arn(arn).build();
     }
 
     private void providerUser(boolean confirmed, boolean passwordChangeRequired, boolean totpRegistered) {

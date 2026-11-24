@@ -14,6 +14,12 @@ import org.springframework.stereotype.Repository;
 @Repository
 @Profile("cognito")
 class JdbcCognitoRecoveries {
+    private static final String RECOVERY_SELECT = """
+            SELECT id, target_user_id, previous_status, session_version, kind, provider_attempt_id,
+                   provider_started_at, provider_mutation_at, provider_ready_at, proof_auth_time, completed_at,
+                   aws_requested_by IS NOT NULL AS aws_recovery
+            FROM helpdesk_account_recoveries
+            """;
     private final JdbcTemplate jdbc;
 
     JdbcCognitoRecoveries(JdbcTemplate jdbc) {
@@ -21,16 +27,26 @@ class JdbcCognitoRecoveries {
     }
 
     Optional<Recovery> find(UUID id) {
-        return jdbc.query("""
-                SELECT id, target_user_id, previous_status, session_version, kind, provider_attempt_id,
-                       provider_started_at, provider_mutation_at, provider_ready_at, proof_auth_time, completed_at
-                FROM helpdesk_account_recoveries WHERE id = ?
-                """, (row, index) -> new Recovery(row.getObject("id", UUID.class), row.getLong("target_user_id"),
+        return findWhere(" WHERE id = ?", id);
+    }
+
+    Optional<Recovery> findAwsRequest(long targetId, UUID clientRequestId) {
+        return findWhere(" WHERE target_user_id = ? AND client_request_id = ? AND aws_requested_by IS NOT NULL",
+                targetId, clientRequestId);
+    }
+
+    Optional<Recovery> findPendingAwsRequest(long targetId) {
+        return findWhere(" WHERE target_user_id = ? AND aws_requested_by IS NOT NULL AND completed_at IS NULL", targetId);
+    }
+
+    private Optional<Recovery> findWhere(String condition, Object... values) {
+        return jdbc.query(RECOVERY_SELECT + condition,
+                (row, index) -> new Recovery(row.getObject("id", UUID.class), row.getLong("target_user_id"),
                         AccountStatus.valueOf(row.getString("previous_status")), row.getLong("session_version"),
                         RecoveryKind.valueOf(row.getString("kind")), row.getObject("provider_attempt_id", UUID.class),
                         instant(row, "provider_started_at"), instant(row, "provider_mutation_at"),
-                        instant(row, "provider_ready_at"), instant(row, "proof_auth_time"), instant(row, "completed_at")),
-                id).stream().findFirst();
+                        instant(row, "provider_ready_at"), instant(row, "proof_auth_time"), instant(row, "completed_at"),
+                        row.getBoolean("aws_recovery")), values).stream().findFirst();
     }
 
     void claim(UUID id, UUID attempt) {
@@ -65,10 +81,11 @@ class JdbcCognitoRecoveries {
                 """, authenticatedAt.atOffset(ZoneOffset.UTC), id);
     }
 
-    void complete(UUID id, long administratorId) {
+    void complete(UUID id, Long administratorId, String awsOperator) {
         jdbc.update("""
-                UPDATE helpdesk_account_recoveries SET completed_at = statement_timestamp(), approved_by = ? WHERE id = ?
-                """, administratorId, id);
+                UPDATE helpdesk_account_recoveries
+                SET completed_at = statement_timestamp(), approved_by = ?, aws_approved_by = ? WHERE id = ?
+                """, administratorId, awsOperator, id);
     }
 
     private static Instant instant(ResultSet row, String name) throws SQLException {
@@ -78,5 +95,5 @@ class JdbcCognitoRecoveries {
 
     record Recovery(UUID id, long targetUserId, AccountStatus previousStatus, long sessionVersion, RecoveryKind kind,
             UUID providerAttemptId, Instant providerStartedAt, Instant providerMutationAt, Instant providerReadyAt,
-            Instant proofAuthTime, Instant completedAt) { }
+            Instant proofAuthTime, Instant completedAt, boolean awsRecovery) { }
 }

@@ -59,6 +59,12 @@ class JdbcCognitoAccounts {
                 JdbcCognitoAccounts::account, accountKey).stream().findFirst();
     }
 
+    Optional<Account> firstAdministrator(boolean lock) {
+        String query = ACCOUNT_SELECT + " WHERE a.first_administrator";
+        if (lock) query += " FOR UPDATE OF a";
+        return jdbc.query(query, JdbcCognitoAccounts::account).stream().findFirst();
+    }
+
     long changeStatus(Account target, AccountStatus status, long administratorId, String reason) {
         long version = target.sessionVersion() + 1;
         OffsetDateTime changedAt = updateStatus(target.userId(), status, version);
@@ -81,16 +87,17 @@ class JdbcCognitoAccounts {
                 targetId, administratorId, clientRequestId).stream().findFirst();
     }
 
-    Recovery startRecovery(Account target, long administratorId, UUID clientRequestId, RecoveryKind kind, String reason) {
+    Recovery startRecovery(Account target, Long administratorId, String awsOperator, UUID clientRequestId,
+            RecoveryKind kind, String reason) {
         UUID id = UUID.randomUUID();
         long version = target.sessionVersion() + 1;
         OffsetDateTime requestedAt = updateStatus(target.userId(), AccountStatus.RECOVERY_PENDING, version);
         jdbc.update("""
                 INSERT INTO helpdesk_account_recoveries
-                    (id, target_user_id, administrator_user_id, client_request_id, previous_status,
+                    (id, target_user_id, administrator_user_id, aws_requested_by, client_request_id, previous_status,
                      session_version, kind, reason, requested_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, id, target.userId(), administratorId, clientRequestId, target.status().name(),
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, id, target.userId(), administratorId, awsOperator, clientRequestId, target.status().name(),
                 version, kind.name(), reason, requestedAt);
         return new Recovery(id, kind, reason, version, requestedAt.toInstant());
     }

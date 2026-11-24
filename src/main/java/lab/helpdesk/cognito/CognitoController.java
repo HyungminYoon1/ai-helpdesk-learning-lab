@@ -148,14 +148,16 @@ class CognitoController {
     ResponseEntity<CognitoRecoveries.Status> recoveryStatus(@PathVariable UUID accountKey, @PathVariable UUID recoveryId,
             Authentication authentication) {
         var administrator = AuthenticatedActorFactory.from(authentication);
-        return response(HttpStatus.OK, recoveries.status(administrator.accountKey(), accountKey, recoveryId));
+        return response(HttpStatus.OK, recoveries.status(
+                new CognitoRecoveries.HelpdeskOperator(administrator.accountKey(), accountKey), recoveryId));
     }
 
     @PostMapping(RECOVERY_PATH + "/prepare")
     ResponseEntity<CognitoRecoveries.Status> prepareRecovery(@PathVariable UUID accountKey, @PathVariable UUID recoveryId,
             @RequestBody(required = false) PrepareRecovery request, Authentication authentication) {
         var administrator = AuthenticatedActorFactory.from(authentication);
-        return response(HttpStatus.OK, recoveries.prepare(administrator.accountKey(), accountKey, recoveryId,
+        return response(HttpStatus.OK, recoveries.prepare(
+                new CognitoRecoveries.HelpdeskOperator(administrator.accountKey(), accountKey), recoveryId,
                 request == null ? null : request.temporaryPassword()));
     }
 
@@ -163,14 +165,16 @@ class CognitoController {
     ResponseEntity<CognitoRecoveries.Status> recheckRecovery(@PathVariable UUID accountKey, @PathVariable UUID recoveryId,
             Authentication authentication) {
         var administrator = AuthenticatedActorFactory.from(authentication);
-        return response(HttpStatus.OK, recoveries.recheck(administrator.accountKey(), accountKey, recoveryId));
+        return response(HttpStatus.OK, recoveries.recheck(
+                new CognitoRecoveries.HelpdeskOperator(administrator.accountKey(), accountKey), recoveryId));
     }
 
     @PostMapping(RECOVERY_PATH + "/approve")
     ResponseEntity<CognitoRecoveries.Status> approveRecovery(@PathVariable UUID accountKey, @PathVariable UUID recoveryId,
             Authentication authentication) {
         var administrator = AuthenticatedActorFactory.from(authentication);
-        return response(HttpStatus.OK, recoveries.approve(administrator.accountKey(), accountKey, recoveryId));
+        return response(HttpStatus.OK, recoveries.approve(
+                new CognitoRecoveries.HelpdeskOperator(administrator.accountKey(), accountKey), recoveryId));
     }
 
     @ExceptionHandler(CognitoFailure.class)

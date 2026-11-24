@@ -2,7 +2,6 @@ package lab.helpdesk.cognito;
 
 import java.io.IOException;
 import java.time.Clock;
-import java.time.Duration;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -30,8 +29,6 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.transaction.TransactionException;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.WebUtils;
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.retries.StandardRetryStrategy;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 
 import static lab.helpdesk.cognito.CognitoFailure.Code.ACCOUNT_RELOGIN_REQUIRED;
@@ -47,20 +44,12 @@ public class CognitoWebSecurity {
 
     @Bean(destroyMethod = "close")
     CognitoIdentityProviderClient cognitoSdkClient() {
-        return CognitoIdentityProviderClient.builder()
-                .region(Region.AP_NORTHEAST_2)
-                .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofSeconds(8))
-                        .apiCallAttemptTimeout(Duration.ofSeconds(4)))
-                .build();
+        return AwsCognitoProvider.clientBuilder(false).build();
     }
 
     @Bean(destroyMethod = "close")
     CognitoIdentityProviderClient cognitoRecoveryMutationClient() {
-        return CognitoIdentityProviderClient.builder()
-                .region(Region.AP_NORTHEAST_2)
-                .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofSeconds(8)).apiCallAttemptTimeout(Duration.ofSeconds(4))
-                        .retryStrategy(StandardRetryStrategy.builder().maxAttempts(1).build()))
-                .build();
+        return AwsCognitoProvider.clientBuilder(true).build();
     }
 
     @Bean

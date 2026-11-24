@@ -17,30 +17,54 @@ import static lab.helpdesk.cognito.CognitoFailure.Code.*;
 class CognitoRecoveries {
     private static final Duration PREPARATION_WINDOW = Duration.ofMinutes(1);
 
-    private final CognitoAccounts accounts;
+    private final CognitoAccountAccess access;
     private final JdbcCognitoAccounts accountRepository;
     private final JdbcCognitoRecoveries repository;
     private final CognitoProvider provider;
     private final TransactionTemplate transactions;
 
-    CognitoRecoveries(CognitoAccounts accounts, JdbcCognitoAccounts accountRepository, JdbcCognitoRecoveries repository,
+    CognitoRecoveries(CognitoAccountAccess access, JdbcCognitoAccounts accountRepository, JdbcCognitoRecoveries repository,
             CognitoProvider provider, PlatformTransactionManager manager) {
-        this.accounts = accounts;
+        this.access = access;
         this.accountRepository = accountRepository;
         this.repository = repository;
         this.provider = provider;
         this.transactions = new TransactionTemplate(manager);
     }
 
-    Status status(UUID administrator, UUID accountKey, UUID id) {
-        return readForAdministrator(administrator, accountKey, id).status();
+    Status status(Operator operator, UUID id) {
+        return targetForOperator(authorize(operator, false), id).status();
+    }
+
+    Status firstAdministratorStatus(AwsOperator operator) {
+        var account = access.firstAdministrator(operator.caller(), false);
+        return repository.findPendingAwsRequest(account.userId()).map(recovery -> new Target(account, recovery).status())
+                .orElseGet(() -> new Status(null, account.accountKey(), RecoveryKind.TOTP_RESET, null, account.status(),
+                        account.sessionVersion()));
+    }
+
+    @Transactional
+    public Status startFirstAdministratorRecovery(AwsOperator operator, UUID requestId, long expectedSessionVersion) {
+        if (requestId == null || expectedSessionVersion < 0) throw new CognitoFailure(INVALID_INPUT);
+        var account = access.firstAdministrator(operator.caller(), true);
+        var old = repository.findAwsRequest(account.userId(), requestId);
+        if (old.isPresent()) {
+            if (old.get().sessionVersion() - 1 != expectedSessionVersion) {
+                throw new CognitoFailure(ACCOUNT_RECOVERY_REQUEST_CONFLICT);
+            }
+            return new Target(account, old.get()).status();
+        }
+        if (account.status() == AccountStatus.RECOVERY_PENDING) throw new CognitoFailure(ACCOUNT_RECOVERY_PENDING);
+        if (account.sessionVersion() != expectedSessionVersion) throw new CognitoFailure(ACCOUNT_STATUS_VERSION_CONFLICT);
+        var opened = accountRepository.startRecovery(account, null, operator.caller().arn(), requestId,
+                RecoveryKind.TOTP_RESET, CognitoAccounts.StatusChangeReason.SECURITY_REVIEW.name());
+        return target(account, opened.id()).status();
     }
 
     @Transactional(propagation = Propagation.NEVER)
-    public Status prepare(UUID administrator, UUID accountKey, UUID id, String temporaryPassword) {
+    public Status prepare(Operator operator, UUID id, String temporaryPassword) {
         var preparation = transactions.execute(tx -> {
-            accounts.requireAdministrator(administrator);
-            var target = lockTarget(accountKey, id);
+            var target = targetForOperator(authorize(operator, true), id);
             if (target.recovery().providerReadyAt() != null) return new Preparation(target, null);
             target.requirePending();
             validatePassword(target.recovery().kind(), temporaryPassword);
@@ -56,6 +80,7 @@ class CognitoRecoveries {
             return new Preparation(target, attempt);
         });
         if (preparation.attempt() == null) return preparation.target().status();
+        UUID accountKey = preparation.target().account().accountKey();
 
         boolean mutationStarted = false;
         try {
@@ -74,7 +99,8 @@ class CognitoRecoveries {
                 provider.removeTotp(user.username());
             }
         } catch (RuntimeException ex) {
-            if (!mutationStarted || ex instanceof CognitoFailure failure && failure.code() == INVALID_TEMPORARY_PASSWORD) {
+            if (!mutationStarted || ex instanceof CognitoFailure failure
+                    && (failure.code() == INVALID_TEMPORARY_PASSWORD || failure.code() == COGNITO_RECOVERY_PERMISSION_DENIED)) {
                 releaseAttempt(accountKey, id, preparation.attempt());
             }
             throw ex;
@@ -83,8 +109,8 @@ class CognitoRecoveries {
     }
 
     @Transactional(propagation = Propagation.NEVER)
-    public Status recheck(UUID administrator, UUID accountKey, UUID id) {
-        var target = readForAdministrator(administrator, accountKey, id);
+    public Status recheck(Operator operator, UUID id) {
+        var target = targetForOperator(authorize(operator, false), id);
         var recovery = target.recovery();
         if (recovery.providerReadyAt() != null) return target.status();
         target.requirePending();
@@ -94,13 +120,14 @@ class CognitoRecoveries {
                 ? user.passwordChangeRequired() && user.totpRegistered()
                 : user.confirmed() && !user.totpRegistered();
         if (!applied) throw new CognitoFailure(ACCOUNT_RECOVERY_PROVIDER_UNCONFIRMED);
-        return providerReady(accountKey, id, recovery.providerAttemptId());
+        return providerReady(target.account().accountKey(), id, recovery.providerAttemptId());
     }
 
     @Transactional(propagation = Propagation.NEVER)
     public boolean verifyAuthentication(UUID id, CognitoAccounts.Identity identity, Instant authenticatedAt,
             Instant firstAuthenticatedAt) {
-        var account = accounts.find(identity).orElseThrow(() -> new CognitoFailure(FRESH_AUTHENTICATION_REQUIRED));
+        var account = accountRepository.find(identity.issuer(), identity.subject())
+                .orElseThrow(() -> new CognitoFailure(FRESH_AUTHENTICATION_REQUIRED));
         var target = target(account, id);
         target.requireFreshAuthentication(authenticatedAt);
         if (firstAuthenticatedAt != null && !authenticatedAt.isAfter(firstAuthenticatedAt)) {
@@ -119,25 +146,40 @@ class CognitoRecoveries {
     }
 
     @Transactional
-    public Status approve(UUID administrator, UUID accountKey, UUID id) {
-        long administratorId = accounts.requireAdministrator(administrator).userId();
-        var target = lockTarget(accountKey, id);
+    public Status approve(Operator operator, UUID id) {
+        var allowed = authorize(operator, true);
+        var target = targetForOperator(allowed, id);
         var recovery = target.recovery();
         if (recovery.completedAt() != null) return target.status();
         target.requirePending();
         if (recovery.proofAuthTime() == null) throw new CognitoFailure(ACCOUNT_RECOVERY_PROOF_REQUIRED);
         accountRepository.restoreAfterRecovery(target.account(), recovery.previousStatus(), recovery.proofAuthTime());
-        repository.complete(id, administratorId);
+        repository.complete(id, allowed.administratorId(), allowed.awsArn());
         return target(target.account(), id).status();
     }
 
-    private Target readForAdministrator(UUID administrator, UUID accountKey, UUID id) {
-        accounts.requireAdministrator(administrator);
-        return target(accounts.find(accountKey).orElseThrow(() -> new CognitoFailure(ACCOUNT_NOT_FOUND)), id);
+    private AuthorizedAccount authorize(Operator operator, boolean lock) {
+        if (operator instanceof AwsOperator aws) {
+            return new AuthorizedAccount(access.firstAdministrator(aws.caller(), lock), null, aws.caller().arn());
+        }
+        var helpdesk = (HelpdeskOperator) operator;
+        long administratorId = access.requireAdministrator(helpdesk.administrator()).userId();
+        var account = lock ? access.lockAccount(helpdesk.accountKey())
+                : accountRepository.find(helpdesk.accountKey()).orElseThrow(() -> new CognitoFailure(ACCOUNT_NOT_FOUND));
+        if (account.accountAdmin()) throw new CognitoFailure(FIRST_ADMINISTRATOR_PROTECTED);
+        return new AuthorizedAccount(account, administratorId, null);
     }
 
     private Target lockTarget(UUID accountKey, UUID id) {
-        return target(accounts.lockTargetAccount(accountKey), id);
+        return target(access.lockAccount(accountKey), id);
+    }
+
+    private Target targetForOperator(AuthorizedAccount operator, UUID id) {
+        var target = target(operator.account(), id);
+        if (target.recovery().awsRecovery() != (operator.awsArn() != null)) {
+            throw new CognitoFailure(ACCOUNT_RECOVERY_NOT_FOUND);
+        }
+        return target;
     }
 
     private Target target(JdbcCognitoAccounts.Account account, UUID id) {
@@ -185,6 +227,12 @@ class CognitoRecoveries {
 
     record Status(UUID recoveryId, UUID accountKey, RecoveryKind kind, Phase phase, AccountStatus accountStatus,
             long sessionVersion) { }
+
+    sealed interface Operator permits HelpdeskOperator, AwsOperator { }
+    record HelpdeskOperator(UUID administrator, UUID accountKey) implements Operator { }
+    record AwsOperator(AwsRecoveryOperator.Caller caller) implements Operator { }
+
+    private record AuthorizedAccount(JdbcCognitoAccounts.Account account, Long administratorId, String awsArn) { }
 
     private record Preparation(Target target, UUID attempt) { }
 

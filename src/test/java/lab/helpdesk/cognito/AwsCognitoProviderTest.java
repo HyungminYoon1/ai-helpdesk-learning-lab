@@ -7,6 +7,8 @@ import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
+import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
+import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminDeleteSoftwareTokenRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminGetUserRequest;
@@ -14,6 +16,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminGetUse
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminSetUserPasswordRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminUserGlobalSignOutRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AttributeType;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.CognitoIdentityProviderException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.DescribeUserPoolClientRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.DescribeUserPoolClientResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.DescribeUserPoolRequest;
@@ -21,6 +24,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.DescribeUse
 import software.amazon.awssdk.services.cognitoidentityprovider.model.GetUserPoolMfaConfigRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.GetUserPoolMfaConfigResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidPasswordException;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.NotAuthorizedException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.OAuthFlowType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.RecoveryOptionNameType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.RecoveryOptionType;
@@ -138,6 +142,20 @@ class AwsCognitoProviderTest {
                 .thenThrow(InvalidPasswordException.builder().message("synthetic provider rejection").build());
         assertThatThrownBy(() -> provider.setTemporaryPassword("canonical-user", "Synthetic-only-42!"))
                 .hasMessage("INVALID_TEMPORARY_PASSWORD");
+    }
+
+    @Test
+    void totpDeletionDistinguishesAProviderPermissionDenialFromAnUnconfirmedResult() {
+        var iamDenial = CognitoIdentityProviderException.builder().statusCode(403)
+                .awsErrorDetails(AwsErrorDetails.builder().errorCode("AccessDeniedException").build())
+                .message("synthetic permission failure detail").build();
+        when(mutations.adminDeleteSoftwareToken(ArgumentMatchers.<Consumer<AdminDeleteSoftwareTokenRequest.Builder>>any()))
+                .thenThrow(NotAuthorizedException.builder().statusCode(400).message("synthetic provider detail").build(),
+                        iamDenial, SdkClientException.create("synthetic response loss"));
+
+        assertThatThrownBy(() -> provider.removeTotp("canonical-user")).hasMessage("COGNITO_RECOVERY_PERMISSION_DENIED");
+        assertThatThrownBy(() -> provider.removeTotp("canonical-user")).hasMessage("COGNITO_RECOVERY_PERMISSION_DENIED");
+        assertThatThrownBy(() -> provider.removeTotp("canonical-user")).hasMessage("COGNITO_UNAVAILABLE");
     }
 
     private static AdminGetUserResponse recoveryUser(String subject) {

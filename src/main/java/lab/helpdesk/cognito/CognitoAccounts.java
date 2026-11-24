@@ -30,11 +30,14 @@ class CognitoAccounts {
     private static final Duration INVITATION_TTL = Duration.ofHours(24);
 
     private final JdbcCognitoAccounts repository;
+    private final CognitoAccountAccess access;
     private final UserIdentityRepository identities;
     private final SupportRepository support;
 
-    CognitoAccounts(JdbcCognitoAccounts repository, UserIdentityRepository identities, SupportRepository support) {
+    CognitoAccounts(JdbcCognitoAccounts repository, CognitoAccountAccess access, UserIdentityRepository identities,
+            SupportRepository support) {
         this.repository = repository;
+        this.access = access;
         this.identities = identities;
         this.support = support;
     }
@@ -58,7 +61,7 @@ class CognitoAccounts {
     @Transactional
     public IssuedInvitation issue(UUID administrator, String address, String role, Long serviceId,
             String displayName, Instant now) {
-        var issuer = requireAdministrator(administrator);
+        var issuer = access.requireAdministrator(administrator);
         String email = canonicalEmail(address);
         if ("CUSTOMER".equals(role)) {
             if (serviceId != null || displayName != null) throw new CognitoFailure(INVALID_INPUT);
@@ -88,19 +91,19 @@ class CognitoAccounts {
     }
 
     List<AccountSummary> listAccounts(UUID administrator) {
-        requireAdministrator(administrator);
+        access.requireAdministrator(administrator);
         return repository.listAccounts();
     }
 
     @Transactional
     public StatusResult changeStatus(UUID administrator, UUID accountKey, AccountStatus status,
             Long expectedSessionVersion, StatusChangeReason reason) {
-        var operator = requireAdministrator(administrator);
+        var operator = access.requireAdministrator(administrator);
         if (status == null || status == AccountStatus.RECOVERY_PENDING || expectedSessionVersion == null
                 || expectedSessionVersion < 0 || reason == null) {
             throw new CognitoFailure(INVALID_INPUT);
         }
-        var target = lockTargetAccount(accountKey);
+        var target = access.lockAccount(accountKey);
         if (target.sessionVersion() != expectedSessionVersion) {
             throw new CognitoFailure(ACCOUNT_STATUS_VERSION_CONFLICT);
         }
@@ -114,12 +117,12 @@ class CognitoAccounts {
     @Transactional
     public RecoveryStart startRecovery(UUID administrator, UUID accountKey, UUID clientRequestId,
             Long expectedSessionVersion, RecoveryKind kind, StatusChangeReason reason) {
-        var operator = requireAdministrator(administrator);
+        var operator = access.requireAdministrator(administrator);
         if (clientRequestId == null || expectedSessionVersion == null || expectedSessionVersion < 0
                 || kind == null || reason == null) {
             throw new CognitoFailure(INVALID_INPUT);
         }
-        var target = lockTargetAccount(accountKey);
+        var target = access.lockAccount(accountKey);
         if (target.accountAdmin()) throw new CognitoFailure(FIRST_ADMINISTRATOR_PROTECTED);
 
         var recovery = repository.findRecovery(target.userId(), operator.userId(), clientRequestId).orElse(null);
@@ -129,24 +132,13 @@ class CognitoAccounts {
             if (target.sessionVersion() != expectedSessionVersion) {
                 throw new CognitoFailure(ACCOUNT_STATUS_VERSION_CONFLICT);
             }
-            recovery = repository.startRecovery(target, operator.userId(), clientRequestId, kind, reason.name());
+            recovery = repository.startRecovery(target, operator.userId(), null, clientRequestId, kind, reason.name());
         } else if (recovery.kind() != kind || !recovery.reason().equals(reason.name())
                 || recovery.sessionVersion() - 1 != expectedSessionVersion) {
             throw new CognitoFailure(ACCOUNT_RECOVERY_REQUEST_CONFLICT);
         }
         return new RecoveryStart(new RecoveryReceipt(recovery.id(), accountKey, recovery.kind(),
                 recovery.sessionVersion(), recovery.requestedAt()), created);
-    }
-
-    JdbcCognitoAccounts.Account lockTargetAccount(UUID accountKey) {
-        repository.boundLockWait();
-        return repository.lockForStatusChange(accountKey).orElseThrow(() -> new CognitoFailure(ACCOUNT_NOT_FOUND));
-    }
-
-    JdbcCognitoAccounts.Account requireAdministrator(UUID administrator) {
-        return repository.find(administrator)
-                .filter(account -> account.accountAdmin() && account.status() == AccountStatus.ACTIVE)
-                .orElseThrow(() -> new CognitoFailure(ACCOUNT_ADMIN_REQUIRED));
     }
 
     @Transactional

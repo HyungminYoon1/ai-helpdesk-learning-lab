@@ -1,8 +1,13 @@
 package lab.helpdesk.cognito;
 
+import java.time.Duration;
 import java.util.List;
+import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.exception.SdkException;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.retries.StandardRetryStrategy;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
+import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClientBuilder;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.CodeMismatchException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.ExpiredCodeException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidPasswordException;
@@ -25,6 +30,13 @@ final class AwsCognitoProvider implements CognitoProvider {
         this.client = client;
         this.recoveryMutations = recoveryMutations;
         this.settings = settings;
+    }
+
+    static CognitoIdentityProviderClientBuilder clientBuilder(boolean mutation) {
+        return CognitoIdentityProviderClient.builder().region(Region.AP_NORTHEAST_2).overrideConfiguration(builder -> {
+            builder.apiCallTimeout(Duration.ofSeconds(8)).apiCallAttemptTimeout(Duration.ofSeconds(4));
+            if (mutation) builder.retryStrategy(StandardRetryStrategy.builder().maxAttempts(1).build());
+        });
     }
 
     @Override
@@ -119,7 +131,7 @@ final class AwsCognitoProvider implements CognitoProvider {
         } catch (InvalidPasswordException | PasswordHistoryPolicyViolationException ex) {
             throw new CognitoFailure(INVALID_TEMPORARY_PASSWORD);
         } catch (SdkException ex) {
-            throw new CognitoFailure(COGNITO_UNAVAILABLE);
+            throw recoveryMutationFailure(ex);
         }
     }
 
@@ -128,7 +140,15 @@ final class AwsCognitoProvider implements CognitoProvider {
         try {
             recoveryMutations.adminDeleteSoftwareToken(request -> request.userPoolId(settings.poolId()).username(username));
         } catch (SdkException ex) {
-            throw new CognitoFailure(COGNITO_UNAVAILABLE);
+            throw recoveryMutationFailure(ex);
         }
+    }
+
+    private static CognitoFailure recoveryMutationFailure(SdkException failure) {
+        if (failure instanceof NotAuthorizedException
+                || failure instanceof AwsServiceException response && response.statusCode() == 403) {
+            return new CognitoFailure(COGNITO_RECOVERY_PERMISSION_DENIED);
+        }
+        return new CognitoFailure(COGNITO_UNAVAILABLE);
     }
 }
