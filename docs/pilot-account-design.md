@@ -81,7 +81,7 @@ V16은 기존에 연결된 계정과 새 계정을 `ACTIVE`, 세션 버전 `0`�
 | `helpdesk.cognito.app-origin` | Helpdesk의 HTTPS Origin. 로컬 콜백 검증에는 Loopback HTTP를 사용할 수 있다. |
 | `helpdesk.cognito.client-id` | 해당 Pool의 App Client ID. |
 | `helpdesk.cognito.client-secret` | 비밀값을 사용하는 Client일 때 서버에만 전달하는 선택 값. |
-| `helpdesk.cognito.bootstrap-subject` | 확인한 첫 계정 관리자의 Cognito `sub`. 초기 연결 뒤 제거할 수 있다. |
+| `helpdesk.cognito.bootstrap-subject` | 확인한 첫 계정 관리자의 Cognito `sub`. 초기 연결 뒤 웹 앱 설정에서 제거할 수 있으며, 독립 복구 명령을 실행하는 환경에는 별도 보관한다. |
 
 Cognito App Client의 콜백은 `/login/oauth2/code/cognito`다. Allowed sign-out URL에는 App Origin의 `/onboarding/resume`과 `/login`을 등록한다. `openid`, `email`, `aws.cognito.signin.user.admin` Scope를 허용한다. 기본 로그인은 `cognito-idp:GetUserPoolMfaConfig`와 `cognito-idp:DescribeUserPoolClient`를 사용한다. V19 복구 사용 시에는 `DescribeUserPool`, `AdminGetUser`, `AdminUserGlobalSignOut`, `AdminSetUserPassword`, `AdminDeleteSoftwareToken`이 추가로 필요하다. 권한은 App 실행 Role의 지정 Pool ARN 범위로 제한한다. 서버의 Cognito 앱 클라이언트 인증 정보와 사용자 Token을 기록하지 않는다. [Cognito 권한 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cognito-idp.html)
 
@@ -141,7 +141,7 @@ V18 `9843216`의 CI는 두 번째 실행에서 통과했다. 첫 실행은 Docke
 관리자 API의 기준 경로는 `/api/accounts/{accountKey}/recoveries/{recoveryId}`다. 변경 요청에는 CSRF를 적용한다. `GET`은 복구 요청의 현재 단계와 시작 또는 완료 시점의 계정 상태 및 세션 버전을 반환한다.
 
 1. `POST …/prepare`에서 Cognito 처리를 시작한다. 비밀번호 복구 본문에는 본인 확인 후 전달할 `temporaryPassword`를 넣는다. TOTP 교체는 빈 본문 또는 빈 JSON으로 요청한다. 일치하는 Pool과 대상 `sub`, 필수 TOTP를 확인한 뒤 전역 로그아웃을 실행하고, 복구 유형에 맞는 자격 증명 변경만 실행한다. 임시 비밀번호는 Helpdesk 요청 처리 중에만 사용한다.
-2. Cognito 호출 앞뒤로 짧은 DB 트랜잭션을 열어 진행 상태를 기록한다. 자격 증명 변경 요청을 보내기 전에 그 시점을 커밋한다. AWS SDK의 변경 요청은 한 번만 전송한다. `PROVIDER_RESULT_UNCONFIRMED`에서는 `POST …/recheck`로 `AdminGetUser`의 결과를 대조한다. 비밀번호는 필수 변경 상태, TOTP는 기존 등록의 소실이 확인되어야 다음 단계로 넘어간다. 결과를 확인할 수 없는 동안에는 복구 대기를 유지한다. `PREPARING`에서 서버가 종료되면 1분 뒤 준비를 다시 요청할 수 있다. 비밀번호 정책 거절로 변경이 실패한 때도 다시 요청할 수 있다.
+2. Cognito 호출 앞뒤로 짧은 DB 트랜잭션을 열어 진행 상태를 기록한다. 자격 증명 변경 요청을 보내기 전에 그 시점을 커밋한다. AWS SDK의 변경 요청은 한 번만 전송한다. `PROVIDER_RESULT_UNCONFIRMED`에서는 `POST …/recheck`로 `AdminGetUser`의 결과를 대조한다. 비밀번호는 필수 변경 상태, TOTP는 기존 등록의 소실이 확인되어야 다음 단계로 넘어간다. 결과를 확인할 수 없는 동안에는 복구 대기를 유지한다. `PREPARING`에서 서버가 종료되면 1분 뒤 준비를 다시 요청할 수 있다. 비밀번호 정책 거절이나 확정적인 권한 거부(`COGNITO_RECOVERY_PERMISSION_DENIED`) 뒤에는 문제를 해결한 후 같은 복구 ID로 준비를 다시 요청한다.
 3. `AWAITING_AUTHENTICATION`에서 사용자는 Helpdesk 로그인 화면에 복구 ID를 입력한다. Hosted UI 로그아웃 뒤 시작한 OIDC 요청의 `auth_time`이 요청 시작과 Cognito 처리 확인 시각보다 늦어야 한다. 기존 `iss`과 `sub`, 이메일 확인과 TOTP 등록 상태도 대조한다. TOTP 교체에서는 등록을 확인한 로그인과 새 코드로 다시 인증한 로그인을 차례로 요구한다. `AUTHENTICATION_VERIFIED`에서 관리자에게 확인을 요청한다.
 4. 관리자가 `POST …/approve`를 보내면 대상 상태 변경, 세션 버전 증가, 승인자를 함께 커밋한다. 이미 완료한 같은 요청에 재승인을 보내면 기록된 결과를 반환한다. 원래 활성 계정에는 승인 시점과 복구 인증 시각을 모두 지난 새 로그인에서 세션을 발급한다. 원래 비활성 계정은 승인 결과가 `DISABLED`이며, 별도의 재활성화 뒤 새로 로그인한다.
 
@@ -149,10 +149,44 @@ V18 `9843216`의 CI는 두 번째 실행에서 통과했다. 첫 실행은 Docke
 
 전체 로컬 검증은 Maven 1,262건, Node 421건과 ESLint를 통과했다. 격리 PostgreSQL에서 V18의 복구 대기 요청과 기존 문의를 준비한 후 V19를 적용해 계정 잠금, 세션 버전과 문의 소유권이 보존되는지 확인했다.
 
+V19 `bc09022`는 GitHub Actions 첫 실행에서 PostgreSQL 통합 테스트와 Docker 이미지 빌드를 포함한 CI를 통과했다. [V19 CI 실행 기록](https://github.com/HyungminYoon1/ai-helpdesk-learning-lab/actions/runs/44309647403)
+
 ### 첫 계정 관리자의 인증기 분실
 
-파일럿 전에 Helpdesk 로그인과 독립된 AWS 운영자 경로를 준비한다. Cognito 인증기와 별도로 보관한 AWS MFA 수단으로 로그인하고 복구 작업을 실행할 수 있는지 연습한다. 필요한 Cognito 권한은 지정 Pool로 제한하고, 복구 작업에서 DB의 첫 관리자와 연결된 신원인지 확인한다. [AWS MFA 관리](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_enable.html) [Cognito IAM 권한 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cognito-idp.html)
+V20의 운영 명령은 Helpdesk 웹 세션 없이 첫 계정 관리자의 TOTP를 복구한다. AWS STS에서 현재 임시 자격 증명의 계정과 지정 역할을 확인하고, DB에 표시된 첫 관리자 한 명의 `iss`와 `sub`를 운영 설정과 대조한다. 시작과 승인에는 각 시점의 AWS 역할 세션 ARN을 기록한다. 비밀번호 복구는 위 V19의 일반 계정 관리자 절차에 속한다. [V20 마이그레이션](../src/main/resources/db/migration/V20__audit_independent_first_administrator_recovery.sql)
 
-분실 시 AWS 운영자 경로에서 복구를 시작한다. Helpdesk 접근 잠금부터 Cognito 세션 회수, TOTP 재등록, 새 인증 검증까지 같은 복구 흐름을 사용한다. AWS 실행 주체와 내부 복구 기록을 연결한다. 기존 첫 관리자 신원으로 인증을 마친 뒤 그 계정의 접근을 재개한다.
+1. Cognito 인증기와 별도로 보관한 AWS MFA 수단을 사용해 지정 운영자 역할의 단기 세션을 얻는다. 역할의 신뢰 정책에 승인한 AWS 운영자와 MFA를 요구한다. `GetCallerIdentity`는 역할 신원을 확인하며, MFA 강제는 역할을 맡는 단계에서 적용한다. STS 호출 자체의 별도 Allow는 필요 없다. [AssumeRole의 MFA](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html) [GetCallerIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html)
+2. 설정과 DB 연결 권한이 보호된 운영 환경에서 애플리케이션의 같은 PostgreSQL에 접근한다. 서비스 설치 과정에서 V20까지 마이그레이션한다. 복구 명령은 웹 서버나 마이그레이션을 시작하지 않는다. JDBC 설정은 `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`로 전달한다. 앞 절의 같은 Issuer·도메인·App Origin·Client ID에 `HELPDESK_COGNITO_BOOTSTRAP_SUBJECT`와 `HELPDESK_COGNITO_FIRST_ADMIN_RECOVERY_OPERATOR_ROLE_ARN`을 운영 환경에 설정한다. 명령 인수로 전달하는 값은 제출 UUID, 조회한 세션 버전과 복구 ID다. [운영 명령](../src/main/java/lab/helpdesk/cognito/FirstAdministratorRecoveryCommand.java)
+3. `status`에서 현재 세션 버전을 읽고 `start <client-request-uuid> <session-version>`으로 복구를 시작한다. 계정 잠금·세션 버전 증가·복구 이력이 함께 커밋된다. 시작 응답을 잃었으면 같은 UUID와 원래 세션 버전으로 재확인한다.
+4. 출력된 복구 ID로 `prepare <recovery-id>`를 실행한다. Cognito 세션과 기존 TOTP 등록을 회수한다. 변경 결과가 불확실하면 `recheck <recovery-id>`로 실제 등록 상태를 대조한다. 확정적인 권한 거부는 `REQUESTED`로 돌아가며 권한을 바로잡은 뒤 같은 ID로 준비를 다시 실행한다. 상태 조회는 `status <recovery-id>`를 사용한다. 명령을 시작할 때 오류가 발생하면 설정값을 제외한 오류 코드를 표시한다.
+5. Helpdesk 로그인 화면에서 복구 ID로 새 TOTP를 등록한 뒤 새 코드로 다시 인증한다. `AUTHENTICATION_VERIFIED`에서 AWS 역할로 `approve <recovery-id>`를 실행한다. 승인 커밋 뒤 같은 Cognito 신원으로 새 정상 로그인을 하면 기존 내부 계정과 관리자 권한을 다시 사용할 수 있다.
+
+예를 들어 자체 빌드한 JAR에서 현재 상태를 읽는 명령은 아래와 같다.
+
+```powershell
+java -jar target/ai-helpdesk-learning-lab-1.0.0-SNAPSHOT.jar first-admin-recovery status
+```
+
+로컬 통합 테스트는 합성 STS·Cognito 응답과 실제 PostgreSQL에서 다른 역할과 다른 계정의 요청 거부, 기존 세션 차단, 권한 거부 후 같은 ID로 재시도, 새 TOTP 재인증과 AWS 승인 뒤의 새 관리자 세션을 확인한다. 별도 DB에서 V19의 진행 중·완료 감사 행을 V20으로 올리고 기존 이력 보존과 공란 AWS 승인자 거부를 검증한다. [복구 통합 테스트](../src/test/java/lab/helpdesk/cognito/CognitoOnboardingHttpIntegrationTest.java) [V19 업그레이드 테스트](../src/test/java/lab/helpdesk/cognito/CognitoRecoveryMigrationIntegrationTest.java) [운영 명령 테스트](../src/test/java/lab/helpdesk/cognito/FirstAdministratorRecoveryCommandTest.java)
+
+2026-11-24 최종 로컬 검증은 Maven 1,267건, Node 421건과 ESLint를 통과했다. 패키징한 JAR에서 운영 명령의 시작 실패는 종료 코드 1, 잘못된 인수는 종료 코드 2를 반환하며 출력에는 오류 코드만 남겼다.
+
+#### 실제 Cognito Lite 검증 범위
+
+서울의 임시 Lite User Pool 1개, 공개 Authorization Code + PKCE App Client 1개, 기본 Cognito Hosted UI 도메인 1개와 합성 계정 2개를 사용한다. 합성 계정은 첫 계정 관리자와 일반 고객으로 연결한다. Pool은 직접 로그인, 필수 TOTP, 관리자 승인형 비밀번호 변경 및 Cognito 기본 이메일을 사용한다. Helpdesk와 새 PostgreSQL은 로컬에서 실행하고 `http://localhost` 콜백으로 연결한다. [Lite의 Hosted UI](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-sign-in-feature-plans.html) [로컬 콜백 요건](https://docs.aws.amazon.com/cognito/latest/developerguide/authorization-endpoint.html) [기본 이메일](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-email.html)
+
+| 주체 | 필요한 권한 |
+|---|---|
+| AWS 준비 담당자 | 서울 및 요청 태그 조건으로 `CreateUserPool`과 생성 시 필요한 `TagResource`를 허용한다. 생성 뒤 그 권한을 회수하고 새 Pool ARN에 `DescribeUserPool`, `SetUserPoolMfaConfig`, `CreateUserPoolClient`, `DescribeUserPoolClient`, `CreateUserPoolDomain`, `AdminCreateUser`, `AdminGetUser`와 아래 정리 권한만 허용한다. |
+| 로컬 앱 실행 역할 | 해당 Pool의 `GetUserPoolMfaConfig`, `DescribeUserPoolClient`, `DescribeUserPool`, `AdminGetUser`, `AdminUserGlobalSignOut`, `AdminSetUserPassword`를 허용한다. 이 조건으로 일반 계정 암호 변경과 두 복구 흐름의 새 인증 확인을 검증한다. |
+| 첫 관리자 복구 역할 | 해당 Pool의 `GetUserPoolMfaConfig`, `DescribeUserPoolClient`, `AdminGetUser`, `AdminUserGlobalSignOut`, `AdminDeleteSoftwareToken`을 허용한다. 지정 운영자가 Cognito와 독립된 AWS MFA로 단기 세션을 얻는다. IAM은 Pool 단위로 허용하고, Helpdesk 운영 명령은 첫 계정 관리자 한 명을 확인한다. |
+
+각 Cognito 권한은 서울에 한정한다. 새 Pool ARN을 알기 전 `CreateUserPool`의 리소스는 `*`가 필요하다. 임시 실행 역할이 필요하면 IAM 관리자가 지정 역할에 `CreateRole`, `GetRole`, `PutRolePolicy`, `GetRolePolicy`, `DeleteRolePolicy`, `DeleteRole`을 사용해 준비하고 회수한다. 신뢰 정책에서 지정 운영자의 `AssumeRole` 접근을 관리하고 첫 관리자 복구 역할에 MFA를 요구한다. `GetCallerIdentity`는 역할 신원 조회에 쓰이며 별도 허용 작업이 필요 없다. [Cognito IAM 작업별 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cognito-idp.html) [IAM 작업별 범위](https://docs.aws.amazon.com/service-authorization/latest/reference/list_awsidentityandaccessmanagementiam.html) [AssumeRole의 MFA](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html) [GetCallerIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html)
+
+일반 계정은 임시 암호로 시작해 새 암호와 기존 TOTP로 재인증한다. 첫 관리자는 AWS 역할로 복구를 시작하고 새 TOTP 등록과 재인증을 거친다. 두 경우 모두 이전 세션이 거부되고 승인 직전에도 접근이 차단되는지 확인한다. 승인 후에는 새 정상 로그인으로 같은 내부 사용자 ID의 접근이 재개되는지 확인한다. 첫 관리자 복구의 시작·승인 AWS 역할과 시점은 감사 행과 대조한다.
+
+2026-11-24 기준으로 한 달 내 두 계정의 Cognito 사용료는 계정 또는 조직의 직접 로그인 무료 사용량 10,000 MAU에 여유가 있으면 $0 예상이다. 두 계정 모두 서울 Lite의 첫 유료 구간에 들어가면 합계는 $0.011이다. 기본 이메일과 TOTP, 로컬 서버를 기준으로 산정하며 실제 무료 잔량은 확인이 필요하다. [Cognito 요금](https://aws.amazon.com/cognito/pricing/) [서울 요금 데이터](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCognito/20261119183922/ap-northeast-2/index.json)
+
+합성 결과를 남긴 뒤 새 Pool의 합성 계정, 도메인, App Client, Pool만 각각 `AdminDeleteUser`, `DeleteUserPoolDomain`, `DeleteUserPoolClient`, `DeleteUserPool`로 정리한다. 새 Pool에는 실험 종료 시 정리를 위해 삭제 보호를 비활성으로 설정한다. 임시 IAM 정책과 역할을 회수하고 로컬 세션과 검증 DB를 정리한다. 삭제 후에는 해당 Pool을 조회할 수 없는지 확인한다. AWS는 삭제된 Pool을 14일간 비활성 보관한 뒤 내부 데이터 제거를 시작한다. [User Pool 삭제 동작](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_DeleteUserPool.html)
 
 [계정 정책의 결정과 대안](./pilot-decision-log.md#d02-운영자-초대와-권한-회수)

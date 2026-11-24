@@ -83,6 +83,13 @@
 - 비밀번호 복구는 관리자가 전달할 임시 비밀번호를 요청에서 받고 Cognito가 새 비밀번호를 받도록 했다. TOTP 교체에서는 기존 등록을 제거하고 등록 뒤 다시 인증한 결과를 확인한다. 같은 Pool의 기존 신원과 새 인증 시각을 대조한 뒤 관리자가 접근을 승인한다. 원래 비활성인 계정에는 복구 승인 뒤에도 별도 재활성화 절차를 적용한다.
 - [V19 마이그레이션](../src/main/resources/db/migration/V19__complete_cognito_account_recovery.sql), [복구 서비스](../src/main/java/lab/helpdesk/cognito/CognitoRecoveries.java), [Cognito 연동](../src/main/java/lab/helpdesk/cognito/AwsCognitoProvider.java)과 기존 로그인 화면에 반영했다. 실제 Pool 권한과 첫 관리자용 독립 AWS 경로는 G2에서 점검한다. [V19 운영 절차](./pilot-account-design.md#v19-cognito-처리와-접근-재개)
 
+### D02-10 2026-11-18 V20 첫 계정 관리자의 독립 AWS 복구
+
+- 첫 관리자가 Cognito 인증기를 잃으면 Helpdesk 관리자 세션으로 복구를 시작할 수 없다. Cognito 콘솔에서 직접 등록을 제거하는 방식과, AWS 운영자가 Helpdesk의 잠금·감사·승인까지 실행하는 방식의 운영 책임을 비교했다. 후자를 별도의 비웹 명령으로 제공해 기존 세션 회수와 복구 이력을 함께 적용한다.
+- 명령의 STS 세션 계정·역할과 DB가 가진 첫 관리자의 `iss`·`sub`가 일치해야 한다. 역할 신뢰 정책에서 AWS MFA를 요구하고, 명령은 같은 단기 자격 증명으로 Cognito를 호출한다. 대상은 설정과 DB에서 고정하고, 작업은 TOTP 교체로 제한한다. 기존의 두 번 새 인증과 별도 승인 경계를 재사용한다.
+- [V20 마이그레이션](../src/main/resources/db/migration/V20__audit_independent_first_administrator_recovery.sql)에 AWS 시작자와 승인자를 추가하고 기존 Helpdesk 관리자 감사 이력은 보존한다. [운영 명령](../src/main/java/lab/helpdesk/cognito/FirstAdministratorRecoveryCommand.java)과 [권한 검사](../src/main/java/lab/helpdesk/cognito/AwsRecoveryOperator.java)에 적용했다. 로컬 검증 뒤에는 G2에서 별도 AWS MFA, 지정 Pool 정책, 실제 새 TOTP 로그인과 정리 절차를 확인한다. [독립 복구 절차](./pilot-account-design.md#첫-계정-관리자의-인증기-분실)
+- 2026-11-24 최종 검토에서 Cognito가 자격 증명 변경을 명시적으로 거부한 경우에도 요청이 결과 미확인에 머무는 문제를 재현했다. 같은 방식으로 처리하면 권한을 바로잡아도 복구를 마칠 수 없으므로, 확정적 권한 거부 뒤에는 같은 복구 ID의 준비를 다시 허용한다. 응답 유실은 등록 상태 조회로 대조한다. 운영 명령의 시작 실패는 오류 코드로 표시하고, V20의 승인 제약은 공란 AWS 승인자를 거부한다. [복구 서비스](../src/main/java/lab/helpdesk/cognito/CognitoRecoveries.java) [V19 업그레이드 테스트](../src/test/java/lab/helpdesk/cognito/CognitoRecoveryMigrationIntegrationTest.java)
+
 ## D03 첫 운영 DB와 학습 데이터
 
 - 학습용 V8 스냅샷을 출발점으로 복원하는 안과 빈 전용 DB에 전체 Migration을 적용하는 안을 비교했다. V9와 V10은 기존 문의의 고객 소유권과 지원 서비스를 추정해 채우지 않는다.
